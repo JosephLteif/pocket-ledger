@@ -282,7 +282,7 @@ struct ProtectedAmountText: View {
         Text(value)
             .blur(radius: isRevealed ? 0 : 8)
             .privacySensitive()
-            .accessibilityLabel(isRevealed ? value : "Hidden balance")
+            .accessibilityLabel(isRevealed ? value : "Hidden amount")
     }
 }
 
@@ -307,10 +307,10 @@ struct BalanceVisibilityControl: View {
         }
         .buttonStyle(.plain)
         .disabled(isAuthenticating)
-        .accessibilityLabel(isRevealed ? "Hide balance amounts" : "Reveal balance amounts")
+        .accessibilityLabel(isRevealed ? "Hide financial amounts" : "Reveal financial amounts")
         .accessibilityHint(isRevealed
-            ? "Hides account and projected balance amounts."
-            : "Requires \(security.availableBiometry?.displayName ?? "Face ID") to reveal account and projected balance amounts.")
+            ? "Hides financial amounts across the app."
+            : "Requires \(security.availableBiometry?.displayName ?? "Face ID") to reveal financial amounts across the app.")
         .alert("Biometrics unavailable", isPresented: $isShowingBiometryUnavailable) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -362,7 +362,7 @@ struct BalanceVisibilityToolbarItem: ToolbarContent {
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var isRevealed = false
 
     var body: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItem(placement: .topBarTrailing) {
             BalanceVisibilityControl(security: security, isRevealed: $isRevealed)
                 .accessibilityIdentifier("balance-visibility-control")
         }

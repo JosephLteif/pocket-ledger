@@ -668,8 +668,11 @@ struct ExchangeRate: Codable, Equatable, Identifiable {
         formatter.usesGroupingSeparator = true
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 2
-        return formatter.string(from: NSDecimalNumber(decimal: value))
-            ?? NSDecimalNumber(decimal: value).stringValue
+        var roundedValue = Decimal()
+        var valueToRound = value
+        NSDecimalRound(&roundedValue, &valueToRound, 2, .plain)
+        return formatter.string(from: NSDecimalNumber(decimal: roundedValue))
+            ?? NSDecimalNumber(decimal: roundedValue).stringValue
     }
 }
 

@@ -215,19 +215,22 @@ struct AccountDetailView: View {
                         } else {
                             LazyVStack(spacing: 0) {
                                 ForEach(snapshot.pageTransactions) { transaction in
-                                    AccountTransactionRow(
+                                    TransactionRow(
                                         transaction: transaction,
-                                        account: account,
                                         store: store,
                                         onEdit: { editingTransaction = transaction },
-                                        onSaveTemplate: { transactionToTemplate = transaction },
+                                        onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
                                         onDelete: {
                                             if store.deleteTransaction(id: transaction.id) {
                                                 deletedTransactionsForUndo.append(transaction)
                                             } else {
                                                 transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
                                             }
-                                        }
+                                        },
+                                        onSaveTemplate: { transactionToTemplate = transaction },
+                                        allowsActions: true,
+                                        usesScrollSwipeActions: true,
+                                        accountContext: account
                                     )
                                     Divider().overlay(PocketLedgerTheme.divider)
                                 }
@@ -428,81 +431,6 @@ struct AccountDetailView: View {
 }
 
 @MainActor
-private struct AccountTransactionRow: View {
-    let transaction: LedgerTransaction
-    let account: Account
-    @ObservedObject var store: LedgerStore
-    let onEdit: () -> Void
-    let onSaveTemplate: () -> Void
-    let onDelete: () -> Void
-
-    private var outgoing: Int64 {
-        transaction.outflows
-            .filter { $0.accountID == account.id }
-            .compactMap {
-                financeConvertedMinorUnits(
-                    $0.money,
-                    to: account.currency,
-                    using: transaction.exchangeRate
-                )
-            }
-            .reduce(Int64.zero, +)
-    }
-
-    private var incoming: Int64 {
-        transaction.inflows
-            .filter { $0.accountID == account.id }
-            .compactMap {
-                financeConvertedMinorUnits(
-                    $0.money,
-                    to: account.currency,
-                    using: transaction.exchangeRate
-                )
-            }
-            .reduce(Int64.zero, +)
-    }
-
-    var body: some View {
-        TransactionRow(
-            transaction: transaction,
-            store: store,
-            onEdit: onEdit,
-            onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-            onDelete: onDelete,
-            onSaveTemplate: onSaveTemplate,
-            allowsActions: true,
-            subtitleOverride: subtitle,
-            amountOverride: amountText,
-            amountColorOverride: amountColor,
-            usesScrollSwipeActions: true
-        )
-    }
-
-    private var subtitle: String {
-        let detail = transaction.kind == .expense
-            ? store.categoryPath(for: transaction.categoryID)
-            : transaction.kind.displayName
-        return [detail, transaction.date.formatted(.dateTime.month(.abbreviated).day().year())]
-            .filter { !$0.isEmpty }
-            .joined(separator: " · ")
-    }
-
-    private var amountText: String {
-        [
-            outgoing > 0 ? "− " + Money(currency: account.currency, minorUnits: outgoing).formatted : nil,
-            incoming > 0 ? "+ " + Money(currency: account.currency, minorUnits: incoming).formatted : nil
-        ]
-        .compactMap { $0 }
-        .joined(separator: "\n")
-    }
-
-    private var amountColor: Color {
-        if outgoing > 0 && incoming == 0 { return PocketLedgerTheme.warning }
-        if incoming > 0 && outgoing == 0 { return PocketLedgerTheme.income }
-        return PocketLedgerTheme.positive
-    }
-}
-
 @MainActor
 private struct AccountBalanceEditor: View {
     @ObservedObject var store: LedgerStore

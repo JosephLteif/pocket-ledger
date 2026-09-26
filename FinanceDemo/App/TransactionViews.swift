@@ -282,6 +282,7 @@ struct TransactionsView: View {
     @State private var drilldownIncludesCategoryDescendants = true
     @State private var drilldownAccountID: UUID?
     @State private var drilldownReportingCurrency: LedgerCurrency?
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     private let transactionsPerPage = 25
 
@@ -636,7 +637,8 @@ struct TransactionsView: View {
             allowsActions: !isSelectingTransactions,
             isSelectionMode: isSelectingTransactions,
             isSelected: selectedTransactionIDs.contains(transaction.id),
-            onToggleSelection: { toggleSelection(for: transaction) }
+            onToggleSelection: { toggleSelection(for: transaction) },
+            reportingCurrency: drilldownReportingCurrency
         )
     }
 
@@ -913,7 +915,7 @@ struct TransactionsView: View {
                 .font(.caption2.weight(.bold))
                 .tracking(0.5)
                 .foregroundStyle(PocketLedgerTheme.textTertiary)
-            Text(value)
+            ProtectedAmountText(value: value, isRevealed: areBalancesRevealed)
                 .font(.subheadline.weight(.semibold).monospacedDigit())
                 .foregroundStyle(tint)
                 .minimumScaleFactor(0.7)
@@ -1013,6 +1015,7 @@ extension View {
 struct TransactionRow: View {
     let transaction: LedgerTransaction
     @ObservedObject var store: LedgerStore
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @Environment(\.layoutDirection) private var layoutDirection
     @State private var isShowingDeleteConfirmation = false
     @State private var swipeOffset: CGFloat = 0
@@ -1031,6 +1034,8 @@ struct TransactionRow: View {
     let isSelectionMode: Bool
     let isSelected: Bool
     let onToggleSelection: () -> Void
+    let reportingCurrency: LedgerCurrency?
+    let accountContext: Account?
 
     init(
         transaction: LedgerTransaction,
@@ -1047,7 +1052,9 @@ struct TransactionRow: View {
         subtitleOverride: String? = nil,
         amountOverride: String? = nil,
         amountColorOverride: Color? = nil,
-        usesScrollSwipeActions: Bool = false
+        usesScrollSwipeActions: Bool = false,
+        reportingCurrency: LedgerCurrency? = nil,
+        accountContext: Account? = nil
     ) {
         self.transaction = transaction
         self.store = store
@@ -1060,6 +1067,8 @@ struct TransactionRow: View {
         self.amountOverride = amountOverride
         self.amountColorOverride = amountColorOverride
         self.usesScrollSwipeActions = usesScrollSwipeActions
+        self.reportingCurrency = reportingCurrency
+        self.accountContext = accountContext
         self.allowsActions = allowsActions
         self.isSelectionMode = isSelectionMode
         self.isSelected = isSelected
@@ -1088,7 +1097,9 @@ struct TransactionRow: View {
             .offset(x: usesCustomScrollSwipeFallback ? swipeOffset : 0)
             .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(transaction.note), \(displaySubtitle), \(displayAmountText)")
+            .accessibilityLabel(
+                "\(transaction.note), \(displaySubtitle), \(areBalancesRevealed ? displayAmountText : "Hidden amount")"
+            )
             .accessibilityHint(isSelectionMode ? "Toggles transaction selection" : "Opens transaction details")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1287,7 +1298,10 @@ struct TransactionRow: View {
                     .lineLimit(1)
 
                 if let amountDue = transaction.amountDue {
-                    Text("Bill total · \(amountDue.formatted)")
+                    ProtectedAmountText(
+                        value: "Bill total · \(amountDue.formatted)",
+                        isRevealed: areBalancesRevealed
+                    )
                         .font(.caption2)
                         .foregroundStyle(PocketLedgerTheme.textTertiary)
                         .lineLimit(1)
@@ -1302,9 +1316,12 @@ struct TransactionRow: View {
                 }
 
                 if let shortfall = transaction.changeAdjustment?.shortfall {
-                    Text(shortfall.minorUnits > 0
-                         ? "Change short · \(shortfall.formatted)"
-                         : "Change adjusted · \(shortfall.formatted)")
+                    ProtectedAmountText(
+                        value: shortfall.minorUnits > 0
+                            ? "Change short · \(shortfall.formatted)"
+                            : "Change adjusted · \(shortfall.formatted)",
+                        isRevealed: areBalancesRevealed
+                    )
                         .font(.caption2)
                         .foregroundStyle(PocketLedgerTheme.warning)
                         .lineLimit(1)
@@ -1313,9 +1330,9 @@ struct TransactionRow: View {
 
             Spacer(minLength: 8)
 
-            Text(displayAmountText)
+            ProtectedAmountText(value: displayAmountText, isRevealed: areBalancesRevealed)
                 .font(.subheadline.weight(.semibold).monospacedDigit())
-                .foregroundStyle(amountColorOverride ?? accentColor)
+                .foregroundStyle(displayAmountColor)
                 .multilineTextAlignment(.trailing)
                 .lineLimit(2)
         }
@@ -1328,6 +1345,11 @@ struct TransactionRow: View {
         let detail = transaction.kind == .expense
             ? store.categoryPath(for: transaction.categoryID)
             : transaction.kind.displayName
+        if accountContext != nil {
+            return [detail, transaction.date.formatted(.dateTime.month(.abbreviated).day().year())]
+                .filter { !$0.isEmpty }
+                .joined(separator: " · ")
+        }
         return "\(detail) · \(transaction.date.formatted(date: .omitted, time: .shortened))"
     }
 
@@ -1362,13 +1384,48 @@ struct TransactionRow: View {
     }
 
     private var amountText: String {
-        switch transaction.kind {
-        case .expense:
-            return "− " + transaction.outflows.map { $0.money.formatted }.joined(separator: " + ")
-        case .income:
-            return "+ " + transaction.inflows.map { $0.money.formatted }.joined(separator: " + ")
-        case .transfer:
-            return store.transactionSummary(transaction)
+        if let accountContext {
+            let outgoing = accountMovementTotal(transaction.outflows, for: accountContext)
+            let incoming = accountMovementTotal(transaction.inflows, for: accountContext)
+            return [
+                outgoing > 0
+                    ? "− " + Money(currency: accountContext.currency, minorUnits: outgoing).formatted
+                    : nil,
+                incoming > 0
+                    ? "+ " + Money(currency: accountContext.currency, minorUnits: incoming).formatted
+                    : nil
+            ]
+            .compactMap { $0 }
+            .joined(separator: "\n")
+        }
+        return store.transactionSummary(transaction, reportingCurrency: reportingCurrency)
+    }
+
+    private var displayAmountColor: Color {
+        if let amountColorOverride { return amountColorOverride }
+        guard let accountContext else { return accentColor }
+
+        let outgoing = accountMovementTotal(transaction.outflows, for: accountContext)
+        let incoming = accountMovementTotal(transaction.inflows, for: accountContext)
+        if outgoing > 0 && incoming == 0 { return PocketLedgerTheme.warning }
+        if incoming > 0 && outgoing == 0 { return PocketLedgerTheme.income }
+        return PocketLedgerTheme.positive
+    }
+
+    private func accountMovementTotal(
+        _ movements: [MoneyMovement],
+        for account: Account
+    ) -> Int64 {
+        movements.reduce(Int64.zero) { total, movement in
+            guard movement.accountID == account.id,
+                  let converted = financeConvertedMinorUnits(
+                      movement.money,
+                      to: account.currency,
+                      using: transaction.exchangeRate
+                  ) else {
+                return total
+            }
+            return total + converted
         }
     }
 

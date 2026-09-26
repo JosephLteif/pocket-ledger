@@ -66,6 +66,7 @@ struct AccountsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
+            BalanceVisibilityToolbarItem(security: security)
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     presentAccount(nil)
@@ -240,14 +241,10 @@ struct AccountsView: View {
     }
 
     private var screenSubtitle: some View {
-        HStack(spacing: 12) {
-            Text("Tap for activity · hold for options · drag to reorder")
-                .font(.footnote)
-                .foregroundStyle(PocketLedgerTheme.textSecondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            BalanceVisibilityControl(security: security, isRevealed: $areBalancesRevealed)
-                .accessibilityIdentifier("balance-visibility-control")
-        }
+        Text("Tap for activity · hold for options · drag to reorder")
+            .font(.footnote)
+            .foregroundStyle(PocketLedgerTheme.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func accountSection(type: AccountType, accounts: [Account]) -> some View {

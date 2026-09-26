@@ -51,6 +51,10 @@ func financeUndoScheduleRecord(
 
 @MainActor
 final class LedgerStore: ObservableObject {
+    private static let balanceAdjustmentCategoryID = UUID(
+        uuidString: "6BFD8D43-EBD4-4B87-A024-A51032A440A1"
+    )!
+
     @Published private(set) var data: FinanceData
     @Published private(set) var lastActionStatus: String?
     @Published private(set) var ledgerRevision = 0
@@ -1198,6 +1202,20 @@ final class LedgerStore: ObservableObject {
 
         var updated = data
         if recordAsTransaction {
+            let categoryID = Self.balanceAdjustmentCategoryID
+            if let categoryIndex = updated.categories.firstIndex(where: { $0.id == categoryID }) {
+                updated.categories[categoryIndex].isArchived = false
+            } else {
+                updated.categories.append(
+                    LedgerCategory(
+                        id: categoryID,
+                        name: "Balance adjustments",
+                        systemImage: "arrow.left.arrow.right",
+                        includeInTotals: false
+                    )
+                )
+            }
+
             let adjustmentMoney = Money(
                 currency: account.currency,
                 minorUnits: Swift.abs(difference)
@@ -1208,7 +1226,7 @@ final class LedgerStore: ObservableObject {
                     ? "Balance adjustment"
                     : note.trimmingCharacters(in: .whitespacesAndNewlines),
                 kind: difference > 0 ? .income : .expense,
-                categoryID: nil,
+                categoryID: categoryID,
                 outflows: difference < 0
                     ? [MoneyMovement(accountID: account.id, money: adjustmentMoney)]
                     : [],
@@ -1293,7 +1311,65 @@ final class LedgerStore: ObservableObject {
         return false
     }
 
-    func transactionSummary(_ transaction: LedgerTransaction) -> String {
+    func transactionSummary(
+        _ transaction: LedgerTransaction,
+        reportingCurrency: LedgerCurrency? = nil
+    ) -> String {
+        if transaction.kind == .expense {
+            let movements = transaction.outflows + transaction.inflows
+            let targetCurrency = reportingCurrency
+                ?? transaction.amountDue?.currency
+                ?? transaction.exchangeRate?.baseCurrency
+                ?? movements.first?.money.currency
+
+            if let targetCurrency {
+                func convertedTotal(_ movements: [MoneyMovement]) -> Int64? {
+                    movements.reduce(Int64.zero) { total, movement in
+                        guard let converted = financeConvertedMinorUnits(
+                            movement.money,
+                            to: targetCurrency,
+                            using: transaction.exchangeRate
+                        ) else {
+                            return total
+                        }
+                        return total + converted
+                    }
+                }
+
+                let canConvertEveryMovement = movements.allSatisfy {
+                    financeConvertedMinorUnits(
+                        $0.money,
+                        to: targetCurrency,
+                        using: transaction.exchangeRate
+                    ) != nil
+                }
+                if canConvertEveryMovement,
+                   let outflowTotal = convertedTotal(transaction.outflows),
+                   let inflowTotal = convertedTotal(transaction.inflows) {
+                    let net = outflowTotal - inflowTotal
+                    guard net != 0 else { return Money(currency: targetCurrency, minorUnits: 0).formatted }
+                    return "\(net > 0 ? "−" : "+") \(Money(currency: targetCurrency, minorUnits: Swift.abs(net)).formatted)"
+                }
+            }
+
+            var currencies: [LedgerCurrency] = []
+            for movement in movements where !currencies.contains(movement.money.currency) {
+                currencies.append(movement.money.currency)
+            }
+            let currencySummaries = currencies.compactMap { currency -> String? in
+                let outflowTotal = transaction.outflows
+                    .filter { $0.money.currency == currency }
+                    .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+                let inflowTotal = transaction.inflows
+                    .filter { $0.money.currency == currency }
+                    .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+                let net = outflowTotal - inflowTotal
+                guard net != 0 else { return nil }
+                return "\(net > 0 ? "−" : "+") \(Money(currency: currency, minorUnits: Swift.abs(net)).formatted)"
+            }
+            return currencySummaries.joined(separator: " · ")
+        }
+
         let outflowText = transaction.outflows.map { $0.money.formatted }.joined(separator: " + ")
         let inflowText = transaction.inflows.map { $0.money.formatted }.joined(separator: " + ")
 

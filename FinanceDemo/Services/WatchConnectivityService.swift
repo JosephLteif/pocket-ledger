@@ -71,7 +71,7 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate, @unchecked Se
             return
         }
 
-        if data.transactions.contains(where: { $0.id == command.id }) {
+        if WatchExpenseQueuePolicy.wasAlreadyRecorded(commandID: command.id, in: data.transactions) {
             sendAcknowledgement(
                 for: command,
                 accepted: true,

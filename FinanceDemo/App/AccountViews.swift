@@ -87,14 +87,15 @@ struct AccountDetailView: View {
     @ObservedObject var security: AppSecurityService
     let accountID: UUID
 
-    @Environment(\.scenePhase) private var scenePhase
     @State private var isPresentingAccountEditor = false
     @State private var isPresentingBalanceEditor = false
     @State private var editingTransaction: LedgerTransaction?
     @State private var transactionToTemplate: LedgerTransaction?
+    @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
+    @State private var transactionDeletionError: String?
     @State private var transactionPage = 0
     @State private var snapshot = AccountDetailSnapshot.empty
-    @State private var areBalancesRevealed = false
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     private let transactionsPerPage = 25
 
@@ -104,9 +105,28 @@ struct AccountDetailView: View {
 
     var body: some View {
         content
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !deletedTransactionsForUndo.isEmpty {
+                    TransactionUndoBanner(
+                        transactions: deletedTransactionsForUndo,
+                        onUndo: {
+                            if store.restoreTransactions(deletedTransactionsForUndo) {
+                                deletedTransactionsForUndo.removeAll()
+                            } else {
+                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be restored."
+                            }
+                        },
+                        onDismiss: { deletedTransactionsForUndo.removeAll() }
+                    )
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                }
+            }
+            .transactionActionAlert(message: $transactionDeletionError)
             .navigationTitle(account?.name ?? "Account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                BalanceVisibilityToolbarItem(security: security)
                 if account != nil {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
@@ -141,10 +161,6 @@ struct AccountDetailView: View {
                 refreshSnapshot()
             }
             .onChange(of: store.ledgerRevision) { _, _ in refreshSnapshot() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .background { areBalancesRevealed = false }
-            }
-            .onDisappear { areBalancesRevealed = false }
     }
 
     @ViewBuilder
@@ -163,27 +179,13 @@ struct AccountDetailView: View {
                     balanceCard(account)
                     totalsScopeCard(account)
 
-                    HStack(spacing: 10) {
-                        accountMetric(
-                            title: "Transactions",
-                            value: "\(snapshot.transactions.count)",
-                            systemImage: "arrow.left.arrow.right",
-                            tint: PocketLedgerTheme.accent
-                        )
-                        accountMetric(
-                            title: "Money in",
-                            value: Money(currency: account.currency, minorUnits: snapshot.incoming).formatted,
-                            systemImage: "arrow.down.left",
-                            tint: PocketLedgerTheme.income,
-                            protectsValue: true
-                        )
-                        accountMetric(
-                            title: "Money out",
-                            value: Money(currency: account.currency, minorUnits: snapshot.outgoing).formatted,
-                            systemImage: "arrow.up.right",
-                            tint: PocketLedgerTheme.warning,
-                            protectsValue: true
-                        )
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 10) {
+                            accountActivityMetrics(account: account, snapshot: snapshot)
+                        }
+                        VStack(spacing: 10) {
+                            accountActivityMetrics(account: account, snapshot: snapshot)
+                        }
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
@@ -308,6 +310,30 @@ struct AccountDetailView: View {
         }
     }
 
+    @ViewBuilder
+    private func accountActivityMetrics(account: Account, snapshot: AccountDetailSnapshot) -> some View {
+        accountMetric(
+            title: "Transactions",
+            value: "\(snapshot.transactions.count)",
+            systemImage: "arrow.left.arrow.right",
+            tint: PocketLedgerTheme.accent
+        )
+        accountMetric(
+            title: "Money in",
+            value: Money(currency: account.currency, minorUnits: snapshot.incoming).formatted,
+            systemImage: "arrow.down.left",
+            tint: PocketLedgerTheme.income,
+            protectsValue: true
+        )
+        accountMetric(
+            title: "Money out",
+            value: Money(currency: account.currency, minorUnits: snapshot.outgoing).formatted,
+            systemImage: "arrow.up.right",
+            tint: PocketLedgerTheme.warning,
+            protectsValue: true
+        )
+    }
+
     private func balanceCard(_ account: Account) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -315,7 +341,6 @@ struct AccountDetailView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
                 Spacer()
-                BalanceVisibilityControl(security: security, isRevealed: $areBalancesRevealed)
                 Text(account.currency.rawValue)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(PocketLedgerTheme.accent)
@@ -435,7 +460,13 @@ private struct AccountTransactionRow: View {
             store: store,
             onEdit: onEdit,
             onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-            onDelete: { _ = store.deleteTransaction(id: transaction.id) },
+            onDelete: {
+                if store.deleteTransaction(id: transaction.id) {
+                    deletedTransactionsForUndo.append(transaction)
+                } else {
+                    transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
+                }
+            },
             onSaveTemplate: onSaveTemplate,
             allowsActions: true,
             subtitleOverride: subtitle,

@@ -5,26 +5,26 @@ import SwiftUI
 struct AccountsView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
-    @Environment(\.scenePhase) private var scenePhase
     @State private var isPresentingAccount = false
     @State private var editingAccount: Account?
     @State private var isArchivedAccountsExpanded = false
+    @State private var isAccountSummaryExpanded = false
     @State private var expandedPositionCurrency: LedgerCurrency?
-    @State private var areBalancesRevealed = false
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     var body: some View {
         List {
-            screenSubtitle
-                .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-
-            accountTypeTotalsSummary
-                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-
-            globalPositionSummary
+            DisclosureGroup(isExpanded: $isAccountSummaryExpanded) {
+                VStack(spacing: 12) {
+                    accountTypeTotalsSummary
+                    globalPositionSummary
+                }
+                .padding(.top, 8)
+            } label: {
+                Label("Account overview", systemImage: "chart.pie")
+                    .font(.headline)
+                    .foregroundStyle(PocketLedgerTheme.textPrimary)
+            }
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
@@ -56,6 +56,12 @@ struct AccountsView: View {
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
         .pocketScreen()
+        .safeAreaInset(edge: .top, spacing: 0) {
+            screenSubtitle
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+                .background(PocketLedgerTheme.background)
+        }
         .navigationTitle("Accounts")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
@@ -64,7 +70,7 @@ struct AccountsView: View {
                 Button {
                     presentAccount(nil)
                 } label: {
-                    Image(systemName: "plus")
+                    Image(systemName: "person.crop.circle.badge.plus")
                 }
                 .accessibilityLabel("Add account")
             }
@@ -77,10 +83,6 @@ struct AccountsView: View {
                 isArchivedAccountsExpanded = false
             }
         }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { areBalancesRevealed = false }
-        }
-        .onDisappear { areBalancesRevealed = false }
     }
 
     private var accountTypeTotalsSummary: some View {
@@ -97,7 +99,6 @@ struct AccountsView: View {
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
                 Spacer(minLength: 8)
-                BalanceVisibilityControl(security: security, isRevealed: $areBalancesRevealed)
             }
 
             if includedAccounts.isEmpty {
@@ -239,9 +240,14 @@ struct AccountsView: View {
     }
 
     private var screenSubtitle: some View {
-        Text("Tap for activity. Hold for options or drag to reorder within its type.")
-            .font(.subheadline)
-            .foregroundStyle(PocketLedgerTheme.textSecondary)
+        HStack(spacing: 12) {
+            Text("Tap for activity · hold for options · drag to reorder")
+                .font(.footnote)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            BalanceVisibilityControl(security: security, isRevealed: $areBalancesRevealed)
+                .accessibilityIdentifier("balance-visibility-control")
+        }
     }
 
     private func accountSection(type: AccountType, accounts: [Account]) -> some View {
@@ -524,6 +530,9 @@ struct AccountEditor: View {
     @State private var openingBalance = "0"
     @State private var includeInTotals = true
     @State private var errorMessage: String?
+    @State private var pendingAccount: Account?
+    @State private var isConfirmingCurrencyChange = false
+    @State private var isConfirmingDiscard = false
 
     init(
         store: LedgerStore,
@@ -580,6 +589,7 @@ struct AccountEditor: View {
             .pocketListSurface()
             .navigationTitle(account == nil ? "New account" : "Edit account")
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(hasUnsavedChanges)
             .onChange(of: currency) { oldCurrency, newCurrency in
                 guard let account, oldCurrency != newCurrency,
                       let balance = Money.parse(openingBalance, currency: oldCurrency) else {
@@ -593,7 +603,7 @@ struct AccountEditor: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel", action: cancel)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: save)
@@ -603,6 +613,16 @@ struct AccountEditor: View {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
+            }
+            .confirmationDialog("Change account currency?", isPresented: $isConfirmingCurrencyChange, titleVisibility: .visible) {
+                Button("Save currency change") { confirmCurrencyChange() }
+                Button("Cancel", role: .cancel) { pendingAccount = nil }
+            } message: {
+                Text(currencyChangeSummary)
+            }
+            .confirmationDialog("Discard account changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
+                Button("Discard changes", role: .destructive) { dismiss() }
+                Button("Keep editing", role: .cancel) {}
             }
         }
     }
@@ -634,6 +654,21 @@ struct AccountEditor: View {
             includeInTotals: includeInTotals,
             isArchived: account?.isArchived ?? false
         )
+        if account?.currency != nil, account?.currency != currency, hasCurrencyImpact {
+            pendingAccount = value
+            isConfirmingCurrencyChange = true
+            return
+        }
+        persist(value)
+    }
+
+    private func confirmCurrencyChange() {
+        guard let pendingAccount else { return }
+        persist(pendingAccount)
+        self.pendingAccount = nil
+    }
+
+    private func persist(_ value: Account) {
         let saved = account == nil ? store.addAccount(value) : store.updateAccount(value)
         guard saved else {
             errorMessage = store.lastActionStatus ?? "The account could not be saved."
@@ -643,12 +678,60 @@ struct AccountEditor: View {
         dismiss()
     }
 
-    private var hasActivity: Bool {
-        guard let account else { return false }
-        return store.data.transactions.contains {
-            ($0.outflows + $0.inflows).contains { $0.accountID == account.id }
-        } || store.data.scheduledTransactions.contains {
-            ($0.outflows + $0.inflows).contains { $0.accountID == account.id }
+    private func cancel() {
+        if hasUnsavedChanges {
+            isConfirmingDiscard = true
+        } else {
+            dismiss()
         }
+    }
+
+    private var hasUnsavedChanges: Bool {
+        let baselineCurrency = account?.currency ?? initialCurrency ?? .usd
+        let baselineBalance = account?.openingBalance ?? Money(currency: baselineCurrency, minorUnits: 0)
+        return name != (account?.name ?? "")
+            || type != (account?.type ?? .cash)
+            || currency != baselineCurrency
+            || Money.parse(openingBalance, currency: currency) != baselineBalance.recast(to: currency)
+            || includeInTotals != (account?.includeInTotals ?? true)
+    }
+
+    private var currencyChangeSummary: String {
+        guard let account else { return "" }
+        let transactionCount = store.data.transactions.filter {
+            ($0.outflows + $0.inflows).contains { $0.accountID == account.id }
+        }.count
+        let scheduleCount = store.data.scheduledTransactions.filter {
+            ($0.outflows + $0.inflows).contains { $0.accountID == account.id }
+        }.count
+        let transactionLabel = transactionCount == 1 ? "transaction" : "transactions"
+        let scheduleLabel = scheduleCount == 1 ? "scheduled entry" : "scheduled entries"
+        let transactionExample = store.data.transactions.lazy
+            .flatMap { $0.outflows + $0.inflows }
+            .first(where: { $0.accountID == account.id })?.money
+        let scheduleExample = store.data.scheduledTransactions.lazy
+            .flatMap { $0.outflows + $0.inflows }
+            .first(where: { $0.accountID == account.id })?.money
+        let recordExample = transactionExample ?? scheduleExample
+        let recordLabel = transactionExample != nil ? "Transaction" : "Scheduled entry"
+        var previews = [
+            "Opening balance: \(account.openingBalance.formatted) → \(account.openingBalance.recast(to: currency).formatted)"
+        ]
+        if let recordExample {
+            previews.append("\(recordLabel): \(recordExample.formatted) → \(recordExample.recast(to: currency).formatted)")
+        }
+        let preview = previews.joined(separator: " · ")
+        return "Switching to \(currency.rawValue) updates the opening balance, \(transactionCount) historical \(transactionLabel), and \(scheduleCount) \(scheduleLabel). \(preview). Amounts are rounded to the new currency’s precision; no exchange-rate conversion is applied. Export a full backup from More → Import & Backup first if you may need to restore the original values."
+    }
+
+    private var hasCurrencyImpact: Bool {
+        guard let account else { return false }
+        return account.openingBalance.minorUnits != 0
+            || store.data.transactions.contains {
+                ($0.outflows + $0.inflows).contains { $0.accountID == account.id }
+            }
+            || store.data.scheduledTransactions.contains {
+                ($0.outflows + $0.inflows).contains { $0.accountID == account.id }
+            }
     }
 }

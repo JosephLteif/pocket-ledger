@@ -280,8 +280,23 @@ struct GetSpendingSummaryIntent: AppIntent {
 
 actor FinanceIntentIndexing {
     static let shared = FinanceIntentIndexing()
+    private var isRefreshing = false
+    private var refreshRequested = false
 
     func refresh() async {
+        guard !isRefreshing else {
+            refreshRequested = true
+            return
+        }
+        isRefreshing = true
+        repeat {
+            refreshRequested = false
+            await performRefresh()
+        } while refreshRequested
+        isRefreshing = false
+    }
+
+    private func performRefresh() async {
         let storage = FinanceStorage(context: "app-intent")
         guard storage.isPersistent else { return }
 

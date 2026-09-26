@@ -1,5 +1,114 @@
 import SwiftUI
 
+struct CategorySelectionSheet: View {
+    let categories: [LedgerCategory]
+    @Binding var selectedCategoryID: UUID?
+    let includeUncategorized: Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+    @AppStorage("pocketLedger.recentCategoryIDs") private var recentCategoryIDsValue = ""
+
+    private var recentCategoryIDs: [UUID] {
+        recentCategoryIDsValue.split(separator: ",").compactMap { UUID(uuidString: String($0)) }
+    }
+
+    private var recentCategories: [LedgerCategory] {
+        let categoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
+        return recentCategoryIDs.compactMap { categoriesByID[$0] }
+    }
+
+    private var visibleSections: [CategoryPickerSection] {
+        let sections = CategoryPickerSection.make(from: categories)
+        guard !searchText.isEmpty else { return sections }
+        return sections.compactMap { section in
+            let entries = section.entries.filter {
+                $0.category.name.localizedCaseInsensitiveContains(searchText)
+            }
+            return entries.isEmpty ? nil : CategoryPickerSection(title: section.title, entries: entries)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if includeUncategorized, searchText.isEmpty {
+                    Button {
+                        selectedCategoryID = nil
+                        dismiss()
+                    } label: {
+                        selectionRow(title: "Uncategorized", systemImage: "tag", id: nil)
+                    }
+                    .accessibilityIdentifier("category-option-uncategorized")
+                }
+
+                if searchText.isEmpty, !recentCategories.isEmpty {
+                    Section("Recent") {
+                        ForEach(recentCategories) { category in
+                            categoryButton(category, depth: 0)
+                        }
+                    }
+                }
+
+                ForEach(visibleSections) { section in
+                    Section(section.title) {
+                        ForEach(section.entries) { entry in
+                            categoryButton(entry.category, depth: entry.depth)
+                        }
+                    }
+                }
+
+                if !searchText.isEmpty, visibleSections.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Choose category")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "Search categories")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func categoryButton(_ category: LedgerCategory, depth: Int) -> some View {
+        Button {
+            selectedCategoryID = category.id
+            remember(category.id)
+            dismiss()
+        } label: {
+            selectionRow(title: category.name, systemImage: category.systemImage, id: category.id)
+                .padding(.leading, CGFloat(depth) * 18)
+        }
+        .accessibilityIdentifier("category-option-\(category.id.uuidString)")
+    }
+
+    private func selectionRow(title: String, systemImage: String, id: UUID?) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .foregroundStyle(PocketLedgerTheme.accent)
+                .frame(width: 22)
+            Text(title)
+                .foregroundStyle(PocketLedgerTheme.textPrimary)
+            Spacer()
+            if selectedCategoryID == id {
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(PocketLedgerTheme.accent)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func remember(_ id: UUID) {
+        let recent = ([id] + recentCategoryIDs.filter { $0 != id }).prefix(5)
+        recentCategoryIDsValue = recent.map(\.uuidString).joined(separator: ",")
+    }
+}
+
 struct CategoryPickerContent: View {
     let categories: [LedgerCategory]
     let includeUncategorized: Bool
@@ -31,7 +140,7 @@ struct CategoryPickerContent: View {
     }
 }
 
-private struct CategoryPickerSection: Identifiable {
+struct CategoryPickerSection: Identifiable {
     struct Entry: Identifiable {
         let category: LedgerCategory
         let depth: Int

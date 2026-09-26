@@ -424,6 +424,11 @@ struct ImportDraft {
     }
 
     mutating func discard() {
+        discardPreparedResults()
+        step = .source
+    }
+
+    mutating func discardPreparedResults() {
         result = nil
         importedData = nil
         duplicateTransactionIDs.removeAll()
@@ -432,7 +437,6 @@ struct ImportDraft {
         selectedCategoryIDs.removeAll()
         remappedAccountCount = 0
         remappedTransactionCount = 0
-        step = .source
     }
 
     mutating func selectTable(_ tableID: String) {

@@ -24,6 +24,31 @@ struct FinanceAttentionItem: Identifiable, Equatable {
     let destination: FinanceAttentionDestination
 }
 
+struct ScheduleRecordUndoReceipt {
+    let transaction: LedgerTransaction
+    let previousSchedule: ScheduledTransaction
+    let recordedSchedule: ScheduledTransaction
+}
+
+func financeUndoScheduleRecord(
+    _ receipt: ScheduleRecordUndoReceipt,
+    in data: FinanceData
+) -> FinanceData? {
+    guard let scheduleIndex = data.scheduledTransactions.firstIndex(where: {
+        $0.id == receipt.previousSchedule.id
+    }), data.scheduledTransactions[scheduleIndex] == receipt.recordedSchedule,
+          let transactionIndex = data.transactions.firstIndex(where: {
+              $0.id == receipt.transaction.id
+          }), data.transactions[transactionIndex] == receipt.transaction else {
+        return nil
+    }
+
+    var restored = data
+    restored.scheduledTransactions[scheduleIndex] = receipt.previousSchedule
+    restored.transactions.remove(at: transactionIndex)
+    return restored
+}
+
 @MainActor
 final class LedgerStore: ObservableObject {
     @Published private(set) var data: FinanceData
@@ -467,20 +492,21 @@ final class LedgerStore: ObservableObject {
     }
 
     @discardableResult
-    func recordScheduledTransactionNow(id: UUID, now: Date = .now) -> Bool {
+    func recordScheduledTransactionNow(id: UUID, now: Date = .now) -> ScheduleRecordUndoReceipt? {
         guard let index = data.scheduledTransactions.firstIndex(where: { $0.id == id }) else {
             lastActionStatus = "Scheduled transaction not found"
-            return false
+            return nil
         }
 
+        let previousSchedule = data.scheduledTransactions[index]
         var schedule = data.scheduledTransactions[index]
         guard schedule.isEnabled else {
             lastActionStatus = "Enable the scheduled transaction before recording it"
-            return false
+            return nil
         }
 
         let transaction = schedule.materializedTransaction(on: now)
-        guard validate(transaction, allowArchivedReferences: true) else { return false }
+        guard validate(transaction, allowArchivedReferences: true) else { return nil }
 
         var updated = data
         updated.transactions.append(transaction)
@@ -508,7 +534,21 @@ final class LedgerStore: ObservableObject {
         }
 
         updated.scheduledTransactions[index] = schedule
-        return persist(updated, successMessage: "Scheduled transaction recorded")
+        guard persist(updated, successMessage: "Scheduled transaction recorded") else { return nil }
+        return ScheduleRecordUndoReceipt(
+            transaction: transaction,
+            previousSchedule: previousSchedule,
+            recordedSchedule: schedule
+        )
+    }
+
+    @discardableResult
+    func undoScheduledTransactionRecord(_ receipt: ScheduleRecordUndoReceipt) -> Bool {
+        guard let restored = financeUndoScheduleRecord(receipt, in: data) else {
+            lastActionStatus = "Undo is unavailable because the schedule or transaction has changed."
+            return false
+        }
+        return persist(restored, successMessage: "Scheduled transaction undone")
     }
 
     @discardableResult
@@ -783,6 +823,24 @@ final class LedgerStore: ObservableObject {
     }
 
     @discardableResult
+    func updateTemplate(_ template: LedgerTemplate) -> Bool {
+        guard let index = data.templates.firstIndex(where: { $0.id == template.id }) else {
+            lastActionStatus = "Template not found"
+            return false
+        }
+        var template = template
+        template.name = template.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !template.name.isEmpty else {
+            lastActionStatus = "Enter a name for this template"
+            return false
+        }
+        guard validate(template.transactionTemplate, allowArchivedReferences: true) else { return false }
+        var updated = data
+        updated.templates[index] = template
+        return persist(updated, successMessage: "Template updated")
+    }
+
+    @discardableResult
     func deleteTemplate(id: UUID) -> Bool {
         var updated = data
         let originalCount = updated.templates.count
@@ -1002,6 +1060,13 @@ final class LedgerStore: ObservableObject {
             return nil
         }
         return storage.attachmentData(relativePath: attachment.relativePath)
+    }
+
+    func attachmentURL(for attachmentID: UUID) -> URL? {
+        guard let attachment = data.attachments.first(where: { $0.id == attachmentID }) else {
+            return nil
+        }
+        return storage.attachmentURL(relativePath: attachment.relativePath)
     }
 
     func attachmentFiles() -> [UUID: Data] {
@@ -1247,6 +1312,18 @@ final class LedgerStore: ObservableObject {
         successMessage: String,
         allowingCorruptedReplacement: Bool = false
     ) -> Bool {
+        guard data != updated else {
+            lastActionStatus = successMessage
+            return true
+        }
+
+        let schedulesChanged = data.scheduledTransactions != updated.scheduledTransactions
+        let shortcutInputsChanged = data.accounts != updated.accounts
+            || data.categories != updated.categories
+            || data.templates != updated.templates
+        let spotlightInputsChanged = data.accounts != updated.accounts
+            || data.categories != updated.categories
+            || data.transactions != updated.transactions
         let persisted = storage.save(
             updated,
             expected: data,
@@ -1267,21 +1344,28 @@ final class LedgerStore: ObservableObject {
 
         replaceData(updated)
         WidgetCenter.shared.reloadTimelines(ofKind: "BalanceWidget")
-        FinanceDemoShortcuts.updateAppShortcutParameters()
-        Task {
-            await FinanceIntentIndexing.shared.refresh()
+        if shortcutInputsChanged {
+            FinanceDemoShortcuts.updateAppShortcutParameters()
         }
-        let schedules = updated.scheduledTransactions
-        Task {
-            await NotificationService.refreshScheduledTransactionNotifications(
-                schedules: schedules
-            )
+        if spotlightInputsChanged {
+            Task {
+                await FinanceIntentIndexing.shared.refresh()
+            }
+        }
+        if schedulesChanged {
+            let schedules = updated.scheduledTransactions
+            Task {
+                await NotificationService.refreshScheduledTransactionNotifications(
+                    schedules: schedules
+                )
+            }
         }
         lastActionStatus = successMessage
         return true
     }
 
     private func replaceData(_ updated: FinanceData) {
+        guard data != updated else { return }
         let indexInputsChanged = data.accounts != updated.accounts
             || data.categories != updated.categories
             || data.transactions != updated.transactions

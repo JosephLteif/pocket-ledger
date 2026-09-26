@@ -17,6 +17,7 @@ struct ContentView: View {
     @SceneStorage("pocketLedger.selectedTab") private var selectedTabRawValue = AppTab.overview.rawValue
     @AppStorage(SetupWizardView.completedKey) private var setupCompleted = false
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -34,6 +35,7 @@ struct ContentView: View {
             if phase == .active {
                 security.refresh()
                 store.reload()
+                openPendingQuickExpense()
                 store.processDueScheduledTransactions()
                 let schedules = store.data.scheduledTransactions
                 Task {
@@ -45,8 +47,11 @@ struct ContentView: View {
                 if security.isPasscodeEnabled && !security.isBiometricPromptActive {
                     isUnlocked = false
                 }
-            } else if phase == .background, security.isPasscodeEnabled {
-                isUnlocked = false
+            } else if phase == .background {
+                areBalancesRevealed = false
+                if security.isPasscodeEnabled {
+                    isUnlocked = false
+                }
             }
         }
         .onChange(of: security.isPasscodeEnabled) { _, enabled in
@@ -56,11 +61,13 @@ struct ContentView: View {
             openPendingIntentSearch()
         }
         .task {
+            areBalancesRevealed = false
             openPendingIntentSearch()
             if ProcessInfo.processInfo.arguments.contains("-ImportWizardUITest") {
                 isShowingImportWizardUITest = true
                 return
             }
+            openPendingQuickExpense()
             store.processDueScheduledTransactions()
             await NotificationService.refreshScheduledTransactionNotifications(
                 schedules: store.data.scheduledTransactions
@@ -106,8 +113,25 @@ struct ContentView: View {
     }
 
     private func handleDeepLink(_ url: URL) {
+        if url.scheme == "pocketledger", url.host == "add", url.path == "/expense" {
+            let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let amountText = queryItems.first(where: { $0.name == "amount" })?.value ?? ""
+            let currency = queryItems.first(where: { $0.name == "currency" })?.value
+                .flatMap(LedgerCurrency.init(rawValue:)) ?? .usd
+            guard let amount = Money.parse(amountText, currency: currency), amount.minorUnits > 0 else { return }
+            let note = queryItems.first(where: { $0.name == "note" })?.value ?? "Quick expense"
+            selectedTabBinding.wrappedValue = .transactions
+            addAction = .prefilledExpense(id: UUID(), amount: amount, note: note)
+            return
+        }
         guard let tab = AppTab(url: url) else { return }
         selectedTabBinding.wrappedValue = tab
+    }
+
+    private func openPendingQuickExpense() {
+        guard let request = FinanceIntentQuickExpenseRequest.consume() else { return }
+        selectedTabBinding.wrappedValue = .transactions
+        addAction = .prefilledExpense(id: UUID(), amount: request.amount, note: request.note)
     }
 
     private func openPendingIntentSearch() {
@@ -147,6 +171,7 @@ struct ContentView: View {
                         .searchFocused($isSearchFieldFocused)
                         .toolbar {
                             AddTransactionToolbar(store: store, onAction: { addAction = $0 })
+                            BalanceVisibilityToolbarItem(security: security)
                         }
                 }
             }
@@ -163,6 +188,9 @@ struct ContentView: View {
                         onAddExpense: { addAction = .expense },
                         onAddAction: { addAction = $0 }
                     )
+                    .toolbar {
+                        BalanceVisibilityToolbarItem(security: security)
+                    }
                 }
             }
             .accessibilityIdentifier("tab-transactions")
@@ -219,6 +247,13 @@ struct ContentView: View {
                 BillScannerView(store: store)
             case .expense:
                 TransactionEditor(store: store, initialKind: .expense)
+            case .prefilledExpense(_, let amount, let note):
+                TransactionEditor(
+                    store: store,
+                    initialKind: .expense,
+                    initialAmount: amount,
+                    initialNote: note
+                )
             case .income:
                 TransactionEditor(store: store, initialKind: .income)
             case .transfer:
@@ -264,6 +299,7 @@ struct ContentView: View {
 enum AddAction: Identifiable {
     case scanBill
     case expense
+    case prefilledExpense(id: UUID, amount: Money, note: String)
     case income
     case transfer
     case scheduled
@@ -276,6 +312,8 @@ enum AddAction: Identifiable {
             return "scanBill"
         case .expense:
             return "expense"
+        case .prefilledExpense(let id, _, _):
+            return "prefilled-expense-\(id.uuidString)"
         case .income:
             return "income"
         case .transfer:
@@ -293,14 +331,37 @@ enum AddAction: Identifiable {
 @MainActor
 struct AddTransactionToolbar: ToolbarContent {
     @ObservedObject var store: LedgerStore
+    @AppStorage("pocketLedger.recentTemplateIDs") private var recentTemplateIDsValue = ""
     let onAction: (AddAction) -> Void
     var systemImage = "plus"
 
+    private var recentTemplateIDs: [UUID] {
+        recentTemplateIDsValue.split(separator: ",").compactMap { UUID(uuidString: String($0)) }
+    }
+
+    private var recentTemplates: [LedgerTemplate] {
+        recentTemplateIDs.compactMap { id in store.data.templates.first { $0.id == id } }
+    }
+
+    private var otherTemplates: [LedgerTemplate] {
+        store.data.templates.filter { !recentTemplateIDs.contains($0.id) }
+    }
+
     var body: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
+            Button {
+                onAction(.expense)
+            } label: {
+                Image(systemName: systemImage)
+            }
+            .accessibilityLabel("Add expense")
+            .accessibilityHint("Opens a new expense")
+            .accessibilityIdentifier("add-transaction-button")
+        }
+
+        ToolbarItem(placement: .primaryAction) {
             Menu {
-                Section("Quick add") {
-                    Button("Expense", systemImage: "arrow.up.right") { onAction(.expense) }
+                Section("Add transaction") {
                     Button("Income", systemImage: "arrow.down.left") { onAction(.income) }
                     Button("Transfer", systemImage: "arrow.left.arrow.right") { onAction(.transfer) }
                 }
@@ -310,11 +371,21 @@ struct AddTransactionToolbar: ToolbarContent {
                     Button("Scheduled", systemImage: "calendar.badge.clock") { onAction(.scheduled) }
                 }
 
-                if !store.data.templates.isEmpty {
+                if !recentTemplates.isEmpty {
+                    Section("Recent templates") {
+                        ForEach(Array(recentTemplates.prefix(3)), id: \.id) { template in
+                            Button(template.name, systemImage: "clock.arrow.circlepath") {
+                                useTemplate(template.id)
+                            }
+                        }
+                    }
+                }
+
+                if !otherTemplates.isEmpty {
                     Section("Templates") {
-                        ForEach(Array(store.data.templates.prefix(3)), id: \.id) { template in
+                        ForEach(Array(otherTemplates.prefix(3)), id: \.id) { template in
                             Button(template.name, systemImage: "rectangle.stack") {
-                                onAction(.template(template.id))
+                                useTemplate(template.id)
                             }
                         }
                     }
@@ -330,12 +401,17 @@ struct AddTransactionToolbar: ToolbarContent {
                     }
                 }
             } label: {
-                Image(systemName: systemImage)
+                Image(systemName: "ellipsis.circle")
             }
-            .accessibilityLabel("Add")
-            .accessibilityHint("Choose what to add")
-            .accessibilityIdentifier("add-transaction-button")
+            .accessibilityLabel("More transaction actions")
+            .accessibilityIdentifier("more-transaction-actions")
         }
+    }
+
+    private func useTemplate(_ id: UUID) {
+        let recent = ([id] + recentTemplateIDs.filter { $0 != id }).prefix(5)
+        recentTemplateIDsValue = recent.map(\.uuidString).joined(separator: ",")
+        onAction(.template(id))
     }
 }
 

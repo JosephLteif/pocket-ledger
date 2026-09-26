@@ -50,7 +50,7 @@ struct MetricsSnapshot {
         var expenses: Int64 = 0
         var activityCounts: [TransactionKind: Int] = [:]
         var categoryTotals: [UUID?: (title: String, amount: Int64, count: Int)] = [:]
-        var accountTotals: [UUID: (amount: Int64, transactionIDs: Set<UUID>)] = [:]
+        var accountTotals: [UUID: (amount: Int64, transactionCount: Int)] = [:]
 
         for transaction in index.sortedTransactions {
             guard interval.contains(transaction.date),
@@ -113,10 +113,10 @@ struct MetricsSnapshot {
                 for (accountID, amount) in accountNetAmounts where amount > 0 {
                     guard index.account(with: accountID) != nil else { continue }
                     let current = accountTotals[accountID]
-                        ?? (amount: 0, transactionIDs: Set<UUID>())
+                        ?? (amount: 0, transactionCount: 0)
                     accountTotals[accountID] = (
                         current.amount + amount,
-                        current.transactionIDs.union([transaction.id])
+                        current.transactionCount + 1
                     )
                 }
             case .transfer:
@@ -158,7 +158,7 @@ struct MetricsSnapshot {
                     accountID: accountID,
                     title: account.name,
                     amount: value.amount,
-                    count: value.transactionIDs.count
+                    count: value.transactionCount
                 )
             }
             .sorted { lhs, rhs in

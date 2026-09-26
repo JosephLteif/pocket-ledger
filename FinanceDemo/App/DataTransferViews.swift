@@ -1,9 +1,29 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+private struct PreparedFileImport: @unchecked Sendable {
+    let backup: BackupImportCandidate?
+    let document: ImportedDocument?
+}
+
+private struct PreparedFileImportResult: @unchecked Sendable {
+    let result: Result<PreparedFileImport, Error>
+}
+
+private struct BackupExportInput: @unchecked Sendable {
+    let data: FinanceData
+    let attachmentURLs: [(UUID, URL)]
+}
+
+private struct PreparedTransferData: @unchecked Sendable {
+    let result: Result<Data, Error>
+}
+
 @MainActor
 struct DataTransferView: View {
     @ObservedObject var store: LedgerStore
+    @Environment(\.dismiss) private var dismiss
+    let isImportOnly: Bool
 
     @State private var isShowingImporter = false
     @State private var isExportingBackup = false
@@ -14,6 +34,10 @@ struct DataTransferView: View {
     @State private var csvDocument = LedgerCSVDocument(data: Data())
     @State private var pendingBackup: BackupImportCandidate?
     @State private var pendingDocument: ImportedDocument?
+    @State private var isProcessingTransfer = false
+    @State private var transferProgress = "Preparing file…"
+    @State private var transferTask: Task<Void, Never>?
+    @State private var transferToken = UUID()
     @State private var errorMessage: String?
     @State private var isShowingResetPreparation = false
     @State private var isShowingResetWarning = false
@@ -23,25 +47,45 @@ struct DataTransferView: View {
     @State private var isShowingRecoveryConfirmation = false
     @State private var isShowingRecoveryDeletionConfirmation = false
 
+    init(store: LedgerStore, isImportOnly: Bool = false) {
+        _store = ObservedObject(wrappedValue: store)
+        self.isImportOnly = isImportOnly
+    }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
                 introCard
-                backupCard
-                if store.hasRecoverySnapshot {
-                    recoveryCard
+                if isProcessingTransfer {
+                    transferProgressCard
                 }
-                importCard
-                resetCard
+                if isImportOnly {
+                    importCard
+                } else {
+                    backupCard
+                    if store.hasRecoverySnapshot {
+                        recoveryCard
+                    }
+                    importCard
+                    resetCard
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .padding(.bottom, 24)
         }
         .pocketScreen()
+        .onDisappear(perform: cancelTransfer)
         .navigationTitle("Import & Backup")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
+        .toolbar {
+            if isImportOnly {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
         .fileImporter(
             isPresented: $isShowingImporter,
             allowedContentTypes: [.data],
@@ -113,7 +157,9 @@ struct DataTransferView: View {
             Label("Move your ledger safely", systemImage: "arrow.left.arrow.right")
                 .font(.title3.weight(.bold))
 
-            Text("Pocket Ledger can restore its own lossless backup or import rows from another app. Files are read on this device and are never uploaded.")
+            Text(isImportOnly
+                 ? "Choose a file to bring your existing history into Pocket Ledger. You can review mapped rows before saving them. Files stay on this device."
+                 : "Pocket Ledger can restore its own lossless backup or import rows from another app. Files are read on this device and are never uploaded.")
                 .font(.subheadline)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
         }
@@ -136,6 +182,7 @@ struct DataTransferView: View {
                     .frame(maxWidth: .infinity)
             }
                 .buttonStyle(.glassProminent)
+                .disabled(isProcessingTransfer)
 
             Button {
                 startJSONBackupExport()
@@ -144,15 +191,14 @@ struct DataTransferView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.glass)
+            .disabled(isProcessingTransfer)
 
-            Button {
-                csvDocument = LedgerCSVDocument(data: LedgerCSVExporter.data(for: store.data))
-                isExportingCSV = true
-            } label: {
+            Button(action: exportCSV) {
                 Label("Export transactions as CSV", systemImage: "tablecells")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.glass)
+            .disabled(isProcessingTransfer)
 
             Text("The full backup includes local receipt files. JSON remains available for compatibility, while CSV is useful for spreadsheets and other finance apps.")
                 .font(.footnote)
@@ -177,6 +223,7 @@ struct DataTransferView: View {
             .frame(maxWidth: .infinity)
             .buttonStyle(.glass)
             .tint(PocketLedgerTheme.warning)
+            .disabled(isProcessingTransfer)
             .confirmationDialog(
                 "Back up before erasing?",
                 isPresented: $isShowingResetPreparation,
@@ -235,6 +282,7 @@ struct DataTransferView: View {
             }
             .buttonStyle(.glass)
             .tint(PocketLedgerTheme.accent)
+            .disabled(isProcessingTransfer)
 
             Button(role: .destructive) {
                 isShowingRecoveryDeletionConfirmation = true
@@ -244,6 +292,7 @@ struct DataTransferView: View {
             }
             .buttonStyle(.glass)
             .tint(PocketLedgerTheme.warning)
+            .disabled(isProcessingTransfer)
         }
         .pocketCard()
     }
@@ -263,13 +312,27 @@ struct DataTransferView: View {
                 Label("Choose import file", systemImage: "folder")
                     .frame(maxWidth: .infinity)
             }
-                .buttonStyle(.glassProminent)
+            .buttonStyle(.glassProminent)
+            .disabled(isProcessingTransfer)
 
             Text("Supported spreadsheet input is .xlsx. Legacy binary .xls files should be exported as .xlsx, CSV, or TSV first.")
                 .font(.footnote)
                 .foregroundStyle(PocketLedgerTheme.textTertiary)
         }
         .pocketCard()
+    }
+
+    private var transferProgressCard: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+            Text(transferProgress)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .pocketGroupedSurface(cornerRadius: 14)
+        .accessibilityElement(children: .combine)
     }
 
     private var errorPresented: Binding<Bool> {
@@ -280,30 +343,61 @@ struct DataTransferView: View {
     }
 
     private func importFile(_ result: Result<[URL], Error>) {
+        guard !isProcessingTransfer else { return }
         do {
             guard let url = try result.get().first else { return }
             let hasSecurityScope = url.startAccessingSecurityScopedResource()
-            defer {
-                if hasSecurityScope {
-                    url.stopAccessingSecurityScopedResource()
+            isProcessingTransfer = true
+            transferProgress = "Reading and preparing import…"
+            transferToken = UUID()
+            let token = transferToken
+            transferTask = Task { @MainActor in
+                defer {
+                    if hasSecurityScope { url.stopAccessingSecurityScopedResource() }
+                    if transferToken == token {
+                        isProcessingTransfer = false
+                        transferTask = nil
+                    }
                 }
-            }
-
-            let data = try Data(contentsOf: url)
-            if let bundle = try? LedgerBackupCodec.decodeBundle(data) {
-                pendingBackup = BackupImportCandidate(
-                    fileName: url.lastPathComponent,
-                    backup: PocketLedgerBackup(data: bundle.data, exportedAt: bundle.exportedAt),
-                    attachmentFiles: Dictionary(uniqueKeysWithValues: bundle.attachments.map { ($0.id, $0.data) })
-                )
-            } else if let backup = try? LedgerBackupCodec.decode(data) {
-                pendingBackup = BackupImportCandidate(
-                    fileName: url.lastPathComponent,
-                    backup: backup,
-                    attachmentFiles: [:]
-                )
-            } else {
-                pendingDocument = try FinanceImportParser.parse(url: url, data: data)
+                let prepared = await Task.detached(priority: .userInitiated) {
+                    do {
+                        let bytes = try Data(contentsOf: url)
+                        if let bundle = try? LedgerBackupCodec.decodeBundle(bytes) {
+                            return PreparedFileImportResult(result: .success(PreparedFileImport(
+                                backup: BackupImportCandidate(
+                                    fileName: url.lastPathComponent,
+                                    backup: PocketLedgerBackup(data: bundle.data, exportedAt: bundle.exportedAt),
+                                    attachmentFiles: Dictionary(uniqueKeysWithValues: bundle.attachments.map { ($0.id, $0.data) })
+                                ),
+                                document: nil
+                            )))
+                        }
+                        if let backup = try? LedgerBackupCodec.decode(bytes) {
+                            return PreparedFileImportResult(result: .success(PreparedFileImport(
+                                backup: BackupImportCandidate(
+                                    fileName: url.lastPathComponent,
+                                    backup: backup,
+                                    attachmentFiles: [:]
+                                ),
+                                document: nil
+                            )))
+                        }
+                        return PreparedFileImportResult(result: .success(PreparedFileImport(
+                            backup: nil,
+                            document: try FinanceImportParser.parse(url: url, data: bytes)
+                        )))
+                    } catch {
+                        return PreparedFileImportResult(result: .failure(error))
+                    }
+                }.value
+                guard !Task.isCancelled else { return }
+                do {
+                    let payload = try prepared.result.get()
+                    pendingBackup = payload.backup
+                    pendingDocument = payload.document
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -332,27 +426,111 @@ struct DataTransferView: View {
     }
 
     private func startBackupExport(continueToReset: Bool = false) {
-        do {
-            backupBundleDocument = PocketLedgerBackupBundleDocument(
-                data: try LedgerBackupCodec.encodeBundle(
-                    store.data,
-                    attachmentData: store.attachmentFiles()
-                )
-            )
-            isContinuingToResetAfterBackup = continueToReset
-            isExportingBackupBundle = true
-        } catch {
-            errorMessage = error.localizedDescription
+        guard !isProcessingTransfer else { return }
+        let exportInput = BackupExportInput(
+            data: store.data,
+            attachmentURLs: store.data.attachments.compactMap { attachment in
+                store.attachmentURL(for: attachment.id).map { (attachment.id, $0) }
+            }
+        )
+        isProcessingTransfer = true
+        transferProgress = "Building full backup…"
+        transferToken = UUID()
+        let token = transferToken
+        transferTask = Task { @MainActor in
+            defer {
+                if transferToken == token {
+                    isProcessingTransfer = false
+                    transferTask = nil
+                }
+            }
+            let prepared = await Task.detached(priority: .userInitiated) {
+                do {
+                    var files: [UUID: Data] = [:]
+                    for (id, url) in exportInput.attachmentURLs {
+                        if let file = try? Data(contentsOf: url) { files[id] = file }
+                    }
+                    return PreparedTransferData(result: .success(
+                        try LedgerBackupCodec.encodeBundle(exportInput.data, attachmentData: files)
+                    ))
+                } catch {
+                    return PreparedTransferData(result: .failure(error))
+                }
+            }.value
+            guard !Task.isCancelled, transferToken == token else { return }
+            do {
+                backupBundleDocument = PocketLedgerBackupBundleDocument(data: try prepared.result.get())
+                isContinuingToResetAfterBackup = continueToReset
+                isExportingBackupBundle = true
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
     private func startJSONBackupExport() {
-        do {
-            backupDocument = PocketLedgerBackupDocument(data: try LedgerBackupCodec.encode(store.data))
-            isExportingBackup = true
-        } catch {
-            errorMessage = error.localizedDescription
+        guard !isProcessingTransfer else { return }
+        let exportInput = BackupExportInput(data: store.data, attachmentURLs: [])
+        isProcessingTransfer = true
+        transferProgress = "Preparing JSON backup…"
+        transferToken = UUID()
+        let token = transferToken
+        transferTask = Task { @MainActor in
+            defer {
+                if transferToken == token {
+                    isProcessingTransfer = false
+                    transferTask = nil
+                }
+            }
+            let prepared = await Task.detached(priority: .userInitiated) {
+                do {
+                    return PreparedTransferData(result: .success(try LedgerBackupCodec.encode(exportInput.data)))
+                } catch {
+                    return PreparedTransferData(result: .failure(error))
+                }
+            }.value
+            guard !Task.isCancelled, transferToken == token else { return }
+            do {
+                backupDocument = PocketLedgerBackupDocument(data: try prepared.result.get())
+                isExportingBackup = true
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
+    }
+
+    private func exportCSV() {
+        guard !isProcessingTransfer else { return }
+        let exportInput = BackupExportInput(data: store.data, attachmentURLs: [])
+        isProcessingTransfer = true
+        transferProgress = "Preparing CSV…"
+        transferToken = UUID()
+        let token = transferToken
+        transferTask = Task { @MainActor in
+            defer {
+                if transferToken == token {
+                    isProcessingTransfer = false
+                    transferTask = nil
+                }
+            }
+            let prepared = await Task.detached(priority: .userInitiated) {
+                PreparedTransferData(result: .success(LedgerCSVExporter.data(for: exportInput.data)))
+            }.value
+            guard !Task.isCancelled, transferToken == token else { return }
+            do {
+                csvDocument = LedgerCSVDocument(data: try prepared.result.get())
+                isExportingCSV = true
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func cancelTransfer() {
+        transferToken = UUID()
+        transferTask?.cancel()
+        transferTask = nil
+        isProcessingTransfer = false
     }
 
     private func resetLedger() {

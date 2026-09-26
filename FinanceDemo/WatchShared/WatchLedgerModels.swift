@@ -139,6 +139,92 @@ struct WatchExpenseCommand: Codable, Equatable, Sendable {
         self.categoryID = categoryID
         self.note = note
     }
+
+    func corrected(
+        amount: Money,
+        accountID: UUID,
+        categoryID: UUID?,
+        note: String
+    ) -> WatchExpenseCommand {
+        WatchExpenseCommand(
+            id: id,
+            date: date,
+            amount: amount,
+            accountID: accountID,
+            categoryID: categoryID,
+            note: note
+        )
+    }
+}
+
+enum WatchExpenseQueuePolicy {
+    static func wasAlreadyRecorded(commandID: UUID, in transactions: [LedgerTransaction]) -> Bool {
+        transactions.contains { $0.id == commandID }
+    }
+
+    static func commandsReadyToSend(
+        _ commands: [WatchExpenseCommand],
+        rejectedIDs: Set<UUID>
+    ) -> [WatchExpenseCommand] {
+        var sentIDs: Set<UUID> = []
+        return commands.filter {
+            !rejectedIDs.contains($0.id) && sentIDs.insert($0.id).inserted
+        }
+    }
+
+    static func retryFailedExpense(
+        id: UUID,
+        commands: [WatchExpenseCommand],
+        failures: [UUID: String]
+    ) -> WatchExpenseQueueState? {
+        guard commands.contains(where: { $0.id == id }), failures[id] != nil else { return nil }
+        var updatedFailures = failures
+        updatedFailures.removeValue(forKey: id)
+        return WatchExpenseQueueState(commands: commands, failures: updatedFailures)
+    }
+
+    static func correctAndRetryFailedExpense(
+        id: UUID,
+        amount: Money,
+        accountID: UUID,
+        categoryID: UUID?,
+        note: String,
+        commands: [WatchExpenseCommand],
+        failures: [UUID: String]
+    ) -> WatchExpenseQueueState? {
+        guard let index = commands.firstIndex(where: { $0.id == id }), failures[id] != nil else {
+            return nil
+        }
+        var updatedCommands = commands
+        updatedCommands[index] = commands[index].corrected(
+            amount: amount,
+            accountID: accountID,
+            categoryID: categoryID,
+            note: note
+        )
+        var updatedFailures = failures
+        updatedFailures.removeValue(forKey: id)
+        return WatchExpenseQueueState(commands: updatedCommands, failures: updatedFailures)
+    }
+
+    static func discardFailedExpense(
+        id: UUID,
+        commands: [WatchExpenseCommand],
+        failures: [UUID: String]
+    ) -> WatchExpenseQueueState? {
+        guard failures[id] != nil else { return nil }
+        var updatedFailures = failures
+        updatedFailures.removeValue(forKey: id)
+        return WatchExpenseQueueState(
+            commands: commands.filter { $0.id != id },
+            failures: updatedFailures
+        )
+    }
+}
+
+struct WatchExpenseQueueState: Equatable {
+    let commands: [WatchExpenseCommand]
+    let failures: [UUID: String]
 }
 
 struct WatchExpenseAcknowledgement: Codable, Equatable, Sendable {
@@ -152,6 +238,47 @@ struct WatchLedgerCache: Codable, Equatable {
     var pendingExpenses: [WatchExpenseCommand]
     var lastSyncDate: Date?
     var lastError: String?
+    var failedExpenseMessages: [UUID: String]
+
+    init(
+        snapshot: WatchLedgerSnapshot?,
+        pendingExpenses: [WatchExpenseCommand],
+        lastSyncDate: Date?,
+        lastError: String?,
+        failedExpenseMessages: [UUID: String] = [:]
+    ) {
+        self.snapshot = snapshot
+        self.pendingExpenses = pendingExpenses
+        self.lastSyncDate = lastSyncDate
+        self.lastError = lastError
+        self.failedExpenseMessages = failedExpenseMessages
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case snapshot
+        case pendingExpenses
+        case lastSyncDate
+        case lastError
+        case failedExpenseMessages
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        snapshot = try container.decodeIfPresent(WatchLedgerSnapshot.self, forKey: .snapshot)
+        pendingExpenses = try container.decodeIfPresent([WatchExpenseCommand].self, forKey: .pendingExpenses) ?? []
+        lastSyncDate = try container.decodeIfPresent(Date.self, forKey: .lastSyncDate)
+        lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
+        failedExpenseMessages = try container.decodeIfPresent([UUID: String].self, forKey: .failedExpenseMessages) ?? [:]
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(snapshot, forKey: .snapshot)
+        try container.encode(pendingExpenses, forKey: .pendingExpenses)
+        try container.encodeIfPresent(lastSyncDate, forKey: .lastSyncDate)
+        try container.encodeIfPresent(lastError, forKey: .lastError)
+        try container.encode(failedExpenseMessages, forKey: .failedExpenseMessages)
+    }
 
     static let empty = WatchLedgerCache(
         snapshot: nil,

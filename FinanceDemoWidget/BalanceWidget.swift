@@ -2,10 +2,10 @@ import SwiftUI
 import WidgetKit
 
 private enum PocketWidgetTheme {
-    static let background = Color(red: 0.04, green: 0.08, blue: 0.13)
-    static let accent = Color(red: 0.20, green: 0.78, blue: 0.70)
-    static let income = Color(red: 0.37, green: 0.66, blue: 1.00)
-    static let warning = Color(red: 0.96, green: 0.70, blue: 0.32)
+    static let background = Color(red: 0.106, green: 0.090, blue: 0.078)
+    static let accent = Color(red: 0.894, green: 0.604, blue: 0.471)
+    static let income = Color(red: 0.525, green: 0.722, blue: 1.000)
+    static let warning = Color(red: 1.000, green: 0.816, blue: 0.475)
 }
 
 struct BalanceEntry: TimelineEntry, Sendable {
@@ -101,7 +101,7 @@ struct BalanceWidgetEntryView: View {
                     .font(.headline)
                     .foregroundStyle(PocketWidgetTheme.warning)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Sign both targets with the Pocket Ledger App Group to share balances.")
+                Text("Open Pocket Ledger to refresh shared data.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -116,7 +116,7 @@ struct BalanceWidgetEntryView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 } else {
-                    Text("App Group required")
+                    Text("Open app to refresh")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -126,18 +126,17 @@ struct BalanceWidgetEntryView: View {
 
                 if entry.snapshot.appGroupAvailable {
                     if family == .systemMedium {
-                        Button(intent: AddDemoExpenseIntent()) {
-                            Label("Add $5 USD expense", systemImage: "plus.circle.fill")
+                        Link(destination: URL(string: "pocketledger://add/expense?amount=5&currency=USD&note=Quick%20widget%20expense")!) {
+                            Label("Review $5 expense", systemImage: "plus.circle.fill")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(PocketWidgetTheme.accent)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Add a five dollar USD expense")
+                        .accessibilityLabel("Review a five dollar USD expense in Pocket Ledger")
                     }
                 } else {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(PocketWidgetTheme.warning)
-                        .accessibilityLabel("Shared App Group unavailable")
+                        .accessibilityLabel("Open Pocket Ledger to refresh shared data")
                 }
             }
         }
@@ -170,7 +169,7 @@ struct BalanceWidget: Widget {
             BalanceWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("Pocket Ledger Balances")
-        .description("Shows available USD, LBP, and EUR balances and the latest transaction.")
+        .description("Shows USD, LBP, and EUR balances and opens a prefilled expense for review.")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }

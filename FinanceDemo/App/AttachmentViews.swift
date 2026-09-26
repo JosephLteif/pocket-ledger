@@ -2,25 +2,33 @@ import PDFKit
 import SwiftUI
 import UIKit
 
+private struct LoadedAttachmentPreview: @unchecked Sendable {
+    let document: PDFDocument?
+    let image: UIImage?
+}
+
 @MainActor
 struct AttachmentPreviewView: View {
     @ObservedObject var store: LedgerStore
     let attachment: LedgerAttachment
+    @State private var document: PDFDocument?
+    @State private var image: UIImage?
+    @State private var isLoading = true
 
     var body: some View {
         Group {
-            if attachment.contentType == "application/pdf",
-               let data = store.attachmentData(for: attachment.id),
-               let document = PDFDocument(data: data) {
+            if let document {
                 AttachmentPDFView(document: document)
-            } else if let data = store.attachmentData(for: attachment.id),
-                      let image = UIImage(data: data) {
+            } else if let image {
                 ScrollView([.vertical, .horizontal]) {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
                         .padding()
                 }
+            } else if isLoading {
+                ProgressView("Loading receipt…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView(
                     "Attachment unavailable",
@@ -32,6 +40,33 @@ struct AttachmentPreviewView: View {
         .pocketScreen()
         .navigationTitle(attachment.fileName)
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: attachment.id) {
+            await loadPreview()
+        }
+    }
+
+    private func loadPreview() async {
+        isLoading = true
+        document = nil
+        image = nil
+        guard let url = store.attachmentURL(for: attachment.id) else {
+            isLoading = false
+            return
+        }
+        let isPDF = attachment.contentType == "application/pdf"
+        let loaded = await Task.detached(priority: .userInitiated) {
+            guard let data = try? Data(contentsOf: url) else {
+                return LoadedAttachmentPreview(document: nil, image: nil)
+            }
+            return LoadedAttachmentPreview(
+                document: isPDF ? PDFDocument(data: data) : nil,
+                image: isPDF ? nil : UIImage(data: data)
+            )
+        }.value
+        guard !Task.isCancelled else { return }
+        document = loaded.document
+        image = loaded.image
+        isLoading = false
     }
 }
 

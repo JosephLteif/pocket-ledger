@@ -465,7 +465,7 @@ final class FinanceStorage {
         }
     }
 
-    private func attachmentURL(relativePath: String) -> URL? {
+    func attachmentURL(relativePath: String) -> URL? {
         guard let attachmentDirectory,
               !relativePath.isEmpty,
               relativePath != ".",

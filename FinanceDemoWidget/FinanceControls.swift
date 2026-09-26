@@ -13,11 +13,11 @@ struct AddExpenseControl: ControlWidget {
             ControlWidgetButton(
                 action: AddConfiguredExpenseIntent(amount: configuration.amount)
             ) {
-                Label("Add \(configuration.amount) USD expense", systemImage: "plus.circle.fill")
+                Label("Review \(configuration.amount) USD expense", systemImage: "plus.circle.fill")
             }
         }
         .displayName("Add Pocket Ledger Expense")
-        .description("Record a configured USD expense from Control Center or the Lock Screen.")
+        .description("Review and save a configured USD expense in Pocket Ledger.")
         .promptsForUserConfiguration()
     }
 }

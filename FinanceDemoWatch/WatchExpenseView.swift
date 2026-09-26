@@ -9,6 +9,19 @@ struct WatchExpenseView: View {
     @State private var categoryID: UUID?
     @State private var validationMessage: String?
     @State private var saveFeedbackTrigger = 0
+    @State private var isShowingDiscardConfirmation = false
+    private let commandToCorrect: WatchExpenseCommand?
+
+    init(store: WatchLedgerStore, commandToCorrect: WatchExpenseCommand? = nil) {
+        _store = ObservedObject(wrappedValue: store)
+        self.commandToCorrect = commandToCorrect
+        _amount = State(initialValue: commandToCorrect.map {
+            $0.amount.currency.formattedInput(minorUnits: $0.amount.minorUnits)
+        } ?? "")
+        _note = State(initialValue: commandToCorrect?.note ?? "")
+        _accountID = State(initialValue: commandToCorrect?.accountID)
+        _categoryID = State(initialValue: commandToCorrect?.categoryID)
+    }
 
     private var accounts: [WatchAccountSummary] {
         (store.snapshot?.accounts ?? []).filter(\.canUseForExpense)
@@ -53,6 +66,18 @@ struct WatchExpenseView: View {
 
     var body: some View {
         Form {
+            if let commandToCorrect,
+               let failure = store.failedExpenseMessages[commandToCorrect.id] {
+                Section("Needs attention") {
+                    Label(failure, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Button("Retry without changes", systemImage: "arrow.clockwise") {
+                        store.retryFailedExpense(id: commandToCorrect.id)
+                        dismiss()
+                    }
+                }
+            }
+
             if accounts.isEmpty {
                 Text("No active account is available for an expense.")
                     .foregroundStyle(.secondary)
@@ -83,13 +108,19 @@ struct WatchExpenseView: View {
 
                 TextField("Note", text: $note)
 
-                Button("Queue expense") {
+                Button(commandToCorrect == nil ? "Queue expense" : "Save corrections and retry") {
                     saveExpense()
                 }
                 .disabled((parsedAmount?.minorUnits ?? 0) <= 0 || accountID == nil)
+
+                if let commandToCorrect {
+                    Button("Discard failed expense", role: .destructive) {
+                        isShowingDiscardConfirmation = true
+                    }
+                }
             }
         }
-        .navigationTitle("Expense")
+        .navigationTitle(commandToCorrect == nil ? "Expense" : "Review expense")
         .sensoryFeedback(.success, trigger: saveFeedbackTrigger)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -99,10 +130,9 @@ struct WatchExpenseView: View {
             }
         }
         .onAppear {
-            if accountID == nil {
-                accountID = accounts.first?.id
-            }
+            normalizeSelections()
         }
+        .onChange(of: store.snapshot) { _, _ in normalizeSelections() }
         .alert(
             "Cannot save expense",
             isPresented: Binding(
@@ -114,12 +144,41 @@ struct WatchExpenseView: View {
         } message: {
             Text(validationMessage ?? "Check the expense details and try again.")
         }
+        .confirmationDialog(
+            "Discard this failed expense?",
+            isPresented: $isShowingDiscardConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Discard expense", role: .destructive) {
+                if let commandToCorrect {
+                    store.discardFailedExpense(id: commandToCorrect.id)
+                }
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the rejected expense from the Watch queue.")
+        }
     }
 
     private func categoryLabel(_ category: WatchCategorySummary, parentName: String) -> String {
         guard category.path != parentName else { return category.path }
         let childName = category.path.split(separator: "/").dropFirst().joined(separator: " / ")
         return "  \(childName)"
+    }
+
+    private func normalizeSelections() {
+        let hasAvailableAccount = accountID.map { selectedID in
+            accounts.contains(where: { $0.id == selectedID })
+        } ?? false
+        if !hasAvailableAccount {
+            accountID = accounts.first?.id
+        }
+
+        if let categoryID,
+           !categories.contains(where: { $0.id == categoryID }) {
+            self.categoryID = nil
+        }
     }
 
     private struct CategorySection: Identifiable {
@@ -137,12 +196,22 @@ struct WatchExpenseView: View {
             return
         }
 
-        store.queueExpense(
-            amount: amount,
-            accountID: accountID,
-            categoryID: categoryID,
-            note: note
-        )
+        if let commandToCorrect {
+            store.correctAndRetryExpense(
+                id: commandToCorrect.id,
+                amount: amount,
+                accountID: accountID,
+                categoryID: categoryID,
+                note: note
+            )
+        } else {
+            store.queueExpense(
+                amount: amount,
+                accountID: accountID,
+                categoryID: categoryID,
+                note: note
+            )
+        }
         saveFeedbackTrigger += 1
         dismiss()
     }

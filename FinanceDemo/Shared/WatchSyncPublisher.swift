@@ -4,49 +4,30 @@ import Foundation
 import WatchConnectivity
 #endif
 
+private struct WatchSyncDataInput: @unchecked Sendable {
+    let data: FinanceData
+}
+
+private struct WatchSyncSnapshotOutput: @unchecked Sendable {
+    let snapshot: WatchLedgerSnapshot
+}
+
 enum WatchSyncPublisher {
+    static func isEligibleForDelivery(
+        sessionSupported: Bool,
+        isActivated: Bool,
+        isWatchAppInstalled: Bool
+    ) -> Bool {
+        sessionSupported && isActivated && isWatchAppInstalled
+    }
+
     static func makeSnapshot(from data: FinanceData, generatedAt: Date = .now) -> WatchLedgerSnapshot {
-        func balance(for account: Account) -> Money {
-            var minorUnits = account.openingBalance.minorUnits
-
-            for transaction in data.transactions {
-                for movement in transaction.outflows where movement.accountID == account.id {
-                    guard let amount = financeConvertedMinorUnits(
-                        movement.money,
-                        to: account.currency,
-                        using: transaction.exchangeRate
-                    ) else { continue }
-                    minorUnits -= amount
-                }
-                for movement in transaction.inflows where movement.accountID == account.id {
-                    guard let amount = financeConvertedMinorUnits(
-                        movement.money,
-                        to: account.currency,
-                        using: transaction.exchangeRate
-                    ) else { continue }
-                    minorUnits += amount
-                }
-            }
-
-            return Money(currency: account.currency, minorUnits: minorUnits)
-        }
+        let index = LedgerIndex(data: data)
 
         func categoryPath(for categoryID: UUID?) -> String? {
             guard let categoryID else { return nil }
 
-            var names: [String] = []
-            var currentID: UUID? = categoryID
-            var visited: Set<UUID> = []
-
-            while let id = currentID,
-                  !visited.contains(id),
-                  let category = data.categories.first(where: { $0.id == id }) {
-                visited.insert(id)
-                names.insert(category.name, at: 0)
-                currentID = category.parentID
-            }
-
-            return names.isEmpty ? nil : names.joined(separator: " / ")
+            return index.categoryPath(for: categoryID)
         }
 
         let accountsByID = Dictionary(uniqueKeysWithValues: data.accounts.map { ($0.id, $0) })
@@ -58,7 +39,7 @@ enum WatchSyncPublisher {
                     id: $0.id,
                     name: $0.name,
                     currency: $0.currency,
-                    balance: balance(for: $0),
+                    balance: index.balance(for: $0),
                     canUseForExpense: !$0.isArchived && $0.type != .loan
                 )
             }
@@ -105,8 +86,8 @@ enum WatchSyncPublisher {
             $0.kind == .expense && $0.categoryID == nil
         }.count
             + data.budgets.filter { budget in
-                financeBudgetSpent(budget, in: data).minorUnits
-                    > financeBudgetAllowance(budget, in: data).minorUnits
+                financeBudgetSpent(budget, in: data, using: index).minorUnits
+                    > financeBudgetAllowance(budget, in: data, using: index).minorUnits
             }.count
         let upcomingScheduledCount = data.scheduledTransactions.filter {
             $0.isEnabled
@@ -128,16 +109,24 @@ enum WatchSyncPublisher {
 #if os(iOS)
     static func publish(data: FinanceData) {
         guard WCSession.isSupported() else { return }
+        let input = WatchSyncDataInput(data: data)
 
-        let snapshot = makeSnapshot(from: data)
-        guard let context = WatchSyncCodec.dictionary(for: snapshot) else { return }
-
-        DispatchQueue.main.async {
+        Task { @MainActor in
             let session = WCSession.default
-            guard session.activationState == .activated,
-                  session.isWatchAppInstalled else {
-                return
-            }
+            guard isEligibleForDelivery(
+                sessionSupported: true,
+                isActivated: session.activationState == .activated,
+                isWatchAppInstalled: session.isWatchAppInstalled
+            ) else { return }
+
+            let output = await Task.detached(priority: .utility) {
+                WatchSyncSnapshotOutput(snapshot: makeSnapshot(from: input.data))
+            }.value
+            guard isEligibleForDelivery(
+                sessionSupported: true,
+                isActivated: session.activationState == .activated,
+                isWatchAppInstalled: session.isWatchAppInstalled
+            ), let context = WatchSyncCodec.dictionary(for: output.snapshot) else { return }
 
             try? session.updateApplicationContext(context)
             if session.isComplicationEnabled {

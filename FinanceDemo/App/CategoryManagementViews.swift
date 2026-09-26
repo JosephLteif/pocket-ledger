@@ -229,6 +229,13 @@ private struct CategoryTile: View {
 
 @MainActor
 private struct CategoryEditor: View {
+    private static let categorySymbols = [
+        "tag", "fork.knife", "house", "car", "cart", "bag", "heart",
+        "cross.case", "gamecontroller", "book", "airplane", "fuelpump",
+        "phone", "gift", "lightbulb", "creditcard", "banknote", "repeat",
+        "pawprint", "leaf", "wrench.and.screwdriver"
+    ]
+
     @ObservedObject var store: LedgerStore
     let category: LedgerCategory?
     let onSaved: (LedgerCategory) -> Void
@@ -238,6 +245,7 @@ private struct CategoryEditor: View {
     @State private var systemImage = "tag"
     @State private var includeInTotals = true
     @State private var errorMessage: String?
+    @State private var isConfirmingDiscard = false
 
     init(
         store: LedgerStore,
@@ -265,7 +273,15 @@ private struct CategoryEditor: View {
                             Text(parent.name).tag(Optional(parent.id))
                         }
                     }
-                    TextField("SF Symbol", text: $systemImage)
+                    Label("Preview", systemImage: systemImage)
+                        .font(.subheadline.weight(.medium))
+                    Picker("Icon", selection: $systemImage) {
+                        ForEach(availableSystemImages, id: \.self) { symbol in
+                            Label(symbol.replacingOccurrences(of: ".", with: " "), systemImage: symbol)
+                                .tag(symbol)
+                        }
+                    }
+                    .pickerStyle(.menu)
                     Toggle("Include in totals and metrics", isOn: $includeInTotals)
                     Text(includeInTotals
                          ? "Expenses in this category count toward totals and metrics."
@@ -277,9 +293,10 @@ private struct CategoryEditor: View {
             .pocketListSurface()
             .navigationTitle(category == nil ? "New category" : "Edit category")
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(hasUnsavedChanges)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel", action: cancel)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: save)
@@ -290,6 +307,10 @@ private struct CategoryEditor: View {
             } message: {
                 Text(errorMessage ?? "")
             }
+            .confirmationDialog("Discard category changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
+                Button("Discard changes", role: .destructive) { dismiss() }
+                Button("Keep editing", role: .cancel) {}
+            }
         }
     }
 
@@ -298,6 +319,25 @@ private struct CategoryEditor: View {
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )
+    }
+
+    private var availableSystemImages: [String] {
+        Self.categorySymbols + (Self.categorySymbols.contains(systemImage) ? [] : [systemImage])
+    }
+
+    private var hasUnsavedChanges: Bool {
+        name != (category?.name ?? "")
+            || parentID != category?.parentID
+            || systemImage != (category?.systemImage ?? "tag")
+            || includeInTotals != (category?.includeInTotals ?? true)
+    }
+
+    private func cancel() {
+        if hasUnsavedChanges {
+            isConfirmingDiscard = true
+        } else {
+            dismiss()
+        }
     }
 
     private func save() {

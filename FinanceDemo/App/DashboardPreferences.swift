@@ -16,7 +16,7 @@ enum DashboardWidget: String, CaseIterable, Codable, Hashable, Identifiable {
     var title: String {
         switch self {
         case .balance:
-            return "Available balance"
+            return "Included balances"
         case .attention:
             return "Needs attention"
         case .accounts:

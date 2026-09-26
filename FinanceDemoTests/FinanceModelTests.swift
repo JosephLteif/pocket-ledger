@@ -2015,6 +2015,327 @@ final class FinanceModelTests: XCTestCase {
         XCTAssertEqual(copy.outflows.first?.money, transaction.outflows.first?.money)
     }
 
+    func testTransactionDefaultsUseRememberedAccountAndPreserveUncategorizedEdits() throws {
+        let firstAccount = Account(
+            name: "Cash",
+            type: .cash,
+            currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 0)
+        )
+        let rememberedAccount = Account(
+            name: "Travel card",
+            type: .bankAccount,
+            currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 0)
+        )
+        let rememberedCategory = LedgerCategory(name: "Food")
+        let account = try XCTUnwrap(FinanceTransactionDefaults.primaryAccount(
+            in: [firstAccount, rememberedAccount],
+            sourceAccountID: nil,
+            scheduledAccountID: nil,
+            rememberedAccountID: rememberedAccount.id,
+            preferredCurrency: .usd
+        ))
+
+        XCTAssertEqual(account.id, rememberedAccount.id)
+        let uncategorized = LedgerTransaction(
+            note: "Uncategorized purchase",
+            kind: .expense,
+            categoryID: nil,
+            outflows: [MoneyMovement(accountID: firstAccount.id, money: Money(currency: .usd, minorUnits: 250))],
+            inflows: []
+        )
+        XCTAssertNil(FinanceTransactionDefaults.categoryID(
+            sourceTransaction: uncategorized,
+            scheduledTransaction: nil,
+            rememberedCategoryID: rememberedCategory.id,
+            activeCategories: [rememberedCategory]
+        ))
+        XCTAssertEqual(FinanceTransactionDefaults.categoryID(
+            sourceTransaction: nil,
+            scheduledTransaction: nil,
+            rememberedCategoryID: rememberedCategory.id,
+            activeCategories: [rememberedCategory]
+        ), rememberedCategory.id)
+    }
+
+    func testTransactionListTotalsFollowFilterAndKeepValidPage() throws {
+        let account = Account(
+            name: "Cash",
+            type: .cash,
+            currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 0)
+        )
+        let expense = LedgerTransaction(
+            date: Date(timeIntervalSince1970: 1_700_000_001),
+            note: "Lunch",
+            kind: .expense,
+            categoryID: nil,
+            outflows: [MoneyMovement(accountID: account.id, money: Money(currency: .usd, minorUnits: 1_500))],
+            inflows: []
+        )
+        let income = LedgerTransaction(
+            date: Date(timeIntervalSince1970: 1_700_000_002),
+            note: "Pay",
+            kind: .income,
+            categoryID: nil,
+            outflows: [],
+            inflows: [MoneyMovement(accountID: account.id, money: Money(currency: .usd, minorUnits: 2_500))],
+            exchangeRate: ExchangeRate(
+                baseCurrency: .usd,
+                quoteCurrency: .lbp,
+                quoteUnitsPerBaseUnit: Decimal(90_000)
+            )
+        )
+        let transfer = LedgerTransaction(
+            date: Date(timeIntervalSince1970: 1_700_000_003),
+            note: "Move money",
+            kind: .transfer,
+            categoryID: nil,
+            outflows: [MoneyMovement(accountID: account.id, money: Money(currency: .usd, minorUnits: 500))],
+            inflows: [MoneyMovement(accountID: account.id, money: Money(currency: .usd, minorUnits: 500))]
+        )
+        let data = FinanceData(accounts: [account], categories: [], transactions: [expense, income, transfer])
+        let index = LedgerIndex(data: data)
+        let incomeSnapshot = TransactionListSnapshot.make(
+            index: index,
+            filter: .income,
+            period: .all,
+            quickFilter: .none,
+            searchText: "",
+            customStartDate: .distantPast,
+            customEndDate: .distantFuture,
+            page: 0,
+            pageSize: 10
+        )
+        XCTAssertEqual(incomeSnapshot.incomeTotals[.usd], 2_500)
+        XCTAssertEqual(
+            incomeSnapshot.incomeTotals[.lbp],
+            financeConvertedMinorUnits(
+                income.inflows[0].money,
+                to: .lbp,
+                using: income.exchangeRate
+            )
+        )
+        XCTAssertEqual(incomeSnapshot.expenseTotals[.usd], nil)
+
+        let allSnapshot = TransactionListSnapshot.make(
+            index: index,
+            filter: .all,
+            period: .all,
+            quickFilter: .none,
+            searchText: "",
+            customStartDate: .distantPast,
+            customEndDate: .distantFuture,
+            page: 1,
+            pageSize: 1
+        )
+        XCTAssertEqual(allSnapshot.expenseTotals[.usd], 1_500)
+        XCTAssertEqual(allSnapshot.incomeTotals[.usd], 2_500)
+        XCTAssertEqual(allSnapshot.displayedPage, 1)
+        XCTAssertEqual(allSnapshot.pageTransactions.count, 1)
+
+        let afterDelete = LedgerIndex(data: FinanceData(
+            accounts: [account],
+            categories: [],
+            transactions: [expense, transfer]
+        ))
+        let retainedPage = TransactionListSnapshot.make(
+            index: afterDelete,
+            filter: .all,
+            period: .all,
+            quickFilter: .none,
+            searchText: "",
+            customStartDate: .distantPast,
+            customEndDate: .distantFuture,
+            page: 1,
+            pageSize: 1
+        )
+        XCTAssertEqual(retainedPage.displayedPage, 1)
+        XCTAssertEqual(retainedPage.pageTransactions.count, 1)
+    }
+
+    func testScheduleRecordUndoRestoresOnlyUnchangedRecords() throws {
+        let account = Account(
+            name: "Cash",
+            type: .cash,
+            currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 0)
+        )
+        let previousSchedule = ScheduledTransaction(
+            nextRunDate: Date(timeIntervalSince1970: 1_700_000_000),
+            frequency: .once,
+            note: "Rent",
+            kind: .expense,
+            categoryID: nil,
+            outflows: [MoneyMovement(accountID: account.id, money: Money(currency: .usd, minorUnits: 50_000))],
+            inflows: []
+        )
+        let now = Date(timeIntervalSince1970: 1_700_100_000)
+        var recordedSchedule = previousSchedule
+        recordedSchedule.isEnabled = false
+        recordedSchedule.lastRunDate = now
+        let transaction = previousSchedule.materializedTransaction(on: now)
+        let receipt = ScheduleRecordUndoReceipt(
+            transaction: transaction,
+            previousSchedule: previousSchedule,
+            recordedSchedule: recordedSchedule
+        )
+        let data = FinanceData(
+            accounts: [account],
+            categories: [],
+            transactions: [transaction],
+            scheduledTransactions: [recordedSchedule]
+        )
+
+        let restored = try XCTUnwrap(financeUndoScheduleRecord(receipt, in: data))
+        XCTAssertTrue(restored.transactions.isEmpty)
+        XCTAssertEqual(restored.scheduledTransactions, [previousSchedule])
+
+        var changedSince = data
+        changedSince.scheduledTransactions[0].note = "Updated rent"
+        XCTAssertNil(financeUndoScheduleRecord(receipt, in: changedSince))
+
+        changedSince = data
+        changedSince.transactions[0].note = "Updated recorded rent"
+        XCTAssertNil(financeUndoScheduleRecord(receipt, in: changedSince))
+    }
+
+    func testImportPreparationRejectsStaleInputsAndDropsStagedResults() {
+        let table = ImportedTable(id: "transactions", name: "Transactions", columns: [], rows: [])
+        let document = ImportedDocument(fileName: "ledger.csv", format: .delimited, tables: [table])
+        var draft = ImportDraft(document: document, existing: .empty, rememberedRules: ImportStoredRules())
+        let inputs = ImportPreparationInputs(draft: draft, ledgerRevision: 4)
+        XCTAssertTrue(inputs.matches(draft, ledgerRevision: 4))
+        var changedDraft = draft
+        changedDraft.defaultKind = .income
+        XCTAssertFalse(inputs.matches(changedDraft, ledgerRevision: 4))
+        XCTAssertFalse(inputs.matches(draft, ledgerRevision: 5))
+
+        draft.step = .organize
+        draft.result = FinanceImportResult(data: .empty, importedRows: 1, skippedRows: 0, warnings: [])
+        draft.importedData = .empty
+        draft.duplicateTransactionIDs = [UUID()]
+
+        draft.discardPreparedResults()
+
+        XCTAssertNil(draft.result)
+        XCTAssertNil(draft.importedData)
+        XCTAssertTrue(draft.duplicateTransactionIDs.isEmpty)
+    }
+
+    func testWatchCacheReadsOlderQueuedItemsAndDoesNotResendRejectedOnes() throws {
+        let rejected = WatchExpenseCommand(
+            amount: Money(currency: .usd, minorUnits: 900),
+            accountID: UUID(),
+            categoryID: nil,
+            note: "Coffee"
+        )
+        let queued = WatchExpenseCommand(
+            amount: Money(currency: .usd, minorUnits: 1_200),
+            accountID: UUID(),
+            categoryID: nil,
+            note: "Lunch"
+        )
+        let currentData = try JSONEncoder().encode(WatchLedgerCache(
+            snapshot: nil,
+            pendingExpenses: [rejected, queued],
+            lastSyncDate: nil,
+            lastError: nil,
+            failedExpenseMessages: [rejected.id: "The account is unavailable."]
+        ))
+        var legacyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: currentData) as? [String: Any])
+        legacyObject.removeValue(forKey: "failedExpenseMessages")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
+        let decodedLegacy = try JSONDecoder().decode(WatchLedgerCache.self, from: legacyData)
+
+        XCTAssertEqual(decodedLegacy.pendingExpenses, [rejected, queued])
+        XCTAssertTrue(decodedLegacy.failedExpenseMessages.isEmpty)
+        XCTAssertEqual(
+            WatchExpenseQueuePolicy.commandsReadyToSend(
+                [rejected, queued, queued],
+                rejectedIDs: [rejected.id]
+            ),
+            [queued]
+        )
+        let failures = [rejected.id: "The account is unavailable."]
+        let retried = try XCTUnwrap(WatchExpenseQueuePolicy.retryFailedExpense(
+            id: rejected.id,
+            commands: [rejected, queued],
+            failures: failures
+        ))
+        XCTAssertEqual(retried.commands, [rejected, queued])
+        XCTAssertTrue(retried.failures.isEmpty)
+
+        let corrected = try XCTUnwrap(WatchExpenseQueuePolicy.correctAndRetryFailedExpense(
+            id: rejected.id,
+            amount: Money(currency: .usd, minorUnits: 1_000),
+            accountID: queued.accountID,
+            categoryID: nil,
+            note: "Coffee corrected",
+            commands: [rejected, queued],
+            failures: failures
+        ))
+        XCTAssertEqual(corrected.commands[0].id, rejected.id)
+        XCTAssertEqual(corrected.commands[0].date, rejected.date)
+        XCTAssertEqual(corrected.commands[0].amount.minorUnits, 1_000)
+        XCTAssertTrue(corrected.failures.isEmpty)
+
+        let discarded = try XCTUnwrap(WatchExpenseQueuePolicy.discardFailedExpense(
+            id: rejected.id,
+            commands: [rejected, queued, rejected],
+            failures: failures
+        ))
+        XCTAssertEqual(discarded.commands, [queued])
+        XCTAssertTrue(discarded.failures.isEmpty)
+        XCTAssertNil(WatchExpenseQueuePolicy.discardFailedExpense(
+            id: rejected.id,
+            commands: [queued],
+            failures: [:]
+        ))
+
+        let alreadyRecorded = LedgerTransaction(
+            id: rejected.id,
+            date: rejected.date,
+            note: rejected.note,
+            kind: .expense,
+            categoryID: rejected.categoryID,
+            outflows: [MoneyMovement(accountID: rejected.accountID, money: rejected.amount)],
+            inflows: []
+        )
+        XCTAssertTrue(WatchExpenseQueuePolicy.wasAlreadyRecorded(
+            commandID: rejected.id,
+            in: [alreadyRecorded]
+        ))
+        XCTAssertFalse(WatchExpenseQueuePolicy.wasAlreadyRecorded(
+            commandID: rejected.id,
+            in: []
+        ))
+    }
+
+    func testWatchSnapshotWorkRequiresEligibleDelivery() {
+        XCTAssertFalse(WatchSyncPublisher.isEligibleForDelivery(
+            sessionSupported: false,
+            isActivated: true,
+            isWatchAppInstalled: true
+        ))
+        XCTAssertFalse(WatchSyncPublisher.isEligibleForDelivery(
+            sessionSupported: true,
+            isActivated: true,
+            isWatchAppInstalled: false
+        ))
+        XCTAssertFalse(WatchSyncPublisher.isEligibleForDelivery(
+            sessionSupported: true,
+            isActivated: false,
+            isWatchAppInstalled: true
+        ))
+        XCTAssertTrue(WatchSyncPublisher.isEligibleForDelivery(
+            sessionSupported: true,
+            isActivated: true,
+            isWatchAppInstalled: true
+        ))
+    }
+
     func testWatchExpenseCommandRoundTripsThroughConnectivityCodec() throws {
         let command = WatchExpenseCommand(
             id: UUID(),

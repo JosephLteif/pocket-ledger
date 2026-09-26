@@ -59,9 +59,15 @@ struct WatchHomeView: View {
                     .disabled(store.snapshot?.accounts.contains(where: \.canUseForExpense) != true)
 
                     if !store.pendingExpenses.isEmpty {
-                        Text("\(store.pendingExpenses.count) expense queued")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        NavigationLink {
+                            WatchPendingExpensesView(store: store)
+                        } label: {
+                            Label(
+                                "\(store.pendingExpenses.count) queued expense\(store.pendingExpenses.count == 1 ? "" : "s")",
+                                systemImage: store.failedExpenseMessages.isEmpty ? "clock" : "exclamationmark.circle.fill"
+                            )
+                            .foregroundStyle(store.failedExpenseMessages.isEmpty ? Color.secondary : Color.orange)
+                        }
                     }
                 }
 
@@ -145,5 +151,55 @@ struct WatchHomeView: View {
                 WatchExpenseView(store: store)
             }
         }
+    }
+}
+
+private struct WatchPendingExpensesView: View {
+    @ObservedObject var store: WatchLedgerStore
+
+    private var failedExpenses: [WatchExpenseCommand] {
+        store.pendingExpenses
+            .filter { store.failedExpenseMessages[$0.id] != nil }
+            .sorted { $0.date > $1.date }
+    }
+
+    private var waitingCount: Int {
+        store.pendingExpenses.count - failedExpenses.count
+    }
+
+    var body: some View {
+        List {
+            if !failedExpenses.isEmpty {
+                Section("Needs attention") {
+                    ForEach(failedExpenses, id: \.id) { command in
+                        NavigationLink {
+                            WatchExpenseView(store: store, commandToCorrect: command)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    Text(command.note.isEmpty ? "Expense" : command.note)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(command.amount.formatted)
+                                        .monospacedDigit()
+                                }
+                                Text(store.failedExpenseMessages[command.id] ?? "Could not save this expense.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if waitingCount > 0 {
+                Section("Waiting to sync") {
+                    Text("\(waitingCount) expense\(waitingCount == 1 ? "" : "s") will sync when the iPhone is available.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("Queued expenses")
     }
 }

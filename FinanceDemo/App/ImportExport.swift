@@ -344,16 +344,20 @@ enum FinanceImportReview {
         in imported: FinanceData,
         existing: FinanceData
     ) -> Set<UUID> {
-        let existingFingerprints = Set(
-            existing.transactions.map { transactionFingerprint($0, in: existing) }
-        )
-        return Set(
-            imported.transactions.compactMap { transaction in
-                existingFingerprints.contains(transactionFingerprint(transaction, in: imported))
-                    ? transaction.id
-                    : nil
+        var existingFingerprints: Set<String> = []
+        for transaction in existing.transactions {
+            if Task.isCancelled { return [] }
+            existingFingerprints.insert(transactionFingerprint(transaction, in: existing))
+        }
+
+        var duplicates: Set<UUID> = []
+        for transaction in imported.transactions {
+            if Task.isCancelled { return [] }
+            if existingFingerprints.contains(transactionFingerprint(transaction, in: imported)) {
+                duplicates.insert(transaction.id)
             }
-        )
+        }
+        return duplicates
     }
 
     static func removingUnusedCreatedRecords(from data: FinanceData) -> FinanceData {
@@ -1597,6 +1601,7 @@ enum FinanceImportBuilder {
         }
 
         for row in table.rows {
+            if Task.isCancelled { return [] }
             addCandidate(
                 name: value(for: .account, in: row, table: table, mapping: mapping),
                 currency: value(for: .currency, in: row, table: table, mapping: mapping),
@@ -1658,6 +1663,7 @@ enum FinanceImportBuilder {
         }
 
         for (rowOffset, row) in table.rows.enumerated() {
+            if Task.isCancelled { throw CancellationError() }
             do {
                 let date = try parseDate(
                     value(for: .date, in: row, table: table, mapping: mapping),

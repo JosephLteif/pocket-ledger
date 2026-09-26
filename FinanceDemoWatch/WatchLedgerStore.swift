@@ -45,6 +45,7 @@ enum WatchSyncStatus: Equatable {
 final class WatchLedgerStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var snapshot: WatchLedgerSnapshot?
     @Published private(set) var pendingExpenses: [WatchExpenseCommand]
+    @Published private(set) var failedExpenseMessages: [UUID: String]
     @Published private(set) var lastSyncedAt: Date?
     @Published private(set) var status: WatchSyncStatus
     @Published private(set) var errorMessage: String?
@@ -59,11 +60,12 @@ final class WatchLedgerStore: NSObject, ObservableObject, WCSessionDelegate {
         let cache = cacheStore.load()
         snapshot = cache.snapshot
         pendingExpenses = cache.pendingExpenses
+        failedExpenseMessages = cache.failedExpenseMessages
         lastSyncedAt = cache.lastSyncDate
         status = WCSession.isSupported()
-            ? (cache.pendingExpenses.isEmpty ? .connecting : .queued)
+            ? (!cache.failedExpenseMessages.isEmpty ? .error : cache.pendingExpenses.isEmpty ? .connecting : .queued)
             : .unavailable
-        errorMessage = cache.lastError
+        errorMessage = cache.failedExpenseMessages.values.first ?? cache.lastError
         super.init()
     }
 
@@ -97,10 +99,61 @@ final class WatchLedgerStore: NSObject, ObservableObject, WCSessionDelegate {
         sendPendingExpenses()
     }
 
+    func correctAndRetryExpense(
+        id: UUID,
+        amount: Money,
+        accountID: UUID,
+        categoryID: UUID?,
+        note: String
+    ) {
+        guard let recovered = WatchExpenseQueuePolicy.correctAndRetryFailedExpense(
+            id: id,
+            amount: amount,
+            accountID: accountID,
+            categoryID: categoryID,
+            note: note,
+            commands: pendingExpenses,
+            failures: failedExpenseMessages
+        ) else { return }
+        pendingExpenses = recovered.commands
+        failedExpenseMessages = recovered.failures
+        updateStatusAfterRecoveryAction()
+        saveCache()
+        sendPendingExpenses()
+    }
+
+    func retryFailedExpense(id: UUID) {
+        guard let recovered = WatchExpenseQueuePolicy.retryFailedExpense(
+            id: id,
+            commands: pendingExpenses,
+            failures: failedExpenseMessages
+        ) else { return }
+        pendingExpenses = recovered.commands
+        failedExpenseMessages = recovered.failures
+        updateStatusAfterRecoveryAction()
+        saveCache()
+        sendPendingExpenses()
+    }
+
+    func discardFailedExpense(id: UUID) {
+        guard let recovered = WatchExpenseQueuePolicy.discardFailedExpense(
+            id: id,
+            commands: pendingExpenses,
+            failures: failedExpenseMessages
+        ) else { return }
+        pendingExpenses = recovered.commands
+        failedExpenseMessages = recovered.failures
+        updateStatusAfterRecoveryAction()
+        saveCache()
+    }
+
     private func sendPendingExpenses() {
         guard session.activationState == .activated else { return }
 
-        for expense in pendingExpenses {
+        for expense in WatchExpenseQueuePolicy.commandsReadyToSend(
+            pendingExpenses,
+            rejectedIDs: Set(failedExpenseMessages.keys)
+        ) {
             guard let context = WatchSyncCodec.dictionary(for: expense) else { continue }
             session.transferUserInfo(context)
         }
@@ -119,8 +172,8 @@ final class WatchLedgerStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
 
-        self.errorMessage = nil
-        status = pendingExpenses.isEmpty ? .synced : .queued
+        self.errorMessage = failedExpenseMessages.values.first
+        status = !failedExpenseMessages.isEmpty ? .error : pendingExpenses.isEmpty ? .synced : .queued
         sendPendingExpenses()
         saveCache()
     }
@@ -132,7 +185,9 @@ final class WatchLedgerStore: NSObject, ObservableObject, WCSessionDelegate {
 
         let receivedTransactionIDs = Set(snapshot.recentTransactions.map(\.id))
         pendingExpenses.removeAll { receivedTransactionIDs.contains($0.id) }
-        status = pendingExpenses.isEmpty ? .synced : .queued
+        failedExpenseMessages = failedExpenseMessages.filter { !receivedTransactionIDs.contains($0.key) }
+        errorMessage = failedExpenseMessages.values.first
+        status = !failedExpenseMessages.isEmpty ? .error : pendingExpenses.isEmpty ? .synced : .queued
         saveCache()
         WidgetCenter.shared.reloadAllTimelines()
     }
@@ -144,9 +199,11 @@ final class WatchLedgerStore: NSObject, ObservableObject, WCSessionDelegate {
 
         if acknowledgement.accepted {
             pendingExpenses.removeAll { $0.id == acknowledgement.commandID }
-            errorMessage = nil
-            status = pendingExpenses.isEmpty ? .synced : .queued
+            failedExpenseMessages.removeValue(forKey: acknowledgement.commandID)
+            errorMessage = failedExpenseMessages.values.first
+            status = !failedExpenseMessages.isEmpty ? .error : pendingExpenses.isEmpty ? .synced : .queued
         } else {
+            failedExpenseMessages[acknowledgement.commandID] = acknowledgement.message
             status = .error
             errorMessage = acknowledgement.message
         }
@@ -159,9 +216,15 @@ final class WatchLedgerStore: NSObject, ObservableObject, WCSessionDelegate {
                 snapshot: snapshot,
                 pendingExpenses: pendingExpenses,
                 lastSyncDate: lastSyncedAt,
-                lastError: errorMessage
+                lastError: errorMessage,
+                failedExpenseMessages: failedExpenseMessages
             )
         )
+    }
+
+    private func updateStatusAfterRecoveryAction() {
+        errorMessage = failedExpenseMessages.values.first
+        status = !failedExpenseMessages.isEmpty ? .error : pendingExpenses.isEmpty ? .synced : .queued
     }
 
     nonisolated func session(

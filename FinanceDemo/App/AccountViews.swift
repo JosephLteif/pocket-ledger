@@ -431,7 +431,6 @@ struct AccountDetailView: View {
 }
 
 @MainActor
-@MainActor
 private struct AccountBalanceEditor: View {
     @ObservedObject var store: LedgerStore
     let account: Account

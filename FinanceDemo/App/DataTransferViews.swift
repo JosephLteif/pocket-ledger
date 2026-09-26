@@ -22,6 +22,8 @@ private struct PreparedTransferData: @unchecked Sendable {
 @MainActor
 struct DataTransferView: View {
     @ObservedObject var store: LedgerStore
+    @Environment(\.dismiss) private var dismiss
+    let isImportOnly: Bool
 
     @State private var isShowingImporter = false
     @State private var isExportingBackup = false
@@ -45,6 +47,11 @@ struct DataTransferView: View {
     @State private var isShowingRecoveryConfirmation = false
     @State private var isShowingRecoveryDeletionConfirmation = false
 
+    init(store: LedgerStore, isImportOnly: Bool = false) {
+        _store = ObservedObject(wrappedValue: store)
+        self.isImportOnly = isImportOnly
+    }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
@@ -52,12 +59,16 @@ struct DataTransferView: View {
                 if isProcessingTransfer {
                     transferProgressCard
                 }
-                backupCard
-                if store.hasRecoverySnapshot {
-                    recoveryCard
+                if isImportOnly {
+                    importCard
+                } else {
+                    backupCard
+                    if store.hasRecoverySnapshot {
+                        recoveryCard
+                    }
+                    importCard
+                    resetCard
                 }
-                importCard
-                resetCard
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -68,6 +79,13 @@ struct DataTransferView: View {
         .navigationTitle("Import & Backup")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
+        .toolbar {
+            if isImportOnly {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
         .fileImporter(
             isPresented: $isShowingImporter,
             allowedContentTypes: [.data],
@@ -139,7 +157,9 @@ struct DataTransferView: View {
             Label("Move your ledger safely", systemImage: "arrow.left.arrow.right")
                 .font(.title3.weight(.bold))
 
-            Text("Pocket Ledger can restore its own lossless backup or import rows from another app. Files are read on this device and are never uploaded.")
+            Text(isImportOnly
+                 ? "Choose a file to bring your existing history into Pocket Ledger. You can review mapped rows before saving them. Files stay on this device."
+                 : "Pocket Ledger can restore its own lossless backup or import rows from another app. Files are read on this device and are never uploaded.")
                 .font(.subheadline)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
         }

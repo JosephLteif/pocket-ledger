@@ -111,7 +111,21 @@ struct GlobalSearchView: View {
     @State private var transactionDocumentsRevision: Int?
     @State private var editingTransaction: LedgerTransaction?
     @State private var transactionToTemplate: LedgerTransaction?
+    @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
+    @State private var transactionDeletionError: String?
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
+
+    private var searchExamples: [String] {
+        var examples: [String] = []
+        for value in [
+            store.activeCategories.first?.name,
+            store.activeAccounts.first?.name,
+            store.data.transactions.first(where: { !$0.note.isEmpty })?.note
+        ].compactMap({ $0 }) where !examples.contains(value) {
+            examples.append(value)
+        }
+        return examples
+    }
 
     private var query: String {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -132,6 +146,23 @@ struct GlobalSearchView: View {
                             description: Text("Find accounts, transactions, descriptions, categories, amounts, and currencies.")
                         )
                         .padding(.top, 18)
+                        if !searchExamples.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Try a search")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 8) {
+                                        ForEach(searchExamples, id: \.self) { example in
+                                            Button(example) { searchText = example }
+                                                .buttonStyle(.glass)
+                                                .accessibilityLabel("Search for \(example)")
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.top, 8)
+                        }
                     } else if results.isEmpty {
                         ContentUnavailableView(
                             "No results",
@@ -166,7 +197,7 @@ struct GlobalSearchView: View {
                                     NavigationLink {
                                         TransactionsView(
                                             store: store,
-                                            initialSearch: store.categoryPath(for: category.id)
+                                            initialCategoryID: category.id
                                         )
                                     } label: {
                                         SearchCategoryRow(
@@ -190,7 +221,13 @@ struct GlobalSearchView: View {
                                         store: store,
                                         onEdit: { editingTransaction = transaction },
                                         onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-                                        onDelete: { _ = store.deleteTransaction(id: transaction.id) },
+                                        onDelete: {
+                                            if store.deleteTransaction(id: transaction.id) {
+                                                deletedTransactionsForUndo.append(transaction)
+                                            } else {
+                                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
+                                            }
+                                        },
                                         onSaveTemplate: { transactionToTemplate = transaction },
                                         allowsActions: true,
                                         subtitleOverride: transactionSubtitle(transaction),
@@ -223,6 +260,24 @@ struct GlobalSearchView: View {
         }
         .pocketSwipeActionsContainer()
         .pocketScreen()
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !deletedTransactionsForUndo.isEmpty {
+                TransactionUndoBanner(
+                    transactions: deletedTransactionsForUndo,
+                    onUndo: {
+                        if store.restoreTransactions(deletedTransactionsForUndo) {
+                            deletedTransactionsForUndo.removeAll()
+                        } else {
+                            transactionDeletionError = store.lastActionStatus ?? "The transaction could not be restored."
+                        }
+                    },
+                    onDismiss: { deletedTransactionsForUndo.removeAll() }
+                )
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+            }
+        }
+        .transactionActionAlert(message: $transactionDeletionError)
         .navigationTitle("Search")
         .navigationBarTitleDisplayMode(.large)
         .task(id: searchTaskID) {

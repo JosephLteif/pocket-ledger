@@ -117,6 +117,7 @@ struct MoreView: View {
             .navigationTitle("More")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
+                BalanceVisibilityToolbarItem(security: security)
                 AddTransactionToolbar(store: store, onAction: onAddAction)
             }
             .listStyle(.insetGrouped)
@@ -159,10 +160,13 @@ struct DashboardView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var presentedSheet: DashboardSheet?
     @State private var transactionToTemplate: LedgerTransaction?
+    @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
+    @State private var transactionDeletionError: String?
     @State private var snapshot = DashboardSnapshot.empty
     @State private var dashboardPreferences = DashboardPreferences.load()
     @State private var isBalanceScopeExpanded = false
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
+    @AppStorage("pocketLedger.showAllBalanceCurrencies") private var showsAllBalanceCurrencies = false
     @AppStorage(PocketLedgerTheme.colorThemeKey) private var selectedColorTheme = PocketLedgerColorTheme.ocean.rawValue
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
 
@@ -191,6 +195,24 @@ struct DashboardView: View {
             }
             .pocketSwipeActionsContainer()
             .pocketScreen()
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !deletedTransactionsForUndo.isEmpty {
+                    TransactionUndoBanner(
+                        transactions: deletedTransactionsForUndo,
+                        onUndo: {
+                            if store.restoreTransactions(deletedTransactionsForUndo) {
+                                deletedTransactionsForUndo.removeAll()
+                            } else {
+                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be restored."
+                            }
+                        },
+                        onDismiss: { deletedTransactionsForUndo.removeAll() }
+                    )
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                }
+            }
+            .transactionActionAlert(message: $transactionDeletionError)
             .accessibilityIdentifier("dashboard-\(selectedColorTheme)")
             .preferredColorScheme(
                 PocketLedgerAppearanceMode(rawValue: selectedAppearanceMode)?.preferredColorScheme
@@ -294,19 +316,30 @@ struct DashboardView: View {
     }
 
     private var balanceHero: some View {
+        let usedCurrencies = Set(snapshot.activeAccounts.filter(\.includeInTotals).map(\.currency))
+        let currencies = showsAllBalanceCurrencies || usedCurrencies.isEmpty
+            ? LedgerCurrency.allCases
+            : LedgerCurrency.allCases.filter { usedCurrencies.contains($0) }
+
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Label("Available balance", systemImage: "wallet.pass.fill")
+                Label("Included balances", systemImage: "wallet.pass.fill")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
 
                 Spacer()
-
+                if !usedCurrencies.isEmpty, usedCurrencies.count < LedgerCurrency.allCases.count {
+                    Button(showsAllBalanceCurrencies ? "Show used" : "Show all") {
+                        showsAllBalanceCurrencies.toggle()
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
+                }
             }
 
             VStack(spacing: 0) {
-                ForEach(LedgerCurrency.allCases) { currency in
-                    if currency != LedgerCurrency.allCases[0] {
+                ForEach(currencies) { currency in
+                    if currency != currencies.first {
                         Divider()
                             .overlay(PocketLedgerTheme.divider)
                     }
@@ -314,7 +347,7 @@ struct DashboardView: View {
                 }
             }
 
-            Text("Loans are tracked separately in Accounts.")
+            Text("Includes accounts marked for totals, including investments and physical assets. Loans are tracked separately in Accounts.")
                 .font(.caption)
                 .foregroundStyle(PocketLedgerTheme.textTertiary)
         }
@@ -424,8 +457,8 @@ struct DashboardView: View {
             }
 
             Text(excludedCount == 0
-                 ? "Included accounts feed totals; loans remain separate from available balance."
-                 : "Excluded accounts remain visible in Accounts but do not affect balances or metrics. Loans remain separate from available balance.")
+                 ? "Included accounts feed totals; loans remain separate from included balances."
+                 : "Excluded accounts remain visible in Accounts but do not affect balances or metrics. Loans remain separate from included balances.")
                 .font(.caption)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
 
@@ -698,10 +731,10 @@ struct DashboardView: View {
                             Spacer()
 
                             VStack(alignment: .trailing, spacing: 3) {
-                                Text(projected.formatted)
+                                protectedBalanceText(projected.formatted)
                                     .font(.subheadline.weight(.bold).monospacedDigit())
                                     .foregroundStyle(projected.minorUnits < 0 ? PocketLedgerTheme.warning : PocketLedgerTheme.textPrimary)
-                                Text(change >= 0 ? "+\(Money(currency: currency, minorUnits: change).formatted) scheduled"
+                                protectedBalanceText(change >= 0 ? "+\(Money(currency: currency, minorUnits: change).formatted) scheduled"
                                      : "\(Money(currency: currency, minorUnits: change).formatted) scheduled")
                                     .font(.caption2.weight(.semibold).monospacedDigit())
                                     .foregroundStyle(change >= 0 ? PocketLedgerTheme.income : PocketLedgerTheme.warning)
@@ -716,7 +749,7 @@ struct DashboardView: View {
                 if LedgerCurrency.allCases.contains(where: {
                     (snapshot.scheduledChanges[$0] ?? 0) < 0
                 }) {
-                    Label("Review upcoming outflows before they affect your available balance.", systemImage: "info.circle")
+                    Label("Review upcoming outflows before they affect your included balances.", systemImage: "info.circle")
                         .font(.caption)
                         .foregroundStyle(PocketLedgerTheme.warning)
                 }
@@ -801,7 +834,13 @@ struct DashboardView: View {
                             store: store,
                             onEdit: { presentedSheet = .transaction(transaction) },
                             onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-                            onDelete: { _ = store.deleteTransaction(id: transaction.id) },
+                            onDelete: {
+                                if store.deleteTransaction(id: transaction.id) {
+                                    deletedTransactionsForUndo.append(transaction)
+                                } else {
+                                    transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
+                                }
+                            },
                             onSaveTemplate: { transactionToTemplate = transaction },
                             allowsActions: true,
                             usesScrollSwipeActions: true

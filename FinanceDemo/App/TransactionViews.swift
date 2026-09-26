@@ -117,6 +117,10 @@ struct TransactionListSnapshot {
         customEndDate: Date,
         page: Int,
         pageSize: Int,
+        categoryID: UUID? = nil,
+        includesCategoryDescendants: Bool = true,
+        accountID: UUID? = nil,
+        reportingCurrency: LedgerCurrency? = nil,
         calendar: Calendar = .current
     ) -> TransactionListSnapshot {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -142,6 +146,39 @@ struct TransactionListSnapshot {
             }
             guard matchesPeriod else { return false }
 
+            if let categoryID {
+                guard let transactionCategoryID = transaction.categoryID else { return false }
+                let ancestors = index.categoryAncestorsByID[transactionCategoryID] ?? [transactionCategoryID]
+                let matchesCategory = includesCategoryDescendants
+                    ? ancestors.contains(categoryID)
+                    : transactionCategoryID == categoryID
+                guard matchesCategory else { return false }
+            }
+
+            if let accountID {
+                let movements = transaction.outflows + transaction.inflows
+                guard movements.contains(where: { $0.accountID == accountID }) else { return false }
+
+                if let reportingCurrency {
+                    let accountOutflows = transaction.outflows.filter { $0.accountID == accountID }
+                    let accountInflows = transaction.inflows.filter { $0.accountID == accountID }
+                    let accountNet = index.movementTotal(
+                        accountOutflows,
+                        currency: reportingCurrency,
+                        exchangeRate: transaction.exchangeRate
+                    ) - index.movementTotal(
+                        accountInflows,
+                        currency: reportingCurrency,
+                        exchangeRate: transaction.exchangeRate
+                    )
+                    guard accountNet > 0 else { return false }
+                }
+            }
+
+            if let reportingCurrency, transaction.kind == .expense {
+                guard index.netExpenseAmount(transaction, currency: reportingCurrency) > 0 else { return false }
+            }
+
             switch quickFilter {
             case .none, .thisMonth, .uncategorized:
                 break
@@ -159,7 +196,7 @@ struct TransactionListSnapshot {
 
         var expenseTotals: [LedgerCurrency: Int64] = [:]
         for transaction in filteredTransactions where transaction.kind == .expense {
-            for currency in LedgerCurrency.allCases {
+            for currency in reportingCurrency.map({ [$0] }) ?? LedgerCurrency.allCases {
                 expenseTotals[currency, default: 0] += index.netExpenseAmount(
                     transaction,
                     currency: currency
@@ -239,7 +276,12 @@ struct TransactionsView: View {
     @State private var selectedTransactionIDs: Set<UUID> = []
     @State private var isShowingBulkDeleteConfirmation = false
     @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
+    @State private var transactionDeletionError: String?
     @State private var listSnapshot = TransactionListSnapshot.empty
+    @State private var drilldownCategoryID: UUID?
+    @State private var drilldownIncludesCategoryDescendants = true
+    @State private var drilldownAccountID: UUID?
+    @State private var drilldownReportingCurrency: LedgerCurrency?
 
     private let transactionsPerPage = 25
 
@@ -249,14 +291,25 @@ struct TransactionsView: View {
         onAddAction: ((AddAction) -> Void)? = nil,
         initialFilter: TransactionFilter = .all,
         initialPeriod: TransactionPeriod = .all,
-        initialSearch: String = ""
+        initialSearch: String = "",
+        initialCategoryID: UUID? = nil,
+        initialCategoryIncludesDescendants: Bool = true,
+        initialAccountID: UUID? = nil,
+        initialReportingCurrency: LedgerCurrency? = nil,
+        initialCustomStartDate: Date? = nil,
+        initialCustomEndDate: Date? = nil
     ) {
         _store = ObservedObject(wrappedValue: store)
         self.onAddExpense = onAddExpense
         self.onAddAction = onAddAction
         _selectedFilter = State(initialValue: initialFilter)
         _selectedPeriod = State(initialValue: initialPeriod)
+        _drilldownCategoryID = State(initialValue: initialCategoryID)
+        _drilldownIncludesCategoryDescendants = State(initialValue: initialCategoryIncludesDescendants)
+        _drilldownAccountID = State(initialValue: initialAccountID)
+        _drilldownReportingCurrency = State(initialValue: initialReportingCurrency)
         let hasExplicitContext = initialFilter != .all || initialPeriod != .all || !initialSearch.isEmpty
+            || initialCategoryID != nil || initialAccountID != nil || initialReportingCurrency != nil
         let persistedQuickFilter = TransactionQuickFilter(
             rawValue: UserDefaults.standard.string(forKey: Self.lastQuickFilterKey) ?? ""
         ) ?? .none
@@ -267,9 +320,9 @@ struct TransactionsView: View {
         )
         _searchText = State(initialValue: initialSearch)
         let calendar = Calendar.current
-        let start = calendar.date(byAdding: .day, value: -30, to: .now) ?? .now
+        let start = initialCustomStartDate ?? calendar.date(byAdding: .day, value: -30, to: .now) ?? .now
         _customStartDate = State(initialValue: start)
-        _customEndDate = State(initialValue: .now)
+        _customEndDate = State(initialValue: initialCustomEndDate ?? .now)
     }
 
     var body: some View {
@@ -359,6 +412,7 @@ struct TransactionsView: View {
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
         .pocketScreen()
+        .transactionActionAlert(message: $transactionDeletionError)
         .navigationTitle("Transactions")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
@@ -574,6 +628,8 @@ struct TransactionsView: View {
             onDelete: {
                 if store.deleteTransaction(id: transaction.id) {
                     deletedTransactionsForUndo = [transaction]
+                } else {
+                    transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
                 }
             },
             onSaveTemplate: { transactionToTemplate = transaction },
@@ -643,6 +699,8 @@ struct TransactionsView: View {
                     deletedTransactionsForUndo = selected
                     selectedTransactionIDs.removeAll()
                     isSelectingTransactions = false
+                } else {
+                    transactionDeletionError = store.lastActionStatus ?? "The selected transactions could not be deleted."
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -655,39 +713,32 @@ struct TransactionsView: View {
     }
 
     private func undoBanner(for transactions: [LedgerTransaction]) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "trash")
-                .foregroundStyle(PocketLedgerTheme.warning)
-            Text(transactions.count == 1
-                 ? "Deleted \(transactions[0].note.isEmpty ? "transaction" : transactions[0].note)"
-                 : "Deleted \(transactions.count) transactions")
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            Button("Undo") {
-                _ = store.restoreTransactions(transactions)
-                deletedTransactionsForUndo.removeAll()
-            }
-            .font(.subheadline.weight(.bold))
-            Button {
-                deletedTransactionsForUndo.removeAll()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption.weight(.bold))
-                    .frame(width: 32, height: 32)
-            }
-            .buttonStyle(.glass)
-            .accessibilityLabel("Dismiss undo message")
-        }
-        .padding(.leading, 14)
-        .padding(.trailing, 6)
-        .padding(.vertical, 7)
-        .pocketGlassCapsule(tint: PocketLedgerTheme.warning.opacity(0.12))
-        .accessibilityElement(children: .contain)
+        TransactionUndoBanner(
+            transactions: transactions,
+            onUndo: {
+                if store.restoreTransactions(transactions) {
+                    deletedTransactionsForUndo.removeAll()
+                } else {
+                    transactionDeletionError = store.lastActionStatus ?? "The transaction could not be restored."
+                }
+            },
+            onDismiss: { deletedTransactionsForUndo.removeAll() }
+        )
     }
 
     private var screenSubtitle: some View {
-        Text("Every inflow and outflow, in one place")
+        let subtitle: String
+        if let drilldownCategoryID {
+            let currency = drilldownReportingCurrency.map { " · \($0.rawValue)" } ?? ""
+            subtitle = "Category · \(store.categoryPath(for: drilldownCategoryID))\(currency)"
+        } else if let drilldownAccountID {
+            let accountName = store.account(with: drilldownAccountID)?.name ?? "Account"
+            let currency = drilldownReportingCurrency.map { " · \($0.rawValue)" } ?? ""
+            subtitle = "Account · \(accountName)\(currency)"
+        } else {
+            subtitle = "Every inflow and outflow, in one place"
+        }
+        return Text(subtitle)
             .font(.subheadline)
             .foregroundStyle(PocketLedgerTheme.textSecondary)
     }
@@ -742,7 +793,11 @@ struct TransactionsView: View {
             customStartDate: customStartDate,
             customEndDate: customEndDate,
             page: transactionPage,
-            pageSize: transactionsPerPage
+            pageSize: transactionsPerPage,
+            categoryID: drilldownCategoryID,
+            includesCategoryDescendants: drilldownIncludesCategoryDescendants,
+            accountID: drilldownAccountID,
+            reportingCurrency: drilldownReportingCurrency
         )
     }
 
@@ -758,6 +813,10 @@ struct TransactionsView: View {
         selectedPeriod = .all
         selectedQuickFilter = .none
         searchText = ""
+        drilldownCategoryID = nil
+        drilldownIncludesCategoryDescendants = true
+        drilldownAccountID = nil
+        drilldownReportingCurrency = nil
         customStartDate = Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .now
         customEndDate = .now
         transactionPage = 0
@@ -834,7 +893,7 @@ struct TransactionsView: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
                     ForEach(totals.indices, id: \.self) { totalIndex in
                         let total = totals[totalIndex]
-                        ForEach(LedgerCurrency.allCases) { currency in
+                    ForEach(drilldownReportingCurrency.map { [$0] } ?? LedgerCurrency.allCases) { currency in
                             transactionSummaryMetric(
                                 title: "\(currency.rawValue) \(total.0)",
                                 value: Money(currency: currency, minorUnits: total.1[currency] ?? 0).formatted,
@@ -889,6 +948,64 @@ struct TransactionsView: View {
         }
         .padding(.top, 4)
         .padding(.bottom, 8)
+    }
+}
+
+struct TransactionUndoBanner: View {
+    let transactions: [LedgerTransaction]
+    let onUndo: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "trash")
+                .foregroundStyle(PocketLedgerTheme.warning)
+            Text(transactions.count == 1
+                 ? "Deleted \(transactions[0].note.isEmpty ? "transaction" : transactions[0].note)"
+                 : "Deleted \(transactions.count) transactions")
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Button("Undo", action: onUndo)
+                .font(.subheadline.weight(.bold))
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.glass)
+            .accessibilityLabel("Dismiss undo message")
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 6)
+        .padding(.vertical, 7)
+        .pocketGlassCapsule(tint: PocketLedgerTheme.warning.opacity(0.12))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Transaction deleted")
+    }
+}
+
+private struct TransactionActionAlert: ViewModifier {
+    @Binding var message: String?
+
+    func body(content: Content) -> some View {
+        content.alert(
+            "Couldn't update transaction",
+            isPresented: Binding(
+                get: { message != nil },
+                set: { if !$0 { message = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { message = nil }
+        } message: {
+            Text(message ?? "The transaction could not be updated.")
+        }
+    }
+}
+
+extension View {
+    func transactionActionAlert(message: Binding<String?>) -> some View {
+        modifier(TransactionActionAlert(message: message))
     }
 }
 

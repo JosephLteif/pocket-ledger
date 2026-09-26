@@ -121,7 +121,9 @@ struct BudgetsView: View {
                         store: store,
                         initialFilter: .expense,
                         initialPeriod: .thisMonth,
-                        initialSearch: summary.categoryPath
+                        initialCategoryID: budget.categoryID,
+                        initialCategoryIncludesDescendants: false,
+                        initialReportingCurrency: budget.currency
                     )
                 } label: {
                     Label("View transactions", systemImage: "list.bullet")
@@ -167,6 +169,8 @@ private struct BudgetEditor: View {
     @State private var amount: String
     @State private var rollover: Bool
     @State private var errorMessage: String?
+    @State private var isSelectingCategory = false
+    @State private var isConfirmingDiscard = false
 
     init(store: LedgerStore, budget: LedgerBudget?) {
         _store = ObservedObject(wrappedValue: store)
@@ -181,25 +185,80 @@ private struct BudgetEditor: View {
         NavigationStack {
             Form {
                 Section("Budget") {
-                    Picker("Category", selection: $categoryID) {
-                        CategoryPickerContent(
-                            categories: store.activeCategories,
-                            includeUncategorized: false
-                        )
+                    Button {
+                        isSelectingCategory = true
+                    } label: {
+                        LabeledContent("Category") {
+                            HStack(spacing: 6) {
+                                Text(selectedCategoryPath)
+                                    .lineLimit(1)
+                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(PocketLedgerTheme.textTertiary)
+                            }
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Search categories or browse the category hierarchy")
                     CurrencyInputField("Monthly limit", text: $amount, currency: $currency)
+                    if !canSave {
+                        Label(
+                            categoryID == nil ? "Choose a category to save this budget." : "Enter a positive monthly limit to save.",
+                            systemImage: "info.circle"
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    }
                     Toggle("Rollover unused amount", isOn: $rollover)
                 }
             }
             .pocketListSurface()
             .navigationTitle(budget == nil ? "New budget" : "Edit budget")
+            .interactiveDismissDisabled(hasUnsavedChanges)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: cancel) }
                 ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).disabled(!canSave) }
             }
             .alert("Budget not saved", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
                 Button("OK") { errorMessage = nil }
             } message: { Text(errorMessage ?? "") }
+            .sheet(isPresented: $isSelectingCategory) {
+                CategorySelectionSheet(
+                    categories: store.activeCategories,
+                    selectedCategoryID: $categoryID,
+                    includeUncategorized: false
+                )
+            }
+            .confirmationDialog("Discard budget changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
+                Button("Discard changes", role: .destructive) { dismiss() }
+                Button("Keep editing", role: .cancel) {}
+            }
+        }
+    }
+
+    private var selectedCategoryPath: String {
+        categoryID.map { store.categoryPath(for: $0) } ?? "Choose a category"
+    }
+
+    private var hasUnsavedChanges: Bool {
+        if let budget {
+            return categoryID != budget.categoryID
+                || currency != budget.currency
+                || Money.parse(amount, currency: currency) != budget.monthlyLimit.recast(to: currency)
+                || rollover != budget.rollover
+        }
+        return categoryID != store.activeCategories.first?.id
+            || currency != .usd
+            || !amount.isEmpty
+            || rollover
+    }
+
+    private func cancel() {
+        if hasUnsavedChanges {
+            isConfirmingDiscard = true
+        } else {
+            dismiss()
         }
     }
 
@@ -222,6 +281,10 @@ private struct BudgetEditor: View {
                 startedAt: budget?.startedAt ?? .now
             )
         )
-        if saved { dismiss() }
+        if saved {
+            dismiss()
+        } else {
+            errorMessage = store.lastActionStatus ?? "The budget could not be saved."
+        }
     }
 }

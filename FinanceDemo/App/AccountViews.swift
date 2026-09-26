@@ -91,6 +91,8 @@ struct AccountDetailView: View {
     @State private var isPresentingBalanceEditor = false
     @State private var editingTransaction: LedgerTransaction?
     @State private var transactionToTemplate: LedgerTransaction?
+    @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
+    @State private var transactionDeletionError: String?
     @State private var transactionPage = 0
     @State private var snapshot = AccountDetailSnapshot.empty
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
@@ -103,6 +105,24 @@ struct AccountDetailView: View {
 
     var body: some View {
         content
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !deletedTransactionsForUndo.isEmpty {
+                    TransactionUndoBanner(
+                        transactions: deletedTransactionsForUndo,
+                        onUndo: {
+                            if store.restoreTransactions(deletedTransactionsForUndo) {
+                                deletedTransactionsForUndo.removeAll()
+                            } else {
+                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be restored."
+                            }
+                        },
+                        onDismiss: { deletedTransactionsForUndo.removeAll() }
+                    )
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                }
+            }
+            .transactionActionAlert(message: $transactionDeletionError)
             .navigationTitle(account?.name ?? "Account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -440,7 +460,13 @@ private struct AccountTransactionRow: View {
             store: store,
             onEdit: onEdit,
             onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-            onDelete: { _ = store.deleteTransaction(id: transaction.id) },
+            onDelete: {
+                if store.deleteTransaction(id: transaction.id) {
+                    deletedTransactionsForUndo.append(transaction)
+                } else {
+                    transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
+                }
+            },
             onSaveTemplate: onSaveTemplate,
             allowsActions: true,
             subtitleOverride: subtitle,

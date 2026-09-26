@@ -557,13 +557,31 @@ struct MetricsView: View {
                 }
             } else {
                 ForEach(snapshot.accounts) { metric in
-                    breakdownRow(
-                        title: metric.title,
-                        icon: store.account(with: metric.accountID)?.type.systemImage ?? "wallet.pass",
-                        amount: metric.amount,
-                        percentage: percentage(for: metric.amount, total: total),
-                        colorIndex: metric.colorIndex
-                    )
+                    NavigationLink {
+                        TransactionsView(
+                            store: store,
+                            initialFilter: .expense,
+                            initialPeriod: .custom,
+                            initialAccountID: metric.accountID,
+                            initialReportingCurrency: selectedCurrency,
+                            initialCustomStartDate: interval.start,
+                            initialCustomEndDate: Calendar.current.date(
+                                byAdding: .day,
+                                value: -1,
+                                to: interval.end
+                            ) ?? interval.end
+                        )
+                    } label: {
+                        breakdownRow(
+                            title: metric.title,
+                            icon: store.account(with: metric.accountID)?.type.systemImage ?? "wallet.pass",
+                            amount: metric.amount,
+                            percentage: percentage(for: metric.amount, total: total),
+                            colorIndex: metric.colorIndex
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Show expenses counted for this account in the selected period")
 
                     if metric.id != snapshot.accounts.last?.id {
                         Divider().overlay(PocketLedgerTheme.divider)
@@ -834,6 +852,8 @@ private struct CategoryMetricsDetailView: View {
     @State private var snapshot = CategoryMetricsDetailSnapshot.empty
     @State private var editingTransaction: LedgerTransaction?
     @State private var transactionToTemplate: LedgerTransaction?
+    @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
+    @State private var transactionDeletionError: String?
     @State private var transactionToOpenID: UUID?
     @State private var isShowingTransactionDetail = false
 
@@ -870,6 +890,24 @@ private struct CategoryMetricsDetailView: View {
         }
         .pocketSwipeActionsContainer()
         .pocketScreen()
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !deletedTransactionsForUndo.isEmpty {
+                TransactionUndoBanner(
+                    transactions: deletedTransactionsForUndo,
+                    onUndo: {
+                        if store.restoreTransactions(deletedTransactionsForUndo) {
+                            deletedTransactionsForUndo.removeAll()
+                        } else {
+                            transactionDeletionError = store.lastActionStatus ?? "The transaction could not be restored."
+                        }
+                    },
+                    onDismiss: { deletedTransactionsForUndo.removeAll() }
+                )
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+            }
+        }
+        .transactionActionAlert(message: $transactionDeletionError)
         .navigationTitle(categoryTitle)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $isShowingTransactionDetail) {
@@ -1058,7 +1096,7 @@ private struct CategoryMetricsDetailView: View {
     }
 
     private func transactionRows(_ snapshot: CategoryMetricsDetailSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        LazyVStack(alignment: .leading, spacing: 0) {
             Text("Transactions")
                 .font(.title3.weight(.bold))
                 .padding(.top, 20)
@@ -1076,7 +1114,13 @@ private struct CategoryMetricsDetailView: View {
                         store: store,
                         onEdit: { editingTransaction = transaction },
                         onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-                        onDelete: { _ = store.deleteTransaction(id: transaction.id) },
+                        onDelete: {
+                            if store.deleteTransaction(id: transaction.id) {
+                                deletedTransactionsForUndo.append(transaction)
+                            } else {
+                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
+                            }
+                        },
                         onSaveTemplate: { transactionToTemplate = transaction },
                         allowsActions: true,
                         onOpen: {

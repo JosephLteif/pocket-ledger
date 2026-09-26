@@ -23,7 +23,11 @@ enum FinanceTransactionDefaults {
             return account
         }
         if let rememberedAccountID,
-           let account = accounts.first(where: { $0.id == rememberedAccountID && !$0.isArchived }) {
+           let account = accounts.first(where: {
+               $0.id == rememberedAccountID
+                   && !$0.isArchived
+                   && (preferredCurrency == nil || $0.currency == preferredCurrency)
+           }) {
             return account
         }
         return accounts.first { account in
@@ -105,6 +109,17 @@ private struct MovementLineEditor: View {
                 selectableCurrencies: availableCurrencies,
                 focusOnAppear: focusAmountOnAppear
             )
+            if !line.amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let amount = Money.parse(line.amount, currency: line.currency), amount.minorUnits <= 0 {
+                Label("Enter an amount greater than zero.", systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.warning)
+            } else if !line.amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      Money.parse(line.amount, currency: line.currency) == nil {
+                Label("Enter a valid amount in \(line.currency.rawValue).", systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.warning)
+            }
 
             Picker("Account", selection: $line.accountID) {
                 ForEach(store.data.accounts.filter { account in
@@ -116,6 +131,11 @@ private struct MovementLineEditor: View {
                 }
             }
             .pickerStyle(.menu)
+            if !store.data.accounts.contains(where: { $0.id == line.accountID && $0.currency == line.currency }) {
+                Label("Choose an account that uses \(line.currency.rawValue).", systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.warning)
+            }
         }
     }
 }
@@ -136,6 +156,7 @@ struct TransactionEditor: View {
     @State private var monthlyRule: ScheduleMonthlyRule = .dayOfMonth
     @State private var scheduleEnabled = true
     @State private var categoryID: UUID?
+    @State private var isSelectingCategory = false
     @State private var dueCurrency: LedgerCurrency = .usd
     @State private var amountDue = ""
     @State private var outflows: [MovementDraft]
@@ -359,6 +380,14 @@ struct TransactionEditor: View {
                     Text("Transaction type")
                 }
 
+                if let saveValidationMessage {
+                    Section("Save needs attention") {
+                        Label(saveValidationMessage, systemImage: "info.circle")
+                            .font(.footnote)
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    }
+                }
+
                 if isTemplateEditor {
                     Section("Template") {
                         TextField("Template name", text: $templateName)
@@ -379,13 +408,6 @@ struct TransactionEditor: View {
                     exchangeRateSection
                 }
 
-                if let saveValidationMessage {
-                    Section {
-                        Label(saveValidationMessage, systemImage: "info.circle")
-                            .font(.footnote)
-                            .foregroundStyle(PocketLedgerTheme.textSecondary)
-                    }
-                }
             }
             .onAppear {
                 if kind == .transfer && inflows.isEmpty {
@@ -467,6 +489,13 @@ struct TransactionEditor: View {
                 NavigationStack {
                     AttachmentPreviewView(store: store, attachment: attachment)
                 }
+            }
+            .sheet(isPresented: $isSelectingCategory) {
+                CategorySelectionSheet(
+                    categories: selectableCategories,
+                    selectedCategoryID: $categoryID,
+                    includeUncategorized: true
+                )
             }
             .fileImporter(
                 isPresented: $isShowingAttachmentImporter,
@@ -806,9 +835,22 @@ struct TransactionEditor: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
-                    Picker("Category", selection: $categoryID) {
-                        CategoryPickerContent(categories: selectableCategories)
+                    Button {
+                        isSelectingCategory = true
+                    } label: {
+                        LabeledContent("Category") {
+                            HStack(spacing: 6) {
+                                Text(selectedCategoryPath)
+                                    .lineLimit(1)
+                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(PocketLedgerTheme.textTertiary)
+                            }
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Search categories or browse the category hierarchy")
                 }
             }
 
@@ -1080,6 +1122,10 @@ struct TransactionEditor: View {
         attachmentIDs.filter { !attachmentIDsPendingDeletion.contains($0) }.compactMap { id in
             store.data.attachments.first(where: { $0.id == id })
         }
+    }
+
+    private var selectedCategoryPath: String {
+        categoryID.map { store.categoryPath(for: $0) } ?? "Uncategorized"
     }
 
     private func beginReplacingAttachment(_ attachment: LedgerAttachment) {

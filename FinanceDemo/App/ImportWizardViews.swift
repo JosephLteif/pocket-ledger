@@ -633,6 +633,10 @@ private struct ImportWizardProgressView: View {
 
 private struct ImportWizardSourceStep: View {
     @Binding var draft: ImportDraft
+    @State private var isRecommendedExpanded = false
+    @State private var isReportingExpanded = false
+    @State private var isAdvancedExpanded = false
+    @State private var areSamplesExpanded = false
 
     private let requiredFields: [ImportField] = [.date, .amount]
     private let recommendedFields: [ImportField] = [.kind, .currency, .account, .category, .note]
@@ -666,19 +670,27 @@ private struct ImportWizardSourceStep: View {
             }
 
             mappingSection("Required", fields: requiredFields)
-            mappingSection("Recommended", fields: recommendedFields)
-            mappingSection("Reporting conversion", fields: reportingFields)
-            mappingSection("Advanced transfers", fields: advancedFields)
+            DisclosureGroup("Recommended fields · \(mappedCount(recommendedFields))/\(recommendedFields.count)", isExpanded: $isRecommendedExpanded) {
+                mappingRows(recommendedFields)
+            }
+            DisclosureGroup("Reporting conversion · \(mappedCount(reportingFields))/\(reportingFields.count)", isExpanded: $isReportingExpanded) {
+                mappingRows(reportingFields)
+            }
+            DisclosureGroup("Advanced transfers · \(mappedCount(advancedFields))/\(advancedFields.count)", isExpanded: $isAdvancedExpanded) {
+                mappingRows(advancedFields)
+            }
 
-            Section("Samples") {
-                ForEach(Array(draft.selectedTable.rows.prefix(3).enumerated()), id: \.offset) { index, row in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Row \(index + 1)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(sampleText(for: row))
-                            .font(.footnote)
-                            .lineLimit(2)
+            DisclosureGroup("Sample rows", isExpanded: $areSamplesExpanded) {
+                Section {
+                    ForEach(Array(draft.selectedTable.rows.prefix(3).enumerated()), id: \.offset) { index, row in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Row \(index + 1)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text(sampleText(for: row))
+                                .font(.footnote)
+                                .lineLimit(2)
+                        }
                     }
                 }
             }
@@ -690,18 +702,38 @@ private struct ImportWizardSourceStep: View {
     @ViewBuilder
     private func mappingSection(_ title: String, fields: [ImportField]) -> some View {
         Section(title) {
-            ForEach(fields) { field in
-                ImportWizardMappingRow(
-                    field: field,
-                    selection: Binding(
-                        get: { draft.mapping[field] ?? nil },
-                        set: { draft.setMapping(field, to: $0) }
-                    ),
-                    columns: draft.selectedTable.columns,
-                    isRequired: requiredFields.contains(field)
-                )
-            }
+            mappingRows(fields)
         }
+    }
+
+    @ViewBuilder
+    private func mappingRows(_ fields: [ImportField]) -> some View {
+        ForEach(fields) { field in
+            ImportWizardMappingRow(
+                field: field,
+                selection: Binding(
+                    get: { draft.mapping[field] ?? nil },
+                    set: { draft.setMapping(field, to: $0) }
+                ),
+                columns: draft.selectedTable.columns,
+                isRequired: requiredFields.contains(field),
+                sampleValue: sampleValue(for: field)
+            )
+        }
+    }
+
+    private func mappedCount(_ fields: [ImportField]) -> Int {
+        fields.filter { draft.mapping[$0] != nil }.count
+    }
+
+    private func sampleValue(for field: ImportField) -> String? {
+        guard let column = draft.mapping[field],
+              let columnIndex = draft.selectedTable.columns.firstIndex(of: column) else { return nil }
+        for row in draft.selectedTable.rows where row.indices.contains(columnIndex) {
+            let value = row[columnIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty { return value }
+        }
+        return nil
     }
 
     private func sampleText(for row: [String]) -> String {
@@ -717,6 +749,7 @@ private struct ImportWizardMappingRow: View {
     @Binding var selection: String?
     let columns: [String]
     let isRequired: Bool
+    let sampleValue: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -730,6 +763,10 @@ private struct ImportWizardMappingRow: View {
                 Label("Required", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
+            } else if let sampleValue {
+                Text("Example: \(sampleValue)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } else {
                 Text(field.helpText)
                     .font(.caption)
@@ -1648,7 +1685,7 @@ private struct ImportWizardReviewList: View {
         Section("Transactions") {
             let indices = filteredTransactionIndices(data: data, context: context)
             if filter == .skipped {
-                Text("Skipped rows do not have editable transaction records.")
+                Text("Correct skipped rows in your source file, cancel this review, and import the corrected file. Skipped rows won’t be imported.")
                     .foregroundStyle(.secondary)
             } else if indices.isEmpty {
                 Text("No transaction rows match this filter.")
@@ -1824,6 +1861,14 @@ private struct ImportWizardTransactionRow: View {
                     }
                 }
             } else if transaction.outflows.isEmpty, !transaction.inflows.isEmpty {
+                Picker("Destination account", selection: destinationAccountBinding) {
+                    ForEach(accountOptions(
+                        for: transaction.inflows[0].accountID,
+                        movementCurrency: transaction.inflows[0].money.currency
+                    )) { account in
+                        Text(accountLabel(account)).tag(Optional(account.id))
+                    }
+                }
                 Picker("Received currency", selection: destinationCurrencyBinding) {
                     ForEach(LedgerCurrency.allCases) { currency in
                         Text(currency.rawValue).tag(currency)

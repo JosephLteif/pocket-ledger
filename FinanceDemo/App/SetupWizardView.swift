@@ -13,6 +13,7 @@ struct SetupWizardView: View {
     @State private var openingBalance = "0"
     @State private var addStarterCategories = true
     @State private var errorMessage: String?
+    @State private var isShowingImport = false
 
     var body: some View {
         NavigationStack {
@@ -21,12 +22,12 @@ struct SetupWizardView: View {
                     Label("A simple local ledger", systemImage: "wallet.pass.fill")
                         .font(.title3.weight(.bold))
 
-                    Text("Create your first account and optional starter categories. You can skip this and set everything up later from More.")
+                    Text("Start fresh with an account, or import an existing ledger below. You can also skip setup and finish later from More.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
 
-                Section("First account") {
+                Section("Start fresh") {
                     TextField("Account name", text: $accountName)
                     Picker("Type", selection: $accountType) {
                         ForEach(AccountType.allCases) { type in
@@ -34,6 +35,17 @@ struct SetupWizardView: View {
                         }
                     }
                     CurrencyInputField("Opening balance", text: $openingBalance, currency: $currency)
+                }
+
+                Section("Import existing history") {
+                    Button {
+                        isShowingImport = true
+                    } label: {
+                        Label("Import existing history", systemImage: "square.and.arrow.down")
+                    }
+                    Text("Review an export from another finance app before adding it to Pocket Ledger.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Categories") {
@@ -56,6 +68,11 @@ struct SetupWizardView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create ledger", action: createLedger)
+                }
+            }
+            .sheet(isPresented: $isShowingImport, onDismiss: finishSetupAfterImport) {
+                NavigationStack {
+                    DataTransferView(store: store, isImportOnly: true)
                 }
             }
             .alert("Setup could not be completed", isPresented: errorPresented) {
@@ -107,5 +124,12 @@ struct SetupWizardView: View {
     private func complete() {
         setupCompleted = true
         dismiss()
+    }
+
+    private func finishSetupAfterImport() {
+        guard !store.data.accounts.isEmpty
+            || !store.data.categories.isEmpty
+            || !store.data.transactions.isEmpty else { return }
+        complete()
     }
 }

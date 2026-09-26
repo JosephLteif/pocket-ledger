@@ -303,13 +303,6 @@ struct ScheduledTransactionsView: View {
                 .foregroundStyle(schedule.isEnabled ? PocketLedgerTheme.positive : PocketLedgerTheme.textTertiary)
                 .labelStyle(.titleAndIcon)
 
-                Toggle(
-                    "Enable schedule",
-                    isOn: enabledBinding(for: schedule)
-                )
-                .labelsHidden()
-                .accessibilityValue(schedule.isEnabled ? "On" : "Off")
-                .disabled(isCompletedOneTime(schedule))
             }
 
             HStack(spacing: 8) {
@@ -323,54 +316,14 @@ struct ScheduledTransactionsView: View {
             .font(.caption)
             .foregroundStyle(PocketLedgerTheme.textSecondary)
 
+            Label(scheduleAccountSummary(for: schedule), systemImage: "wallet.pass")
+                .font(.caption)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                .lineLimit(1)
+
             Text(timingText(for: schedule))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(schedule.isEnabled ? PocketLedgerTheme.accent : PocketLedgerTheme.textTertiary)
-
-            Menu {
-                Button {
-                    updateReminder(for: schedule, timing: nil)
-                } label: {
-                    if schedule.reminderTiming == nil {
-                        Label("Default · \(globalReminderTiming.title)", systemImage: "checkmark")
-                    } else {
-                        Text("Default · \(globalReminderTiming.title)")
-                    }
-                }
-
-                ForEach(ScheduledReminderTiming.allCases) { timing in
-                    Button {
-                        updateReminder(for: schedule, timing: timing)
-                    } label: {
-                        if schedule.reminderTiming == timing {
-                            Label(timing.title, systemImage: "checkmark")
-                        } else {
-                            Text(timing.title)
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "bell")
-                        .foregroundStyle(PocketLedgerTheme.accent)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Reminder")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(PocketLedgerTheme.textSecondary)
-                        Text(reminderLabel(for: schedule))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(PocketLedgerTheme.textPrimary)
-                    }
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(PocketLedgerTheme.textTertiary)
-                }
-                .padding(11)
-                .contentShape(Rectangle())
-                .pocketGroupedSurface(cornerRadius: 14)
-            }
-            .buttonStyle(.plain)
 
             HStack(spacing: 10) {
                 if schedule.isEnabled {
@@ -401,6 +354,41 @@ struct ScheduledTransactionsView: View {
                 Spacer()
 
                 Menu {
+                    Button(
+                        schedule.isEnabled ? "Pause schedule" : "Enable schedule",
+                        systemImage: schedule.isEnabled ? "pause.circle" : "play.circle"
+                    ) {
+                        _ = store.setScheduledTransactionEnabled(
+                            id: schedule.id,
+                            isEnabled: !schedule.isEnabled
+                        )
+                    }
+                    .disabled(isCompletedOneTime(schedule))
+
+                    Menu("Reminder · \(reminderLabel(for: schedule))", systemImage: "bell") {
+                        Button {
+                            updateReminder(for: schedule, timing: nil)
+                        } label: {
+                            if schedule.reminderTiming == nil {
+                                Label("Default · \(globalReminderTiming.title)", systemImage: "checkmark")
+                            } else {
+                                Text("Default · \(globalReminderTiming.title)")
+                            }
+                        }
+
+                        ForEach(ScheduledReminderTiming.allCases) { timing in
+                            Button {
+                                updateReminder(for: schedule, timing: timing)
+                            } label: {
+                                if schedule.reminderTiming == timing {
+                                    Label(timing.title, systemImage: "checkmark")
+                                } else {
+                                    Text(timing.title)
+                                }
+                            }
+                        }
+                    }
+
                     if schedule.isEnabled {
                         Button("Skip next", systemImage: "forward.end") {
                             _ = store.skipNextScheduledTransaction(id: schedule.id)
@@ -496,6 +484,18 @@ struct ScheduledTransactionsView: View {
             ?? (didUndo ? "Scheduled transaction undone." : "Undo is no longer available.")
     }
 
+    private func scheduleAccountSummary(for schedule: ScheduledTransaction) -> String {
+        let sourceAccounts = schedule.outflows.compactMap { store.account(with: $0.accountID)?.name }
+        let destinationAccounts = schedule.inflows.compactMap { store.account(with: $0.accountID)?.name }
+        let source = sourceAccounts.joined(separator: ", ")
+        let destination = destinationAccounts.joined(separator: ", ")
+        if !source.isEmpty, !destination.isEmpty {
+            return "\(source) → \(destination)"
+        }
+        if !source.isEmpty { return source }
+        return destination.isEmpty ? "Account unavailable" : destination
+    }
+
     private func timingText(for schedule: ScheduledTransaction) -> String {
         let date = schedule.nextRunDate.formatted(date: .abbreviated, time: .shortened)
         if let skippedDate = schedule.lastSkippedDate,
@@ -524,17 +524,6 @@ struct ScheduledTransactionsView: View {
 
     private func isCompletedOneTime(_ schedule: ScheduledTransaction) -> Bool {
         schedule.frequency == .once && schedule.lastRunDate != nil
-    }
-
-    private func enabledBinding(for schedule: ScheduledTransaction) -> Binding<Bool> {
-        Binding(
-            get: {
-                store.data.scheduledTransactions.first { $0.id == schedule.id }?.isEnabled ?? false
-            },
-            set: { isEnabled in
-                _ = store.setScheduledTransactionEnabled(id: schedule.id, isEnabled: isEnabled)
-            }
-        )
     }
 
     private func reminderLabel(for schedule: ScheduledTransaction) -> String {

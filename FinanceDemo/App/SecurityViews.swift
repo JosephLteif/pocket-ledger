@@ -164,7 +164,7 @@ struct SecuritySettingsView: View {
                     }
 
                     if security.isPasscodeEnabled {
-                        Text("Your passcode is stored as a salted verifier in the iPhone Keychain. Five incorrect attempts trigger a wait period that grows with continued failures.")
+                        Text("Your passcode is protected by the iPhone Keychain. After five incorrect attempts, you’ll need to wait before trying again.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -454,65 +454,72 @@ struct AppLockView: View {
             PocketLedgerTheme.background
                 .ignoresSafeArea()
 
-            VStack(spacing: 24) {
-                Spacer()
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(spacing: 24) {
+                        Spacer()
 
-                Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 56))
-                    .foregroundStyle(PocketLedgerTheme.accent)
+                        Image(systemName: "lock.shield.fill")
+                            .font(.system(size: 56))
+                            .foregroundStyle(PocketLedgerTheme.accent)
 
-                VStack(spacing: 8) {
-                    Text("Pocket Ledger is locked")
-                        .font(.title2.weight(.bold))
-                    Text("Enter your app passcode to view your financial data.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-
-                SecureField("App passcode", text: $passcode)
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 280)
-                    .onChange(of: passcode) { _, value in
-                        let sanitized = AppPasscodeRules.sanitized(value)
-                        if sanitized != value {
-                            passcode = sanitized
+                        VStack(spacing: 8) {
+                            Text("Pocket Ledger is locked")
+                                .font(.title2.weight(.bold))
+                            Text("Enter your app passcode to view your financial data.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }
+
+                        SecureField("App passcode", text: $passcode)
+                            .keyboardType(.numberPad)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 280)
+                            .onChange(of: passcode) { _, value in
+                                let sanitized = AppPasscodeRules.sanitized(value)
+                                if sanitized != value {
+                                    passcode = sanitized
+                                }
+                            }
+
+                        Button("Unlock", action: unlockWithPasscode)
+                            .buttonStyle(.glassProminent)
+                            .tint(PocketLedgerTheme.accent)
+                            .disabled(!AppPasscodeRules.isValid(passcode))
+
+                        if security.biometricsEnabled {
+                            Button {
+                                Task { await unlockWithBiometrics() }
+                            } label: {
+                                Label(
+                                    "Unlock with \(security.biometricName)",
+                                    systemImage: security.availableBiometry?.systemImage ?? "touchid"
+                                )
+                            }
+                            .disabled(isAuthenticating)
+                        }
+
+                        if isAuthenticating {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(.footnote)
+                                .foregroundStyle(PocketLedgerTheme.accent)
+                                .multilineTextAlignment(.center)
+                        }
+
+                        Spacer()
                     }
-
-                Button("Unlock", action: unlockWithPasscode)
-                    .buttonStyle(.glassProminent)
-                    .tint(PocketLedgerTheme.accent)
-                    .disabled(!AppPasscodeRules.isValid(passcode))
-
-                if security.biometricsEnabled {
-                    Button {
-                        Task { await unlockWithBiometrics() }
-                    } label: {
-                        Label(
-                            "Unlock with \(security.biometricName)",
-                            systemImage: security.availableBiometry?.systemImage ?? "touchid"
-                        )
-                    }
-                    .disabled(isAuthenticating)
+                    .frame(maxWidth: .infinity, minHeight: max(0, geometry.size.height - 64))
+                    .padding(32)
                 }
-
-                if isAuthenticating {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.footnote)
-                        .foregroundStyle(PocketLedgerTheme.accent)
-                        .multilineTextAlignment(.center)
-                }
-
-                Spacer()
+                .scrollIndicators(.hidden)
+                .scrollDismissesKeyboard(.interactively)
             }
-            .padding(32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(PocketLedgerTheme.textPrimary)

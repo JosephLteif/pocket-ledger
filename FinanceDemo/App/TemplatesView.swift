@@ -50,6 +50,14 @@ struct TemplatesView: View {
         .navigationTitle("Templates")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { isCreatingTemplate = true } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Create template")
+            }
+        }
         .sheet(item: $templateToUse) { template in
             TransactionEditor(store: store, template: template)
         }

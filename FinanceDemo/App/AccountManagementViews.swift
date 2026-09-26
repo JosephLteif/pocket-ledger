@@ -5,13 +5,12 @@ import SwiftUI
 struct AccountsView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
-    @Environment(\.scenePhase) private var scenePhase
     @State private var isPresentingAccount = false
     @State private var editingAccount: Account?
     @State private var isArchivedAccountsExpanded = false
     @State private var isAccountSummaryExpanded = false
     @State private var expandedPositionCurrency: LedgerCurrency?
-    @State private var areBalancesRevealed = false
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     var body: some View {
         List {
@@ -83,10 +82,6 @@ struct AccountsView: View {
                 isArchivedAccountsExpanded = false
             }
         }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { areBalancesRevealed = false }
-        }
-        .onDisappear { areBalancesRevealed = false }
     }
 
     private var accountTypeTotalsSummary: some View {
@@ -103,7 +98,6 @@ struct AccountsView: View {
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
                 Spacer(minLength: 8)
-                BalanceVisibilityControl(security: security, isRevealed: $areBalancesRevealed)
             }
 
             if includedAccounts.isEmpty {

@@ -87,14 +87,13 @@ struct AccountDetailView: View {
     @ObservedObject var security: AppSecurityService
     let accountID: UUID
 
-    @Environment(\.scenePhase) private var scenePhase
     @State private var isPresentingAccountEditor = false
     @State private var isPresentingBalanceEditor = false
     @State private var editingTransaction: LedgerTransaction?
     @State private var transactionToTemplate: LedgerTransaction?
     @State private var transactionPage = 0
     @State private var snapshot = AccountDetailSnapshot.empty
-    @State private var areBalancesRevealed = false
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     private let transactionsPerPage = 25
 
@@ -107,6 +106,7 @@ struct AccountDetailView: View {
             .navigationTitle(account?.name ?? "Account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                BalanceVisibilityToolbarItem(security: security)
                 if account != nil {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
@@ -141,10 +141,6 @@ struct AccountDetailView: View {
                 refreshSnapshot()
             }
             .onChange(of: store.ledgerRevision) { _, _ in refreshSnapshot() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .background { areBalancesRevealed = false }
-            }
-            .onDisappear { areBalancesRevealed = false }
     }
 
     @ViewBuilder
@@ -325,7 +321,6 @@ struct AccountDetailView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
                 Spacer()
-                BalanceVisibilityControl(security: security, isRevealed: $areBalancesRevealed)
                 Text(account.currency.rawValue)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(PocketLedgerTheme.accent)

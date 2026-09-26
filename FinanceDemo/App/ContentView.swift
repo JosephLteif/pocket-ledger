@@ -17,6 +17,7 @@ struct ContentView: View {
     @SceneStorage("pocketLedger.selectedTab") private var selectedTabRawValue = AppTab.overview.rawValue
     @AppStorage(SetupWizardView.completedKey) private var setupCompleted = false
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -45,8 +46,11 @@ struct ContentView: View {
                 if security.isPasscodeEnabled && !security.isBiometricPromptActive {
                     isUnlocked = false
                 }
-            } else if phase == .background, security.isPasscodeEnabled {
-                isUnlocked = false
+            } else if phase == .background {
+                areBalancesRevealed = false
+                if security.isPasscodeEnabled {
+                    isUnlocked = false
+                }
             }
         }
         .onChange(of: security.isPasscodeEnabled) { _, enabled in
@@ -56,6 +60,7 @@ struct ContentView: View {
             openPendingIntentSearch()
         }
         .task {
+            areBalancesRevealed = false
             openPendingIntentSearch()
             if ProcessInfo.processInfo.arguments.contains("-ImportWizardUITest") {
                 isShowingImportWizardUITest = true
@@ -147,6 +152,7 @@ struct ContentView: View {
                         .searchFocused($isSearchFieldFocused)
                         .toolbar {
                             AddTransactionToolbar(store: store, onAction: { addAction = $0 })
+                            BalanceVisibilityToolbarItem(security: security)
                         }
                 }
             }
@@ -163,6 +169,9 @@ struct ContentView: View {
                         onAddExpense: { addAction = .expense },
                         onAddAction: { addAction = $0 }
                     )
+                    .toolbar {
+                        BalanceVisibilityToolbarItem(security: security)
+                    }
                 }
             }
             .accessibilityIdentifier("tab-transactions")
@@ -180,6 +189,7 @@ struct ContentView: View {
                                 onAction: { addAction = $0 },
                                 systemImage: "plus.circle"
                             )
+                            BalanceVisibilityToolbarItem(security: security)
                         }
                 }
             }

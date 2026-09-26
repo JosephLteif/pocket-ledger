@@ -186,6 +186,7 @@ enum PocketLedgerMotion {
 enum PocketLedgerTheme {
     static let colorThemeKey = "pocketLedger.colorTheme"
     static let appearanceModeKey = "pocketLedger.appearanceMode"
+    static let balanceVisibilityKey = "pocketLedger.areBalancesRevealed"
 
     static var colorTheme: PocketLedgerColorTheme {
         let rawValue = UserDefaults.standard.string(forKey: colorThemeKey)
@@ -259,20 +260,18 @@ struct BalanceVisibilityControl: View {
         Button(action: toggle) {
             Label(
                 isRevealed ? "Hide" : "Reveal",
-                systemImage: isRevealed
-                    ? "eye.slash"
-                    : (security.availableBiometry?.systemImage ?? "faceid")
+                systemImage: isRevealed ? "eye.slash" : "eye"
             )
             .font(.caption.weight(.semibold))
             .foregroundStyle(PocketLedgerTheme.accent)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(PocketLedgerTheme.surfaceElevated, in: Capsule())
+            .frame(minWidth: 44, minHeight: 44)
         }
         .buttonStyle(.plain)
         .disabled(isAuthenticating)
         .accessibilityLabel(isRevealed ? "Hide balance amounts" : "Reveal balance amounts")
-        .accessibilityHint("Requires \(security.availableBiometry?.displayName ?? "Face ID")")
+        .accessibilityHint(isRevealed
+            ? "Hides account and projected balance amounts."
+            : "Requires \(security.availableBiometry?.displayName ?? "Face ID") to reveal account and projected balance amounts.")
         .alert("Biometrics unavailable", isPresented: $isShowingBiometryUnavailable) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -315,6 +314,19 @@ struct BalanceVisibilityControl: View {
         requestID = nil
         isAuthenticating = false
         isRevealed = false
+    }
+}
+
+@MainActor
+struct BalanceVisibilityToolbarItem: ToolbarContent {
+    @ObservedObject var security: AppSecurityService
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var isRevealed = false
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            BalanceVisibilityControl(security: security, isRevealed: $isRevealed)
+                .accessibilityIdentifier("balance-visibility-control")
+        }
     }
 }
 

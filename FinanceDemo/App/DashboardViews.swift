@@ -157,13 +157,12 @@ struct DashboardView: View {
     let onShowTransactions: () -> Void
     let onAddAction: (AddAction) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
     @State private var presentedSheet: DashboardSheet?
     @State private var transactionToTemplate: LedgerTransaction?
     @State private var snapshot = DashboardSnapshot.empty
     @State private var dashboardPreferences = DashboardPreferences.load()
     @State private var isBalanceScopeExpanded = false
-    @State private var areBalancesRevealed = false
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @AppStorage(PocketLedgerTheme.colorThemeKey) private var selectedColorTheme = PocketLedgerColorTheme.ocean.rawValue
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
 
@@ -210,6 +209,7 @@ struct DashboardView: View {
                     .accessibilityHint("Choose which widgets appear and reorder them")
                     .accessibilityIdentifier("dashboard-customize")
                 }
+                BalanceVisibilityToolbarItem(security: security)
                 AddTransactionToolbar(store: store, onAction: onAddAction)
             }
             .sheet(item: $presentedSheet) { sheet in
@@ -230,12 +230,6 @@ struct DashboardView: View {
                 }
             }
             .onChange(of: dashboardPreferences) { _, preferences in preferences.save() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .background {
-                    concealBalances()
-                }
-            }
-            .onDisappear(perform: concealBalances)
         }
     }
 
@@ -308,7 +302,6 @@ struct DashboardView: View {
 
                 Spacer()
 
-                balanceVisibilityControl
             }
 
             VStack(spacing: 0) {
@@ -415,7 +408,6 @@ struct DashboardView: View {
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
                 Spacer()
-                balanceVisibilityControl
                 NavigationLink {
                     AccountsView(store: store, security: security)
                 } label: {
@@ -489,16 +481,8 @@ struct DashboardView: View {
         }
     }
 
-    private var balanceVisibilityControl: some View {
-        BalanceVisibilityControl(security: security, isRevealed: $areBalancesRevealed)
-    }
-
     private func protectedBalanceText(_ value: String) -> some View {
         ProtectedAmountText(value: value, isRevealed: areBalancesRevealed)
-    }
-
-    private func concealBalances() {
-        areBalancesRevealed = false
     }
 
     private func scopeMetric(title: String, value: String, tint: Color) -> some View {

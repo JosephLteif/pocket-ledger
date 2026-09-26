@@ -106,13 +106,12 @@ struct GlobalSearchView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
     @Binding var searchText: String
-    @Environment(\.scenePhase) private var scenePhase
     @State private var results = GlobalSearchSnapshot.empty
     @State private var transactionDocuments: [GlobalSearchTransactionDocument] = []
     @State private var transactionDocumentsRevision: Int?
     @State private var editingTransaction: LedgerTransaction?
     @State private var transactionToTemplate: LedgerTransaction?
-    @State private var areBalancesRevealed = false
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     private var query: String {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -142,15 +141,6 @@ struct GlobalSearchView: View {
                         .padding(.top, 18)
                     } else {
                         if !results.accounts.isEmpty {
-                            HStack {
-                                Spacer()
-                                BalanceVisibilityControl(
-                                    security: security,
-                                    isRevealed: $areBalancesRevealed
-                                )
-                            }
-                            .padding(.horizontal, 4)
-
                             resultsSection(title: "Accounts", count: results.accounts.count) {
                                 ForEach(results.accounts) { account in
                                     NavigationLink {
@@ -244,10 +234,6 @@ struct GlobalSearchView: View {
         .sheet(item: $transactionToTemplate) { transaction in
             TemplateNameEditor(store: store, transaction: transaction)
         }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { areBalancesRevealed = false }
-        }
-        .onDisappear { areBalancesRevealed = false }
     }
 
     private func resultsSection<Content: View>(

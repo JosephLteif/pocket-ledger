@@ -33,7 +33,6 @@ struct SecuritySettingsView: View {
     @State private var errorMessage: String?
     @State private var dailyReminderStatus: String?
     @State private var isUpdatingDailyReminder = false
-    @AppStorage(PocketLedgerTheme.colorThemeKey) private var selectedColorTheme = PocketLedgerColorTheme.ocean.rawValue
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
     @AppStorage(NotificationService.dailyTransactionReminderEnabledKey)
     private var isDailyTransactionReminderEnabled = false
@@ -52,41 +51,7 @@ struct SecuritySettingsView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    ForEach(PocketLedgerColorTheme.allCases) { theme in
-                        Button {
-                            selectedColorTheme = theme.rawValue
-                        } label: {
-                            HStack(spacing: 12) {
-                                HStack(spacing: 4) {
-                                    ForEach(theme.previewColors.indices, id: \.self) { index in
-                                        Circle()
-                                            .fill(theme.previewColors[index])
-                                            .frame(width: 12, height: 12)
-                                    }
-                                }
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(theme.title)
-                                        .font(.subheadline.weight(.semibold))
-                                    Text(theme.subtitle)
-                                        .font(.caption)
-                                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-                                }
-
-                                Spacer()
-
-                                if selectedColorTheme == theme.rawValue {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(PocketLedgerTheme.accent)
-                                }
-                            }
-                            .foregroundStyle(PocketLedgerTheme.textPrimary)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    Text("Choose a palette and decide whether Pocket Ledger follows the device appearance or stays light or dark.")
+                    Text("Choose whether Pocket Ledger follows your device appearance or stays light or dark.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

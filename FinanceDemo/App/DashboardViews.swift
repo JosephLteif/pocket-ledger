@@ -8,7 +8,6 @@ struct MoreView: View {
     let onAddExpense: () -> Void
     let onAddAction: (AddAction) -> Void
     @State private var isShowingSetup = false
-    @AppStorage(PocketLedgerTheme.colorThemeKey) private var selectedColorTheme = PocketLedgerColorTheme.ocean.rawValue
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
 
     var body: some View {
@@ -128,7 +127,7 @@ struct MoreView: View {
             .preferredColorScheme(
                 PocketLedgerAppearanceMode(rawValue: selectedAppearanceMode)?.preferredColorScheme
             )
-            .accessibilityIdentifier("more-screen-\(selectedColorTheme)")
+            .accessibilityIdentifier("more-screen-\(PocketLedgerTheme.colorTheme.rawValue)")
             .sheet(isPresented: $isShowingSetup) {
                 SetupWizardView(store: store)
             }
@@ -167,7 +166,6 @@ struct DashboardView: View {
     @State private var isBalanceScopeExpanded = false
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @AppStorage("pocketLedger.showAllBalanceCurrencies") private var showsAllBalanceCurrencies = false
-    @AppStorage(PocketLedgerTheme.colorThemeKey) private var selectedColorTheme = PocketLedgerColorTheme.ocean.rawValue
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
 
     var body: some View {
@@ -213,7 +211,7 @@ struct DashboardView: View {
                 }
             }
             .transactionActionAlert(message: $transactionDeletionError)
-            .accessibilityIdentifier("dashboard-\(selectedColorTheme)")
+            .accessibilityIdentifier("dashboard-\(PocketLedgerTheme.colorTheme.rawValue)")
             .preferredColorScheme(
                 PocketLedgerAppearanceMode(rawValue: selectedAppearanceMode)?.preferredColorScheme
             )

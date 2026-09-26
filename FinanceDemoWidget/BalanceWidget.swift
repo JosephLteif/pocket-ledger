@@ -2,10 +2,10 @@ import SwiftUI
 import WidgetKit
 
 private enum PocketWidgetTheme {
-    static let background = Color(red: 0.04, green: 0.08, blue: 0.13)
-    static let accent = Color(red: 0.20, green: 0.78, blue: 0.70)
-    static let income = Color(red: 0.37, green: 0.66, blue: 1.00)
-    static let warning = Color(red: 0.96, green: 0.70, blue: 0.32)
+    static let background = Color(red: 0.106, green: 0.090, blue: 0.078)
+    static let accent = Color(red: 0.894, green: 0.604, blue: 0.471)
+    static let income = Color(red: 0.525, green: 0.722, blue: 1.000)
+    static let warning = Color(red: 1.000, green: 0.816, blue: 0.475)
 }
 
 struct BalanceEntry: TimelineEntry, Sendable {

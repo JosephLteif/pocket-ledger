@@ -42,7 +42,10 @@ enum PocketLedgerAppearanceMode: String, CaseIterable, Identifiable {
     }
 }
 
+// Keep palette definitions extensible; only the selected brand palette is used by the app.
 enum PocketLedgerColorTheme: String, CaseIterable, Identifiable {
+    case ledger
+    case clay
     case ocean
     case forest
     case sunset
@@ -56,6 +59,10 @@ enum PocketLedgerColorTheme: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
+        case .ledger:
+            return "Warm parchment and evergreen"
+        case .clay:
+            return "Warm parchment and terracotta"
         case .ocean:
             return "Teal and navy"
         case .forest:
@@ -69,6 +76,10 @@ enum PocketLedgerColorTheme: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .ledger:
+            return "book.closed.fill"
+        case .clay:
+            return "flame.fill"
         case .ocean:
             return "water.waves"
         case .forest:
@@ -87,6 +98,34 @@ enum PocketLedgerColorTheme: String, CaseIterable, Identifiable {
 
     fileprivate var palette: PocketLedgerPalette {
         switch self {
+        case .clay:
+            return PocketLedgerPalette(
+                background: adaptiveColor(light: 0xF6EFE5, dark: 0x1B1714),
+                surface: adaptiveColor(light: 0xFFFBF6, dark: 0x29211C),
+                surfaceElevated: adaptiveColor(light: 0xEDE1D4, dark: 0x392B23),
+                divider: adaptiveColor(light: 0x50372A, dark: 0xFFFFFF).opacity(0.11),
+                textPrimary: adaptiveColor(light: 0x312720, dark: 0xFFFFFF).opacity(0.94),
+                textSecondary: adaptiveColor(light: 0x725C51, dark: 0xFFFFFF).opacity(0.62),
+                textTertiary: adaptiveColor(light: 0x927A6E, dark: 0xFFFFFF).opacity(0.40),
+                accent: adaptiveColor(light: 0xA35438, dark: 0xE49A78),
+                income: adaptiveColor(light: 0x1C6FAE, dark: 0x86B8FF),
+                positive: adaptiveColor(light: 0x2E8B57, dark: 0x9EDC83),
+                warning: adaptiveColor(light: 0xB06A00, dark: 0xFFD079)
+            )
+        case .ledger:
+            return PocketLedgerPalette(
+                background: adaptiveColor(light: 0xF5F0E6, dark: 0x111A15),
+                surface: adaptiveColor(light: 0xFFFCF7, dark: 0x1A251E),
+                surfaceElevated: adaptiveColor(light: 0xECE4D6, dark: 0x26352B),
+                divider: adaptiveColor(light: 0x514737, dark: 0xFFFFFF).opacity(0.11),
+                textPrimary: adaptiveColor(light: 0x273029, dark: 0xFFFFFF).opacity(0.94),
+                textSecondary: adaptiveColor(light: 0x5C675D, dark: 0xFFFFFF).opacity(0.62),
+                textTertiary: adaptiveColor(light: 0x818A7D, dark: 0xFFFFFF).opacity(0.40),
+                accent: adaptiveColor(light: 0x356B52, dark: 0x7CC69B),
+                income: adaptiveColor(light: 0x1D6FA8, dark: 0x71B3EE),
+                positive: adaptiveColor(light: 0x247A47, dark: 0x6DD08D),
+                warning: adaptiveColor(light: 0xA86615, dark: 0xE8B55C)
+            )
         case .ocean:
             return PocketLedgerPalette(
                 background: adaptiveColor(light: 0xF2F7FB, dark: 0x0A1522),
@@ -184,13 +223,13 @@ enum PocketLedgerMotion {
 }
 
 enum PocketLedgerTheme {
+    // Reserved for a future return of user-selectable palettes.
     static let colorThemeKey = "pocketLedger.colorTheme"
     static let appearanceModeKey = "pocketLedger.appearanceMode"
     static let balanceVisibilityKey = "pocketLedger.areBalancesRevealed"
 
     static var colorTheme: PocketLedgerColorTheme {
-        let rawValue = UserDefaults.standard.string(forKey: colorThemeKey)
-        return PocketLedgerColorTheme(rawValue: rawValue ?? "") ?? .ocean
+        .clay
     }
 
     static var appearanceMode: PocketLedgerAppearanceMode {

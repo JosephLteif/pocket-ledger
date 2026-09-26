@@ -568,7 +568,7 @@ struct AccountEditor: View {
                                 .tag(accountType)
                         }
                     }
-                    if hasActivity {
+                    if hasCurrencyImpact {
                         Text("Changing currency updates this account's opening balance and all related transactions. Amounts keep their displayed numeric value; no exchange-rate conversion is applied.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)

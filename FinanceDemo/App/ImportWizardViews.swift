@@ -727,7 +727,7 @@ private struct ImportWizardSourceStep: View {
     }
 
     private func sampleValue(for field: ImportField) -> String? {
-        guard let column = draft.mapping[field],
+        guard let column = draft.mapping[field] ?? nil,
               let columnIndex = draft.selectedTable.columns.firstIndex(of: column) else { return nil }
         for row in draft.selectedTable.rows where row.indices.contains(columnIndex) {
             let value = row[columnIndex].trimmingCharacters(in: .whitespacesAndNewlines)

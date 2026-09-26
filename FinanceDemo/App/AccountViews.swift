@@ -220,7 +220,14 @@ struct AccountDetailView: View {
                                         account: account,
                                         store: store,
                                         onEdit: { editingTransaction = transaction },
-                                        onSaveTemplate: { transactionToTemplate = transaction }
+                                        onSaveTemplate: { transactionToTemplate = transaction },
+                                        onDelete: {
+                                            if store.deleteTransaction(id: transaction.id) {
+                                                deletedTransactionsForUndo.append(transaction)
+                                            } else {
+                                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
+                                            }
+                                        }
                                     )
                                     Divider().overlay(PocketLedgerTheme.divider)
                                 }
@@ -427,6 +434,7 @@ private struct AccountTransactionRow: View {
     @ObservedObject var store: LedgerStore
     let onEdit: () -> Void
     let onSaveTemplate: () -> Void
+    let onDelete: () -> Void
 
     private var outgoing: Int64 {
         transaction.outflows
@@ -460,13 +468,7 @@ private struct AccountTransactionRow: View {
             store: store,
             onEdit: onEdit,
             onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-            onDelete: {
-                if store.deleteTransaction(id: transaction.id) {
-                    deletedTransactionsForUndo.append(transaction)
-                } else {
-                    transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
-                }
-            },
+            onDelete: onDelete,
             onSaveTemplate: onSaveTemplate,
             allowsActions: true,
             subtitleOverride: subtitle,

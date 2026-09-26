@@ -319,7 +319,7 @@ struct DashboardView: View {
             ? LedgerCurrency.allCases
             : LedgerCurrency.allCases.filter { usedCurrencies.contains($0) }
 
-        VStack(alignment: .leading, spacing: 18) {
+        return VStack(alignment: .leading, spacing: 18) {
             HStack {
                 Label("Included balances", systemImage: "wallet.pass.fill")
                     .font(.subheadline.weight(.semibold))

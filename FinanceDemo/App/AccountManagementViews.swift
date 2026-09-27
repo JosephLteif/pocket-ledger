@@ -55,7 +55,6 @@ struct AccountsView: View {
                 .listRowSeparator(.hidden)
         }
         .listStyle(.plain)
-        .pocketSwipeActionsContainer()
         .listSectionSpacing(20)
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
@@ -267,20 +266,18 @@ struct AccountsView: View {
         Section {
             ForEach(Array(accounts.enumerated()), id: \.element.id) { entry in
                 let account = entry.element
-                HStack(spacing: 4) {
-                    NavigationLink {
-                        AccountDetailView(store: store, security: security, accountID: account.id)
-                    } label: {
-                        AccountRow(
-                            account: account,
-                            balance: store.balance(for: account),
-                            areBalancesRevealed: areBalancesRevealed
-                        )
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                NavigationLink {
+                    AccountDetailView(store: store, security: security, accountID: account.id)
+                } label: {
+                    AccountRow(
+                        account: account,
+                        balance: store.balance(for: account),
+                        areBalancesRevealed: areBalancesRevealed
+                    )
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contextMenu {
                     Button("Edit", systemImage: "pencil") {
                         presentAccount(account)
@@ -300,9 +297,16 @@ struct AccountsView: View {
                     Button(role: .destructive) {
                         accountToDelete = account
                     } label: {
-                        Label("Delete Account", systemImage: "trash")
-                            .foregroundStyle(.red)
+                        Label {
+                            Text("Delete Account")
+                                .foregroundStyle(.red)
+                        } icon: {
+                            Image(systemName: "trash")
+                                .symbolRenderingMode(.monochrome)
+                                .foregroundStyle(.red)
+                        }
                     }
+                    .tint(.red)
                 }
                 .draggable(account.id.uuidString)
                 .dropDestination(for: String.self) { items, _ in
@@ -390,44 +394,36 @@ struct AccountsView: View {
             if isArchivedAccountsExpanded {
                 ForEach(Array(archivedAccounts.enumerated()), id: \.element.id) { entry in
                     let account = entry.element
-                    HStack(spacing: 12) {
-                        NavigationLink {
-                            AccountDetailView(store: store, security: security, accountID: account.id)
-                        } label: {
-                            HStack(spacing: 12) {
-                                PocketIcon(
-                                    systemImage: account.type.systemImage,
-                                    tint: PocketLedgerTheme.textTertiary,
-                                    size: 34
-                                )
+                    NavigationLink {
+                        AccountDetailView(store: store, security: security, accountID: account.id)
+                    } label: {
+                        HStack(spacing: 12) {
+                            PocketIcon(
+                                systemImage: account.type.systemImage,
+                                tint: PocketLedgerTheme.textTertiary,
+                                size: 34
+                            )
 
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(account.name)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(PocketLedgerTheme.textPrimary)
-                                    Text("\(account.type.displayName) · \(account.currency.rawValue)")
-                                        .font(.caption)
-                                        .foregroundStyle(PocketLedgerTheme.textTertiary)
-                                }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(account.name)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(PocketLedgerTheme.textPrimary)
+                                Text("\(account.type.displayName) · \(account.currency.rawValue)")
+                                    .font(.caption)
+                                    .foregroundStyle(PocketLedgerTheme.textTertiary)
                             }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
 
-                        Spacer(minLength: 8)
+                            Spacer(minLength: 8)
 
-                        if store.isManagedLegacyLoanAccount(account.id) {
-                            Text("Managed in Loans")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(PocketLedgerTheme.textSecondary)
-                        } else {
-                            Button("Restore", systemImage: "arrow.uturn.backward") {
-                                _ = store.setAccountArchived(accountID: account.id, isArchived: false)
+                            if store.isManagedLegacyLoanAccount(account.id) {
+                                Text("Managed in Loans")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
                             }
-                            .font(.subheadline.weight(.semibold))
-                            .buttonStyle(.borderless)
                         }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .frame(minHeight: 68)
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
                         if !store.isManagedLegacyLoanAccount(account.id) {

@@ -412,7 +412,6 @@ struct TransactionsView: View {
             }
         }
         .listStyle(.plain)
-        .pocketSwipeActionsContainer()
         .listSectionSpacing(20)
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
@@ -1087,35 +1086,36 @@ struct TransactionRow: View {
             rowWithActions
                 .simultaneousGesture(customSwipeGesture)
         } else {
-            rowWithActions
+            rowButton
         }
     }
 
     private var rowWithActions: some View {
         ZStack {
-            if usesCustomScrollSwipeFallback {
-                scrollSwipeActions
-            }
-
-            Button(action: activateRow) {
-                rowContent
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .offset(x: usesCustomScrollSwipeFallback ? swipeOffset : 0)
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(
-                "\(transaction.note), \(displaySubtitle), \(areBalancesRevealed ? displayAmountText : "Hidden amount")"
-            )
-            .accessibilityHint(isSelectionMode && canSelectTransaction
-                ? "Toggles transaction selection"
-                : transaction.loanID != nil
-                    ? "Opens loan details"
-                    : "Opens transaction details")
+            scrollSwipeActions
+            rowButton
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .clipped()
         .contentShape(Rectangle())
+    }
+
+    private var rowButton: some View {
+        Button(action: activateRow) {
+            rowContent
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .offset(x: usesCustomScrollSwipeFallback ? swipeOffset : 0)
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(transaction.note), \(displaySubtitle), \(areBalancesRevealed ? displayAmountText : "Hidden amount")"
+        )
+        .accessibilityHint(isSelectionMode && canSelectTransaction
+            ? "Toggles transaction selection"
+            : transaction.loanID != nil
+                ? "Opens loan details"
+                : "Opens transaction details")
         .contextMenu {
             if canEditTransaction {
                 Button("Edit", systemImage: "pencil", action: onEdit)
@@ -1124,9 +1124,16 @@ struct TransactionRow: View {
                 Button(role: .destructive) {
                     isShowingDeleteConfirmation = true
                 } label: {
-                    Label("Delete", systemImage: "trash")
-                        .foregroundStyle(.red)
+                    Label {
+                        Text("Delete")
+                            .foregroundStyle(.red)
+                    } icon: {
+                        Image(systemName: "trash")
+                            .symbolRenderingMode(.monochrome)
+                            .foregroundStyle(.red)
+                    }
                 }
+                .tint(.red)
             }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {

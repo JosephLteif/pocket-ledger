@@ -1121,54 +1121,55 @@ struct TransactionRow: View {
                 Button("Edit", systemImage: "pencil", action: onEdit)
                 Button("Duplicate", systemImage: "plus.square.on.square", action: onDuplicate)
                 Button("Save as template", systemImage: "rectangle.stack.badge.plus", action: onSaveTemplate)
-                Button(role: .destructive) {
+                Button("Delete", systemImage: "trash", role: .destructive) {
                     isShowingDeleteConfirmation = true
-                } label: {
-                    Label {
-                        Text("Delete")
-                            .foregroundStyle(.red)
-                    } icon: {
-                        Image(systemName: "trash")
-                            .symbolRenderingMode(.monochrome)
-                            .foregroundStyle(.red)
-                    }
                 }
-                .tint(.red)
             }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if canEditTransaction {
-                PocketCircularSwipeAction(
-                    title: "Delete",
-                    systemImage: "trash",
-                    tint: .red,
-                    role: .destructive
-                ) {
+                Button(role: .destructive) {
                     isShowingDeleteConfirmation = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 54, height: 54)
+                        .background(.red, in: Circle())
                 }
-                PocketCircularSwipeAction(
-                    title: "Edit",
-                    systemImage: "pencil",
-                    tint: .yellow,
-                    iconColor: .black,
-                    action: onEdit
-                )
+                .tint(.red)
+                .accessibilityLabel("Delete")
+                Button(action: onEdit) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.black)
+                        .frame(width: 54, height: 54)
+                        .background(.yellow, in: Circle())
+                }
+                .tint(.yellow)
+                .accessibilityLabel("Edit")
             }
         }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if canEditTransaction {
-                PocketCircularSwipeAction(
-                    title: "Duplicate",
-                    systemImage: "plus.square.on.square",
-                    tint: PocketLedgerTheme.accent,
-                    action: onDuplicate
-                )
-                PocketCircularSwipeAction(
-                    title: "Template",
-                    systemImage: "rectangle.stack.badge.plus",
-                    tint: PocketLedgerTheme.positive,
-                    action: onSaveTemplate
-                )
+                Button(action: onDuplicate) {
+                    Image(systemName: "plus.square.on.square")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 54, height: 54)
+                        .background(PocketLedgerTheme.accent, in: Circle())
+                }
+                .tint(PocketLedgerTheme.accent)
+                .accessibilityLabel("Duplicate")
+                Button(action: onSaveTemplate) {
+                    Image(systemName: "rectangle.stack.badge.plus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 54, height: 54)
+                        .background(PocketLedgerTheme.positive, in: Circle())
+                }
+                .tint(PocketLedgerTheme.positive)
+                .accessibilityLabel("Template")
             }
         }
         .confirmationDialog(

@@ -69,6 +69,12 @@ struct BillLineItem: Identifiable, Equatable, Sendable {
     }
 }
 
+private struct BillOCRResult: Sendable {
+    let text: String
+    let items: [BillLineItem]
+    let currency: LedgerCurrency
+}
+
 private struct BillScanResult: Sendable {
     let text: String
     let items: [BillLineItem]
@@ -93,7 +99,7 @@ private enum BillScannerError: LocalizedError, Sendable {
 }
 
 private enum BillOCRService {
-    static func extract(from data: Data) async throws -> BillScanResult {
+    static func recognize(from data: Data) async throws -> BillOCRResult {
         let visionResult = try await Task.detached(priority: .userInitiated) {
             guard let image = UIImage(data: data),
                   let cgImage = image.cgImage else {
@@ -106,8 +112,8 @@ private enum BillOCRService {
 
             if let supportedLanguages = try? request.supportedRecognitionLanguages() {
                 let preferredPrefixes = ["en", "ar", "fr"]
-                let languages = supportedLanguages.filter { language in
-                    preferredPrefixes.contains { prefix in
+                let languages = preferredPrefixes.compactMap { prefix in
+                    supportedLanguages.first { language in
                         language == prefix || language.hasPrefix("\(prefix)-")
                     }
                 }
@@ -136,6 +142,14 @@ private enum BillOCRService {
             return BillScannerParser.parse(recognizedText)
         }.value
 
+        return BillOCRResult(
+            text: visionResult.text,
+            items: visionResult.items,
+            currency: visionResult.currency
+        )
+    }
+
+    static func analyze(_ visionResult: BillOCRResult) async -> BillScanResult {
         let analysis = await FoundationModelService.analyzeReceipt(text: visionResult.text)
         let aiItems: [BillLineItem] = analysis.items.compactMap { item -> BillLineItem? in
             let unitPriceText = item.unitPriceText.flatMap {
@@ -452,6 +466,7 @@ struct BillScannerView: View {
     @State private var scanStatusMessage: String?
     @State private var currency: LedgerCurrency = .usd
     @State private var isScanning = false
+    @State private var scanProgressMessage = "Reading receipt text…"
     @State private var isShowingCamera = false
     @State private var isShowingDocumentImporter = false
     @State private var isShowingAccountEditor = false
@@ -517,7 +532,7 @@ struct BillScannerView: View {
                         HStack(spacing: 10) {
                             ProgressView()
                                 .tint(PocketLedgerTheme.accent)
-                            Text("Reading bill…")
+                            Text(scanProgressMessage)
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
                         }
@@ -1061,6 +1076,7 @@ struct BillScannerView: View {
 
     private func scan(data: Data) async {
         isScanning = true
+        scanProgressMessage = "Reading receipt text…"
         errorMessage = nil
         recognizedText = ""
         lineItems = []
@@ -1068,7 +1084,13 @@ struct BillScannerView: View {
         scanStatusMessage = nil
 
         do {
-            let result = try await BillOCRService.extract(from: data)
+            let visionResult = try await BillOCRService.recognize(from: data)
+            recognizedText = visionResult.text
+            lineItems = visionResult.items
+            currency = visionResult.currency
+            scanProgressMessage = "Organizing receipt items…"
+
+            let result = await BillOCRService.analyze(visionResult)
             recognizedText = result.text
             lineItems = result.items
             currency = result.currency

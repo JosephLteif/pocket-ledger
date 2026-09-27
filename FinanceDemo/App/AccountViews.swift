@@ -231,6 +231,7 @@ struct AccountDetailView: View {
                                         onSaveTemplate: { transactionToTemplate = transaction },
                                         allowsActions: true,
                                         usesScrollSwipeActions: true,
+                                        swipeActionHorizontalInset: 14,
                                         accountContext: account
                                     )
                                     Divider().overlay(PocketLedgerTheme.divider)

@@ -522,6 +522,33 @@ struct PocketGlassContainer<Content: View>: View {
     }
 }
 
+struct PocketSwipeActionLabel: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    var iconColor: Color = .white
+    var titleColor: Color = .white
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(iconColor)
+                .frame(width: 48, height: 48)
+                .background(tint, in: Circle())
+
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(titleColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(width: 72)
+        .frame(maxHeight: .infinity)
+        .contentShape(Rectangle())
+    }
+}
+
 struct PocketCircularSwipeAction: View {
     let title: String
     let systemImage: String
@@ -532,12 +559,13 @@ struct PocketCircularSwipeAction: View {
 
     var body: some View {
         Button(role: role, action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(iconColor)
-                .frame(width: 54, height: 54)
-                .background(tint, in: Circle())
-                .contentShape(Circle())
+            PocketSwipeActionLabel(
+                title: title,
+                systemImage: systemImage,
+                tint: tint,
+                iconColor: iconColor,
+                titleColor: PocketLedgerTheme.textSecondary
+            )
         }
         .buttonStyle(.plain)
         .tint(.clear)

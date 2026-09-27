@@ -1036,6 +1036,7 @@ struct TransactionRow: View {
     let amountOverride: String?
     let amountColorOverride: Color?
     let usesScrollSwipeActions: Bool
+    let swipeActionHorizontalInset: CGFloat
     let allowsActions: Bool
     let isSelectionMode: Bool
     let isSelected: Bool
@@ -1059,6 +1060,7 @@ struct TransactionRow: View {
         amountOverride: String? = nil,
         amountColorOverride: Color? = nil,
         usesScrollSwipeActions: Bool = false,
+        swipeActionHorizontalInset: CGFloat = 0,
         reportingCurrency: LedgerCurrency? = nil,
         accountContext: Account? = nil
     ) {
@@ -1073,6 +1075,7 @@ struct TransactionRow: View {
         self.amountOverride = amountOverride
         self.amountColorOverride = amountColorOverride
         self.usesScrollSwipeActions = usesScrollSwipeActions
+        self.swipeActionHorizontalInset = swipeActionHorizontalInset
         self.reportingCurrency = reportingCurrency
         self.accountContext = accountContext
         self.allowsActions = allowsActions
@@ -1083,27 +1086,27 @@ struct TransactionRow: View {
 
     var body: some View {
         renderedRow
+            .padding(.horizontal, swipeActionHorizontalInset)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.clear)
             .contentShape(Rectangle())
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 if canEditTransaction {
                     Button(role: .destructive) {
                         isShowingDeleteConfirmation = true
                     } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 54, height: 54)
-                            .background(.red, in: Circle())
+                        PocketSwipeActionLabel(title: "Delete", systemImage: "trash", tint: .red)
                     }
                     .tint(.red)
                     .accessibilityLabel("Delete")
                     Button(action: onEdit) {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.black)
-                            .frame(width: 54, height: 54)
-                            .background(.yellow, in: Circle())
+                        PocketSwipeActionLabel(
+                            title: "Edit",
+                            systemImage: "pencil",
+                            tint: .yellow,
+                            iconColor: .black,
+                            titleColor: .black
+                        )
                     }
                     .tint(.yellow)
                     .accessibilityLabel("Edit")
@@ -1112,25 +1115,26 @@ struct TransactionRow: View {
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                 if canEditTransaction {
                     Button(action: onDuplicate) {
-                        Image(systemName: "plus.square.on.square")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 54, height: 54)
-                            .background(PocketLedgerTheme.accent, in: Circle())
+                        PocketSwipeActionLabel(
+                            title: "Duplicate",
+                            systemImage: "plus.square.on.square",
+                            tint: PocketLedgerTheme.accent
+                        )
                     }
                     .tint(PocketLedgerTheme.accent)
                     .accessibilityLabel("Duplicate")
                     Button(action: onSaveTemplate) {
-                        Image(systemName: "rectangle.stack.badge.plus")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 54, height: 54)
-                            .background(PocketLedgerTheme.positive, in: Circle())
+                        PocketSwipeActionLabel(
+                            title: "Template",
+                            systemImage: "rectangle.stack.badge.plus",
+                            tint: PocketLedgerTheme.positive
+                        )
                     }
                     .tint(PocketLedgerTheme.positive)
                     .accessibilityLabel("Template")
                 }
             }
+            .padding(.horizontal, -swipeActionHorizontalInset)
     }
 
     @ViewBuilder

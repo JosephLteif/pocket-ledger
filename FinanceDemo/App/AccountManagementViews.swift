@@ -307,33 +307,35 @@ struct AccountsView: View {
                     Button {
                         presentAccount(account)
                     } label: {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.black)
-                            .frame(width: 54, height: 54)
-                            .background(.yellow, in: Circle())
+                        PocketSwipeActionLabel(
+                            title: "Edit",
+                            systemImage: "pencil",
+                            tint: .yellow,
+                            iconColor: .black,
+                            titleColor: .black
+                        )
                     }
                     .tint(.yellow)
                     .accessibilityLabel("Edit")
                     Button {
                         _ = store.setAccountArchived(accountID: account.id, isArchived: true)
                     } label: {
-                        Image(systemName: "archivebox")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 54, height: 54)
-                            .background(PocketLedgerTheme.warning, in: Circle())
+                        PocketSwipeActionLabel(
+                            title: "Archive",
+                            systemImage: "archivebox",
+                            tint: PocketLedgerTheme.warning
+                        )
                     }
                     .tint(PocketLedgerTheme.warning)
                     .accessibilityLabel("Archive")
                     Button(role: .destructive) {
                         accountToDelete = account
                     } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 54, height: 54)
-                            .background(.red, in: Circle())
+                        PocketSwipeActionLabel(
+                            title: "Delete account",
+                            systemImage: "trash",
+                            tint: .red
+                        )
                     }
                     .tint(.red)
                     .accessibilityLabel("Delete account")
@@ -345,14 +347,11 @@ struct AccountsView: View {
                             included: !account.includeInTotals
                         )
                     } label: {
-                        Image(systemName: account.includeInTotals ? "eye.slash" : "eye")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 54, height: 54)
-                            .background(
-                                account.includeInTotals ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.positive,
-                                in: Circle()
-                            )
+                        PocketSwipeActionLabel(
+                            title: account.includeInTotals ? "Exclude" : "Include",
+                            systemImage: account.includeInTotals ? "eye.slash" : "eye",
+                            tint: account.includeInTotals ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.positive
+                        )
                     }
                     .tint(account.includeInTotals ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.positive)
                     .accessibilityLabel(account.includeInTotals ? "Exclude" : "Include")
@@ -437,11 +436,11 @@ struct AccountsView: View {
                             Button {
                                 _ = store.setAccountArchived(accountID: account.id, isArchived: false)
                             } label: {
-                                Image(systemName: "arrow.uturn.backward")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 54, height: 54)
-                                    .background(PocketLedgerTheme.accent, in: Circle())
+                                PocketSwipeActionLabel(
+                                    title: "Restore",
+                                    systemImage: "arrow.uturn.backward",
+                                    tint: PocketLedgerTheme.accent
+                                )
                             }
                             .tint(PocketLedgerTheme.accent)
                             .accessibilityLabel("Restore")
@@ -452,11 +451,11 @@ struct AccountsView: View {
                             accountToDelete = account
                         }
                         label: {
-                            Image(systemName: "trash")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 54, height: 54)
-                                .background(.red, in: Circle())
+                            PocketSwipeActionLabel(
+                                title: "Delete account",
+                                systemImage: "trash",
+                                tint: .red
+                            )
                         }
                         .tint(.red)
                         .accessibilityLabel("Delete account")

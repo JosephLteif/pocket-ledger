@@ -961,7 +961,8 @@ struct DashboardView: View {
                             },
                             onSaveTemplate: { transactionToTemplate = transaction },
                             allowsActions: true,
-                            usesScrollSwipeActions: true
+                            usesScrollSwipeActions: true,
+                            swipeActionHorizontalInset: 14
                         )
                         .transition(
                             reduceMotion

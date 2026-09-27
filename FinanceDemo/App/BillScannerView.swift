@@ -12,7 +12,7 @@ struct BillLineItem: Identifiable, Equatable, Sendable {
     var quantity: Int
     var unitPriceText: String
     var lineTotalText: String
-    var lineTotalOverrideText = ""
+    var lineTotalOverrideText: String? = nil
     var isSelected: Bool
     private let initialQuantity: Int
     private let initialUnitPriceText: String
@@ -39,7 +39,7 @@ struct BillLineItem: Identifiable, Equatable, Sendable {
     func total(in currency: LedgerCurrency) -> Money? {
         let multiplier = Int64(max(quantity, 1))
 
-        if !lineTotalOverrideText.isEmpty {
+        if let lineTotalOverrideText {
             guard let lineTotal = Money.parse(lineTotalOverrideText, currency: currency),
                   lineTotal.minorUnits > 0 else {
                 return nil
@@ -665,7 +665,6 @@ struct BillScannerView: View {
 
     private func lineItemEditor(_ item: Binding<BillLineItem>) -> some View {
         let itemID = item.wrappedValue.id
-        let total = item.wrappedValue.total(in: currency)
         let isSelected = Binding<Bool>(
             get: { item.wrappedValue.isSelected },
             set: {
@@ -674,7 +673,14 @@ struct BillScannerView: View {
             }
         )
         let lineTotalOverrideText = Binding<String>(
-            get: { item.wrappedValue.lineTotalOverrideText },
+            get: {
+                let lineItem = item.wrappedValue
+                if let lineTotalOverrideText = lineItem.lineTotalOverrideText {
+                    return lineTotalOverrideText
+                }
+                guard let total = lineItem.total(in: currency) else { return "" }
+                return editableAmountText(for: total)
+            },
             set: {
                 item.wrappedValue.lineTotalOverrideText = $0
                 billTotalOverrideText = nil
@@ -719,7 +725,7 @@ struct BillScannerView: View {
                 get: { item.wrappedValue.quantity },
                 set: { quantity in
                     item.wrappedValue.quantity = quantity
-                    item.wrappedValue.lineTotalOverrideText = ""
+                    item.wrappedValue.lineTotalOverrideText = nil
                     billTotalOverrideText = nil
                 }
             ), in: 1...99) {
@@ -732,45 +738,26 @@ struct BillScannerView: View {
                     let oldPrice = Money.parse(oldValue, currency: currency)?.minorUnits
                     let newPrice = Money.parse(newValue, currency: currency)?.minorUnits
                     guard oldPrice != newPrice else { return }
-                    item.wrappedValue.lineTotalOverrideText = ""
+                    item.wrappedValue.lineTotalOverrideText = nil
                     billTotalOverrideText = nil
                 }
 
             HStack {
-                Text("Current total")
+                Text("Item total")
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
                 Spacer()
-                if focusedLineTotalID == itemID {
-                    TextField("Enter total", text: lineTotalOverrideText)
-                        .keyboardType(.decimalPad)
-                        .focused($focusedLineTotalID, equals: itemID)
-                        .multilineTextAlignment(.trailing)
-                        .font(.subheadline.weight(.semibold).monospacedDigit())
-                        .frame(minWidth: 80, maxWidth: 150)
-                        .onChange(of: currency) { _, newCurrency in
-                            lineTotalOverrideText.wrappedValue = newCurrency.formattedInput(
-                                lineTotalOverrideText.wrappedValue
-                            )
-                        }
-                } else {
-                    Button {
-                        billTotalOverrideText = nil
-                        if item.wrappedValue.lineTotalOverrideText.isEmpty, let total {
-                            item.wrappedValue.lineTotalOverrideText = editableAmountText(for: total)
-                        }
-                        focusedLineTotalID = itemID
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text(total?.formatted ?? "Enter a price")
-                            Image(systemName: "pencil")
-                                .font(.caption2)
-                        }
-                        .font(.subheadline.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(total == nil ? PocketLedgerTheme.textTertiary : PocketLedgerTheme.textPrimary)
+                TextField("Enter total", text: lineTotalOverrideText)
+                    .keyboardType(.decimalPad)
+                    .focused($focusedLineTotalID, equals: itemID)
+                    .multilineTextAlignment(.trailing)
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .frame(minWidth: 80, maxWidth: 150)
+                    .accessibilityLabel("Item total")
+                    .onChange(of: currency) { _, newCurrency in
+                        guard let totalOverride = item.wrappedValue.lineTotalOverrideText,
+                              !totalOverride.isEmpty else { return }
+                        item.wrappedValue.lineTotalOverrideText = newCurrency.formattedInput(totalOverride)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Edit item total")
-                }
                 CurrencySelectionMenu(currency: $currency)
             }
         }

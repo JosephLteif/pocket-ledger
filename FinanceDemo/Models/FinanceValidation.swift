@@ -13,6 +13,7 @@ enum FinanceTransactionValidationError: LocalizedError, Equatable {
     case missingAttachment
     case unbalancedTransfer
     case missingExchangeRate
+    case invalidLoanActivity
 
     var errorDescription: String? {
         switch self {
@@ -40,6 +41,8 @@ enum FinanceTransactionValidationError: LocalizedError, Equatable {
             return "A same-currency transfer must send and receive the same amount."
         case .missingExchangeRate:
             return "Add an exchange rate for this cross-currency transaction."
+        case .invalidLoanActivity:
+            return "Loan activity must be linked to a valid loan and use one matching cash movement."
         }
     }
 }
@@ -52,6 +55,14 @@ enum FinanceTransactionValidator {
     ) -> FinanceTransactionValidationError? {
         let movements = transaction.outflows + transaction.inflows
         guard !movements.isEmpty else { return .noMovements }
+
+        let isLoanActivity = transaction.loanID != nil
+            || transaction.loanPaymentID != nil
+            || transaction.loanActivity != nil
+            || transaction.loanPrincipalAmount != nil
+        if isLoanActivity, !isValidLoanActivity(transaction, in: data) {
+            return .invalidLoanActivity
+        }
 
         for movement in movements {
             guard let account = data.accounts.first(where: { $0.id == movement.accountID }) else {
@@ -87,7 +98,8 @@ enum FinanceTransactionValidator {
         case .income:
             guard !transaction.inflows.isEmpty else { return .noMovements }
         case .transfer:
-            guard !transaction.outflows.isEmpty, !transaction.inflows.isEmpty else {
+            guard transaction.loanID != nil
+                    || (!transaction.outflows.isEmpty && !transaction.inflows.isEmpty) else {
                 return .noMovements
             }
         }
@@ -111,7 +123,7 @@ enum FinanceTransactionValidator {
         }
 
         let currencies = Set(movements.map { $0.money.currency })
-        if transaction.kind == .transfer {
+        if transaction.kind == .transfer, transaction.loanID == nil {
             if currencies.count == 1 {
                 let outflowTotal = transaction.outflows.reduce(Int64.zero) { $0 + $1.money.minorUnits }
                 let inflowTotal = transaction.inflows.reduce(Int64.zero) { $0 + $1.money.minorUnits }
@@ -122,6 +134,57 @@ enum FinanceTransactionValidator {
         }
 
         return nil
+    }
+
+    private static func isValidLoanActivity(
+        _ transaction: LedgerTransaction,
+        in data: FinanceData
+    ) -> Bool {
+        guard transaction.kind == .transfer,
+              let loanID = transaction.loanID,
+              let activity = transaction.loanActivity,
+              let principalAmount = transaction.loanPrincipalAmount,
+              principalAmount.minorUnits > 0,
+              transaction.categoryID == nil,
+              transaction.amountDue == nil,
+              transaction.changeAdjustment == nil,
+              transaction.outflows.count + transaction.inflows.count == 1,
+              let loan = data.loans.first(where: { $0.id == loanID }),
+              principalAmount.currency == loan.currency,
+              let movement = (transaction.outflows + transaction.inflows).first,
+              let movementAccount = data.accounts.first(where: { $0.id == movement.accountID }),
+              movementAccount.type == .cash || movementAccount.type == .bankAccount,
+              financeConvertedMinorUnits(
+                  movement.money,
+                  to: loan.currency,
+                  using: transaction.exchangeRate
+              ) == principalAmount.minorUnits else {
+            return false
+        }
+
+        switch activity {
+        case .funding:
+            guard transaction.loanPaymentID == nil,
+                  loan.fundingTransactionID == transaction.id,
+                  transaction.date == loan.startedAt,
+                  loan.settlementAccountID == movement.accountID else {
+                return false
+            }
+            return loan.direction == .lent
+                ? !transaction.outflows.isEmpty
+                : !transaction.inflows.isEmpty
+        case .payment:
+            guard let paymentID = transaction.loanPaymentID,
+                  let payment = loan.payments.first(where: { $0.id == paymentID }),
+                  payment.transactionID == transaction.id,
+                  payment.date == transaction.date,
+                  payment.amount == principalAmount else {
+                return false
+            }
+            return loan.direction == .lent
+                ? !transaction.inflows.isEmpty
+                : !transaction.outflows.isEmpty
+        }
     }
 }
 
@@ -136,6 +199,7 @@ enum FinanceDataValidationError: LocalizedError, Equatable {
     case invalidTemplate(index: Int, error: FinanceTransactionValidationError)
     case invalidBudget(index: Int)
     case invalidExchangeRate(index: Int)
+    case invalidLoan(String)
 
     var errorDescription: String? {
         switch self {
@@ -159,6 +223,8 @@ enum FinanceDataValidationError: LocalizedError, Equatable {
             return "Budget \(index + 1) has a missing category, invalid amount, or currency mismatch."
         case .invalidExchangeRate(let index):
             return "Exchange rate \(index + 1) is invalid."
+        case .invalidLoan(let counterparty):
+            return "Loan with \(counterparty) has invalid amounts, references, or payment history."
         }
     }
 }
@@ -173,6 +239,12 @@ enum FinanceDataValidator {
         }
         if hasDuplicateIDs(data.transactions.map(\.id)) {
             return .duplicateIDs("transactions")
+        }
+        if hasDuplicateIDs(data.loans.map(\.id)) {
+            return .duplicateIDs("loans")
+        }
+        if hasDuplicateIDs(data.loans.flatMap { $0.payments.map(\.id) }) {
+            return .duplicateIDs("loan payments")
         }
         if hasDuplicateIDs(data.scheduledTransactions.map(\.id)) {
             return .duplicateIDs("scheduled transactions")
@@ -189,6 +261,67 @@ enum FinanceDataValidator {
 
         for account in data.accounts where account.openingBalance.currency != account.currency {
             return .accountCurrencyMismatch(account.name)
+        }
+
+        for accountID in data.managedLegacyLoanAccountIDs {
+            guard let account = data.accounts.first(where: { $0.id == accountID }),
+                  account.type == .loan,
+                  account.isArchived,
+                  !account.includeInTotals else {
+                return .invalidLoan("legacy account")
+            }
+        }
+
+        for loan in data.loans {
+            let paymentTotal = loan.payments.reduce(Int64.zero) { $0 + $1.amount.minorUnits }
+            guard !loan.counterparty.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  loan.startingAmount.currency == loan.currency,
+                  loan.startingAmount.minorUnits > 0,
+                  paymentTotal <= loan.startingAmount.minorUnits,
+                  loan.payments.allSatisfy({
+                      $0.amount.currency == loan.currency
+                          && $0.amount.minorUnits > 0
+                  }) else {
+                return .invalidLoan(loan.counterparty)
+            }
+            if let settlementAccountID = loan.settlementAccountID {
+                guard let account = data.accounts.first(where: { $0.id == settlementAccountID }),
+                      account.type == .cash || account.type == .bankAccount else {
+                    return .invalidLoan(loan.counterparty)
+                }
+            }
+            if let legacyAccountID = loan.legacyAccountID {
+                guard let account = data.accounts.first(where: { $0.id == legacyAccountID }),
+                      account.type == .loan,
+                      account.isArchived,
+                      !account.includeInTotals,
+                      data.managedLegacyLoanAccountIDs.contains(legacyAccountID),
+                      loan.fundingTransactionID == nil else {
+                    return .invalidLoan(loan.counterparty)
+                }
+            } else if loan.fundingTransactionID == nil {
+                return .invalidLoan(loan.counterparty)
+            }
+            guard loan.payments.allSatisfy({ payment in
+                data.transactions.contains(where: {
+                    $0.id == payment.transactionID
+                        && $0.loanID == loan.id
+                        && $0.loanPaymentID == payment.id
+                        && $0.loanActivity == .payment
+                        && $0.loanPrincipalAmount == payment.amount
+                        && $0.date == payment.date
+                })
+            }) else {
+                return .invalidLoan(loan.counterparty)
+            }
+            if let fundingTransactionID = loan.fundingTransactionID,
+               !data.transactions.contains(where: {
+                   $0.id == fundingTransactionID
+                       && $0.loanID == loan.id
+                       && $0.loanActivity == .funding
+               }) {
+                return .invalidLoan(loan.counterparty)
+            }
         }
 
         let categoriesByID = Dictionary(uniqueKeysWithValues: data.categories.map { ($0.id, $0) })

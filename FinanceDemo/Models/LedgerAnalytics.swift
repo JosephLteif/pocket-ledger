@@ -8,9 +8,11 @@ struct LedgerIndex {
     }
 
     let accountsByID: [UUID: Account]
+    let loansByID: [UUID: Loan]
     let categoriesByID: [UUID: LedgerCategory]
     let includedAccountIDs: Set<UUID>
     let activeAccounts: [Account]
+    let loans: [Loan]
     let activeCategories: [LedgerCategory]
     let rootCategories: [LedgerCategory]
     let categoryPathsByID: [UUID: String]
@@ -21,15 +23,18 @@ struct LedgerIndex {
 
     init(data: FinanceData, calendar: Calendar = .current) {
         let accountsByID = Dictionary(uniqueKeysWithValues: data.accounts.map { ($0.id, $0) })
+        let loansByID = Dictionary(uniqueKeysWithValues: data.loans.map { ($0.id, $0) })
         let categoriesByID = Dictionary(uniqueKeysWithValues: data.categories.map { ($0.id, $0) })
         let includedAccountIDs = Set(
             data.accounts.filter(\.includeInTotals).map(\.id)
         )
 
         self.accountsByID = accountsByID
+        self.loansByID = loansByID
         self.categoriesByID = categoriesByID
         self.includedAccountIDs = includedAccountIDs
         self.activeAccounts = data.accounts.filter { !$0.isArchived }
+        self.loans = data.loans
         self.activeCategories = data.categories.filter { !$0.isArchived }
         self.rootCategories = data.categories.filter { $0.parentID == nil && !$0.isArchived }
 
@@ -103,6 +108,10 @@ struct LedgerIndex {
 
     func account(with id: UUID) -> Account? {
         accountsByID[id]
+    }
+
+    func loan(with id: UUID) -> Loan? {
+        loansByID[id]
     }
 
     func includesInTotals(accountID: UUID) -> Bool {
@@ -197,6 +206,20 @@ struct LedgerIndex {
         let total = activeAccounts
             .filter { $0.currency == currency && $0.type == .loan && $0.includeInTotals }
             .reduce(Int64.zero) { $0 + (balancesByAccountID[$1.id] ?? $1.openingBalance.minorUnits) }
+        return Money(currency: currency, minorUnits: total)
+    }
+
+    func lentLoanBalance(for currency: LedgerCurrency) -> Money {
+        let total = loans
+            .filter { $0.currency == currency && $0.direction == .lent }
+            .reduce(Int64.zero) { $0 + $1.outstandingAmount.minorUnits }
+        return Money(currency: currency, minorUnits: total)
+    }
+
+    func borrowedLoanBalance(for currency: LedgerCurrency) -> Money {
+        let total = loans
+            .filter { $0.currency == currency && $0.direction == .borrowed }
+            .reduce(Int64.zero) { $0 + $1.outstandingAmount.minorUnits }
         return Money(currency: currency, minorUnits: total)
     }
 

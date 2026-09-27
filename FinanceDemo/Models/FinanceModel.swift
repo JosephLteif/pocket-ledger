@@ -754,6 +754,10 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
     var exchangeRate: ExchangeRate?
     var changeAdjustment: ChangeAdjustment?
     var attachmentIDs: [UUID]
+    var loanID: UUID?
+    var loanPaymentID: UUID?
+    var loanActivity: LoanLedgerActivity?
+    var loanPrincipalAmount: Money?
 
     init(
         id: UUID = UUID(),
@@ -766,7 +770,11 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         inflows: [MoneyMovement],
         exchangeRate: ExchangeRate? = nil,
         changeAdjustment: ChangeAdjustment? = nil,
-        attachmentIDs: [UUID] = []
+        attachmentIDs: [UUID] = [],
+        loanID: UUID? = nil,
+        loanPaymentID: UUID? = nil,
+        loanActivity: LoanLedgerActivity? = nil,
+        loanPrincipalAmount: Money? = nil
     ) {
         self.id = id
         self.date = date
@@ -779,6 +787,10 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         self.exchangeRate = exchangeRate
         self.changeAdjustment = changeAdjustment
         self.attachmentIDs = attachmentIDs
+        self.loanID = loanID
+        self.loanPaymentID = loanPaymentID
+        self.loanActivity = loanActivity
+        self.loanPrincipalAmount = loanPrincipalAmount
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -793,6 +805,10 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         case exchangeRate
         case changeAdjustment
         case attachmentIDs
+        case loanID
+        case loanPaymentID
+        case loanActivity
+        case loanPrincipalAmount
     }
 
     init(from decoder: Decoder) throws {
@@ -808,6 +824,10 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         exchangeRate = try container.decodeIfPresent(ExchangeRate.self, forKey: .exchangeRate)
         changeAdjustment = try container.decodeIfPresent(ChangeAdjustment.self, forKey: .changeAdjustment)
         attachmentIDs = try container.decodeIfPresent([UUID].self, forKey: .attachmentIDs) ?? []
+        loanID = try container.decodeIfPresent(UUID.self, forKey: .loanID)
+        loanPaymentID = try container.decodeIfPresent(UUID.self, forKey: .loanPaymentID)
+        loanActivity = try container.decodeIfPresent(LoanLedgerActivity.self, forKey: .loanActivity)
+        loanPrincipalAmount = try container.decodeIfPresent(Money.self, forKey: .loanPrincipalAmount)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -823,7 +843,102 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(exchangeRate, forKey: .exchangeRate)
         try container.encodeIfPresent(changeAdjustment, forKey: .changeAdjustment)
         try container.encode(attachmentIDs, forKey: .attachmentIDs)
+        try container.encodeIfPresent(loanID, forKey: .loanID)
+        try container.encodeIfPresent(loanPaymentID, forKey: .loanPaymentID)
+        try container.encodeIfPresent(loanActivity, forKey: .loanActivity)
+        try container.encodeIfPresent(loanPrincipalAmount, forKey: .loanPrincipalAmount)
     }
+}
+
+enum LoanDirection: String, Codable, CaseIterable, Identifiable, Hashable, Sendable {
+    case lent
+    case borrowed
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .lent: "Lent"
+        case .borrowed: "Borrowed"
+        }
+    }
+
+    var counterpartyLabel: String {
+        switch self {
+        case .lent: "Borrower"
+        case .borrowed: "Lender"
+        }
+    }
+}
+
+enum LoanLedgerActivity: String, Codable, Hashable, Sendable {
+    case funding
+    case payment
+}
+
+struct LoanPayment: Identifiable, Codable, Equatable, Sendable {
+    let id: UUID
+    var date: Date
+    var amount: Money
+    var transactionID: UUID
+
+    init(id: UUID = UUID(), date: Date, amount: Money, transactionID: UUID) {
+        self.id = id
+        self.date = date
+        self.amount = amount
+        self.transactionID = transactionID
+    }
+}
+
+struct Loan: Identifiable, Codable, Equatable, Sendable {
+    let id: UUID
+    var counterparty: String
+    var direction: LoanDirection
+    var currency: LedgerCurrency
+    var startingAmount: Money
+    var startedAt: Date
+    var dueDate: Date?
+    var settlementAccountID: UUID?
+    var fundingTransactionID: UUID?
+    var legacyAccountID: UUID?
+    var payments: [LoanPayment]
+
+    init(
+        id: UUID = UUID(),
+        counterparty: String,
+        direction: LoanDirection,
+        currency: LedgerCurrency,
+        startingAmount: Money,
+        startedAt: Date = .now,
+        dueDate: Date? = nil,
+        settlementAccountID: UUID? = nil,
+        fundingTransactionID: UUID? = nil,
+        legacyAccountID: UUID? = nil,
+        payments: [LoanPayment] = []
+    ) {
+        self.id = id
+        self.counterparty = counterparty
+        self.direction = direction
+        self.currency = currency
+        self.startingAmount = startingAmount
+        self.startedAt = startedAt
+        self.dueDate = dueDate
+        self.settlementAccountID = settlementAccountID
+        self.fundingTransactionID = fundingTransactionID
+        self.legacyAccountID = legacyAccountID
+        self.payments = payments
+    }
+
+    var outstandingAmount: Money {
+        Money(
+            currency: currency,
+            minorUnits: startingAmount.minorUnits - payments.reduce(Int64.zero) {
+                $0 + $1.amount.minorUnits
+            }
+        )
+    }
+
+    var isSettled: Bool { outstandingAmount.minorUnits == 0 }
 }
 
 struct ScheduledTransaction: Identifiable, Codable, Equatable {
@@ -1292,6 +1407,8 @@ struct FinanceData: Codable, Equatable {
     var accounts: [Account]
     var categories: [LedgerCategory]
     var transactions: [LedgerTransaction]
+    var loans: [Loan]
+    var managedLegacyLoanAccountIDs: Set<UUID>
     var scheduledTransactions: [ScheduledTransaction]
     var exchangeRates: [ExchangeRate]
     var budgets: [LedgerBudget]
@@ -1304,6 +1421,8 @@ struct FinanceData: Codable, Equatable {
         accounts: [Account],
         categories: [LedgerCategory],
         transactions: [LedgerTransaction],
+        loans: [Loan] = [],
+        managedLegacyLoanAccountIDs: Set<UUID> = [],
         scheduledTransactions: [ScheduledTransaction] = [],
         exchangeRates: [ExchangeRate] = [],
         budgets: [LedgerBudget] = [],
@@ -1315,6 +1434,8 @@ struct FinanceData: Codable, Equatable {
         self.accounts = accounts
         self.categories = categories
         self.transactions = transactions
+        self.loans = loans
+        self.managedLegacyLoanAccountIDs = managedLegacyLoanAccountIDs
         self.scheduledTransactions = scheduledTransactions
         self.exchangeRates = exchangeRates
         self.budgets = budgets
@@ -1328,6 +1449,8 @@ struct FinanceData: Codable, Equatable {
         case accounts
         case categories
         case transactions
+        case loans
+        case managedLegacyLoanAccountIDs
         case scheduledTransactions
         case exchangeRates
         case budgets
@@ -1342,6 +1465,11 @@ struct FinanceData: Codable, Equatable {
         accounts = try container.decode([Account].self, forKey: .accounts)
         categories = try container.decode([LedgerCategory].self, forKey: .categories)
         transactions = try container.decode([LedgerTransaction].self, forKey: .transactions)
+        loans = try container.decodeIfPresent([Loan].self, forKey: .loans) ?? []
+        managedLegacyLoanAccountIDs = try container.decodeIfPresent(
+            Set<UUID>.self,
+            forKey: .managedLegacyLoanAccountIDs
+        ) ?? []
         scheduledTransactions = try container.decodeIfPresent(
             [ScheduledTransaction].self,
             forKey: .scheduledTransactions
@@ -1368,6 +1496,8 @@ struct FinanceData: Codable, Equatable {
         try container.encode(accounts, forKey: .accounts)
         try container.encode(categories, forKey: .categories)
         try container.encode(transactions, forKey: .transactions)
+        try container.encode(loans, forKey: .loans)
+        try container.encode(managedLegacyLoanAccountIDs, forKey: .managedLegacyLoanAccountIDs)
         try container.encode(scheduledTransactions, forKey: .scheduledTransactions)
         try container.encode(exchangeRates, forKey: .exchangeRates)
         try container.encode(budgets, forKey: .budgets)

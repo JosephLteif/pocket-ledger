@@ -1023,6 +1023,7 @@ struct TransactionRow: View {
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @Environment(\.layoutDirection) private var layoutDirection
     @State private var isShowingDeleteConfirmation = false
+    @State private var isShowingLoanDetails = false
     @State private var swipeOffset: CGFloat = 0
     @State private var swipeStartOffset: CGFloat = 0
     @State private var isTrackingHorizontalSwipe = false
@@ -1105,13 +1106,17 @@ struct TransactionRow: View {
             .accessibilityLabel(
                 "\(transaction.note), \(displaySubtitle), \(areBalancesRevealed ? displayAmountText : "Hidden amount")"
             )
-            .accessibilityHint(isSelectionMode ? "Toggles transaction selection" : "Opens transaction details")
+            .accessibilityHint(isSelectionMode && canSelectTransaction
+                ? "Toggles transaction selection"
+                : transaction.loanID != nil
+                    ? "Opens loan details"
+                    : "Opens transaction details")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .clipped()
         .contentShape(Rectangle())
         .contextMenu {
-            if allowsActions {
+            if canEditTransaction {
                 Button("Edit", systemImage: "pencil", action: onEdit)
                 Button("Duplicate", systemImage: "plus.square.on.square", action: onDuplicate)
                 Button("Save as template", systemImage: "rectangle.stack.badge.plus", action: onSaveTemplate)
@@ -1121,7 +1126,7 @@ struct TransactionRow: View {
             }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if allowsActions {
+            if canEditTransaction {
                 PocketCircularSwipeAction(
                     title: "Delete",
                     systemImage: "trash",
@@ -1140,7 +1145,7 @@ struct TransactionRow: View {
             }
         }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            if allowsActions {
+            if canEditTransaction {
                 PocketCircularSwipeAction(
                     title: "Duplicate",
                     systemImage: "plus.square.on.square",
@@ -1165,10 +1170,17 @@ struct TransactionRow: View {
         } message: {
             Text(transaction.note)
         }
+        .sheet(isPresented: $isShowingLoanDetails) {
+            if let loanID = transaction.loanID {
+                NavigationStack {
+                    LoanDetailView(store: store, loanID: loanID, showsCloseButton: true)
+                }
+            }
+        }
     }
 
     private var usesCustomScrollSwipeFallback: Bool {
-        guard usesScrollSwipeActions && allowsActions else { return false }
+        guard usesScrollSwipeActions && canEditTransaction else { return false }
         if #available(iOS 27, *) { return false }
         return true
     }
@@ -1263,9 +1275,11 @@ struct TransactionRow: View {
             closeSwipeActions()
             return
         }
-        if isSelectionMode {
+        if isSelectionMode && canSelectTransaction {
             onToggleSelection()
-        } else {
+        } else if !isSelectionMode, transaction.loanID != nil {
+            isShowingLoanDetails = true
+        } else if !isSelectionMode, transaction.loanID == nil {
             (onOpen ?? onEdit)()
         }
     }
@@ -1280,7 +1294,7 @@ struct TransactionRow: View {
 
     private var rowContent: some View {
         HStack(spacing: 12) {
-            if isSelectionMode {
+            if isSelectionMode && canSelectTransaction {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
                     .foregroundStyle(isSelected ? PocketLedgerTheme.accent : PocketLedgerTheme.textTertiary)
@@ -1347,9 +1361,14 @@ struct TransactionRow: View {
     }
 
     private var rowSubtitle: String {
-        let detail = transaction.kind == .expense
-            ? store.categoryPath(for: transaction.categoryID)
-            : transaction.kind.displayName
+        let detail: String
+        if transaction.loanID != nil {
+            detail = "Loan activity"
+        } else {
+            detail = transaction.kind == .expense
+                ? store.categoryPath(for: transaction.categoryID)
+                : transaction.kind.displayName
+        }
         if accountContext != nil {
             return [detail, transaction.date.formatted(.dateTime.month(.abbreviated).day().year())]
                 .filter { !$0.isEmpty }
@@ -1363,6 +1382,7 @@ struct TransactionRow: View {
     }
 
     private var iconName: String {
+        if transaction.loanID != nil { return "banknote" }
         if transaction.categoryID != nil {
             return store.ledgerIndex.categorySystemImage(for: transaction.categoryID)
         }
@@ -1436,5 +1456,13 @@ struct TransactionRow: View {
 
     private var displayAmountText: String {
         amountOverride ?? amountText
+    }
+
+    private var canEditTransaction: Bool {
+        allowsActions && transaction.loanID == nil
+    }
+
+    private var canSelectTransaction: Bool {
+        transaction.loanID == nil
     }
 }

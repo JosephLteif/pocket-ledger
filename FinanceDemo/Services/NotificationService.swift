@@ -3,6 +3,7 @@ import UserNotifications
 
 enum NotificationService {
     private static let scheduledPrefix = "pocket-ledger-scheduled-"
+    private static let loanPrefix = "pocket-ledger-loan-"
     private static let dailyTransactionReminderIdentifier = "pocket-ledger-daily-transaction-reminder"
     static let globalReminderKey = "pocketLedger.scheduledReminderTiming"
     static let scheduledLiveActivityEnabledKey = "pocketLedger.scheduledLiveActivityEnabled"
@@ -137,6 +138,101 @@ enum NotificationService {
 
         await refreshScheduledTransactionNotifications(schedules: schedules)
         return "Scheduled-entry reminders are enabled with a \(globalReminderTiming.title.lowercased()) default."
+    }
+
+    static func requestLoanNotifications(loans: [Loan]) async -> String {
+        guard globalReminderTiming != .none else {
+            await refreshLoanNotifications(loans: loans)
+            return "Reminder timing is set to Never. Change the reminder timing in Settings to schedule loan reminders."
+        }
+
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            do {
+                let granted = try await center.requestAuthorization(options: [.alert, .sound])
+                guard granted else { return "Notification permission was not granted." }
+            } catch {
+                return "Notification permission failed: \(error.localizedDescription)"
+            }
+        case .denied:
+            return "Notifications are disabled for this app."
+        case .authorized, .provisional, .ephemeral:
+            break
+        @unknown default:
+            return "Notification permission is unavailable right now."
+        }
+
+        await refreshLoanNotifications(loans: loans)
+        return "Loan reminders are enabled with a \(globalReminderTiming.title.lowercased()) default."
+    }
+
+    static func refreshLoanNotifications(loans: [Loan]) async {
+        let center = UNUserNotificationCenter.current()
+        let pending = await center.pendingNotificationRequests()
+        center.removePendingNotificationRequests(
+            withIdentifiers: pending.map(\.identifier).filter { $0.hasPrefix(loanPrefix) }
+        )
+
+        let loansByID = Dictionary(uniqueKeysWithValues: loans.map { ($0.id.uuidString, $0) })
+        let delivered = await center.deliveredNotifications()
+        let deliveredIDsToRemove = delivered.compactMap { notification -> String? in
+            let identifier = notification.request.identifier
+            guard identifier.hasPrefix(loanPrefix) else { return nil }
+            guard let loanID = notification.request.content.userInfo["loanID"] as? String,
+                  let loan = loansByID[loanID],
+                  !loan.isSettled else {
+                return identifier
+            }
+            guard let dueDate = loan.dueDate,
+                  let deliveredDueDate = notification.request.content.userInfo["dueDate"] as? TimeInterval,
+                  deliveredDueDate == dueDate.timeIntervalSince1970 else {
+                return identifier
+            }
+            return nil
+        }
+        center.removeDeliveredNotifications(withIdentifiers: deliveredIDsToRemove)
+
+        let calendar = Calendar.current
+        let now = Date.now
+        for loan in loans where !loan.isSettled {
+            guard let dueDate = loan.dueDate else { continue }
+            let timing = globalReminderTiming
+            guard timing != .none else { continue }
+            var dueComponents = calendar.dateComponents([.year, .month, .day], from: dueDate)
+            dueComponents.hour = 9
+            dueComponents.minute = 0
+            guard let dueReminderDate = calendar.date(from: dueComponents) else { continue }
+            let fireDate = timing == .atDue
+                ? dueReminderDate
+                : dueReminderDate.addingTimeInterval(-timing.leadTime)
+            guard fireDate > now else { continue }
+
+            let content = UNMutableNotificationContent()
+            content.title = "Pocket Ledger"
+            content.body = "A loan payment is due soon. Open Pocket Ledger to review it."
+            content.sound = .default
+            content.userInfo = [
+                "loanID": loan.id.uuidString,
+                "dueDate": dueDate.timeIntervalSince1970
+            ]
+            let components = calendar.dateComponents(
+                [.year, .month, .day, .hour, .minute],
+                from: fireDate
+            )
+            let request = UNNotificationRequest(
+                identifier: loanPrefix + loan.id.uuidString,
+                content: content,
+                trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+            )
+            do {
+                try await center.add(request)
+            } catch {
+                continue
+            }
+        }
     }
 
     static func refreshScheduledTransactionNotifications(

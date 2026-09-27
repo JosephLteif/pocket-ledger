@@ -277,6 +277,8 @@ final class FinanceModelTests: XCTestCase {
         object.removeValue(forKey: "attachments")
         object.removeValue(forKey: "attentionState")
         object.removeValue(forKey: "reconciliations")
+        object.removeValue(forKey: "loans")
+        object.removeValue(forKey: "managedLegacyLoanAccountIDs")
         var accounts = try XCTUnwrap(object["accounts"] as? [[String: Any]])
         accounts[0].removeValue(forKey: "isArchived")
         object["accounts"] = accounts
@@ -296,6 +298,292 @@ final class FinanceModelTests: XCTestCase {
         XCTAssertEqual(decoded.attachments, [])
         XCTAssertEqual(decoded.attentionState.dismissedIDs, [])
         XCTAssertEqual(decoded.reconciliations, [:])
+        XCTAssertEqual(decoded.loans, [])
+        XCTAssertEqual(decoded.managedLegacyLoanAccountIDs, [])
+    }
+
+    func testManagedLegacyLoanConversionKeepsHistoryAndCountsBalanceOnce() throws {
+        let cash = Account(
+            name: "Cash",
+            type: .cash,
+            currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 10_000)
+        )
+        let legacyLoanAccount = Account(
+            name: "Old loan account",
+            type: .loan,
+            currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 10_000)
+        )
+        let historicalTransaction = LedgerTransaction(
+            note: "Old loan payment",
+            kind: .transfer,
+            categoryID: nil,
+            outflows: [MoneyMovement(
+                accountID: legacyLoanAccount.id,
+                money: Money(currency: .usd, minorUnits: 2_000)
+            )],
+            inflows: [MoneyMovement(
+                accountID: cash.id,
+                money: Money(currency: .usd, minorUnits: 2_000)
+            )]
+        )
+        let firstLoan = Loan(
+            counterparty: "Lender A",
+            direction: .borrowed,
+            currency: .usd,
+            startingAmount: Money(currency: .usd, minorUnits: 3_000),
+            legacyAccountID: legacyLoanAccount.id
+        )
+        let secondLoan = Loan(
+            counterparty: "Lender B",
+            direction: .borrowed,
+            currency: .usd,
+            startingAmount: Money(currency: .usd, minorUnits: 5_000),
+            legacyAccountID: legacyLoanAccount.id
+        )
+
+        var converted = FinanceData(
+            accounts: [cash, legacyLoanAccount],
+            categories: [],
+            transactions: [historicalTransaction],
+            loans: [firstLoan, secondLoan],
+            managedLegacyLoanAccountIDs: [legacyLoanAccount.id]
+        )
+        converted.accounts[1].isArchived = true
+        converted.accounts[1].includeInTotals = false
+
+        XCTAssertNil(FinanceDataValidator.validate(converted))
+        XCTAssertEqual(converted.transactions, [historicalTransaction])
+
+        let index = LedgerIndex(data: converted)
+        XCTAssertEqual(index.balance(for: legacyLoanAccount).minorUnits, 8_000)
+        XCTAssertEqual(index.loanBalance(for: .usd).minorUnits, 0)
+        XCTAssertEqual(index.borrowedLoanBalance(for: .usd).minorUnits, 8_000)
+        XCTAssertEqual(index.availableBalance(for: .usd).minorUnits, 12_000)
+        XCTAssertEqual(financeNetExpenseAmount(historicalTransaction, currency: .usd, in: converted), 0)
+
+        let encoded = try JSONEncoder().encode(converted)
+        XCTAssertEqual(try JSONDecoder().decode(FinanceData.self, from: encoded), converted)
+    }
+
+    func testLoanFundingChangesAssetAndLiabilityBalancesWithoutIncomeOrExpense() throws {
+        let fundingDate = Date(timeIntervalSince1970: 1_760_000_000)
+        let cash = Account(
+            name: "Cash",
+            type: .cash,
+            currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 10_000)
+        )
+        let lentFundingID = UUID()
+        let borrowedFundingID = UUID()
+        let lentLoan = Loan(
+            counterparty: "Friend",
+            direction: .lent,
+            currency: .usd,
+            startingAmount: Money(currency: .usd, minorUnits: 5_000),
+            startedAt: fundingDate,
+            settlementAccountID: cash.id,
+            fundingTransactionID: lentFundingID
+        )
+        let borrowedLoan = Loan(
+            counterparty: "Bank",
+            direction: .borrowed,
+            currency: .usd,
+            startingAmount: Money(currency: .usd, minorUnits: 2_000),
+            startedAt: fundingDate,
+            settlementAccountID: cash.id,
+            fundingTransactionID: borrowedFundingID
+        )
+        let lentFunding = LedgerTransaction(
+            id: lentFundingID,
+            date: fundingDate,
+            note: "Loan to Friend",
+            kind: .transfer,
+            categoryID: nil,
+            outflows: [MoneyMovement(
+                accountID: cash.id,
+                money: Money(currency: .usd, minorUnits: 4_000)
+            )],
+            inflows: [],
+            loanID: lentLoan.id,
+            loanActivity: .funding,
+            loanPrincipalAmount: Money(currency: .usd, minorUnits: 4_000)
+        )
+        let borrowedFunding = LedgerTransaction(
+            id: borrowedFundingID,
+            date: fundingDate,
+            note: "Loan from Bank",
+            kind: .transfer,
+            categoryID: nil,
+            outflows: [],
+            inflows: [MoneyMovement(accountID: cash.id, money: borrowedLoan.startingAmount)],
+            loanID: borrowedLoan.id,
+            loanActivity: .funding,
+            loanPrincipalAmount: borrowedLoan.startingAmount
+        )
+        let data = FinanceData(
+            accounts: [cash],
+            categories: [],
+            transactions: [lentFunding, borrowedFunding],
+            loans: [lentLoan, borrowedLoan]
+        )
+
+        XCTAssertNil(FinanceDataValidator.validate(data))
+        let index = LedgerIndex(data: data)
+        XCTAssertEqual(index.availableBalance(for: .usd).minorUnits, 8_000)
+        XCTAssertEqual(index.lentLoanBalance(for: .usd).minorUnits, 5_000)
+        XCTAssertEqual(index.borrowedLoanBalance(for: .usd).minorUnits, 2_000)
+        XCTAssertEqual(
+            index.availableBalance(for: .usd).minorUnits
+                + index.lentLoanBalance(for: .usd).minorUnits
+                - index.borrowedLoanBalance(for: .usd).minorUnits,
+            11_000
+        )
+        XCTAssertEqual(
+            financeNetExpenseAmount(lentFunding, currency: .usd, in: data)
+                + financeNetExpenseAmount(borrowedFunding, currency: .usd, in: data),
+            0
+        )
+        XCTAssertTrue(data.transactions.allSatisfy { $0.kind == .transfer })
+    }
+
+    func testPartialAndFullLoanPaymentsKeepDueDateAndExchangeRateLinked() throws {
+        let startDate = Date(timeIntervalSince1970: 1_760_000_000)
+        let dueDate = Date(timeIntervalSince1970: 1_762_592_000)
+        let usdCash = Account(
+            name: "USD cash",
+            type: .cash,
+            currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 100_000)
+        )
+        let eurBank = Account(
+            name: "Euro bank",
+            type: .bankAccount,
+            currency: .eur,
+            openingBalance: Money(currency: .eur, minorUnits: 0)
+        )
+        let fundingID = UUID()
+        let loanID = UUID()
+        let originalAmount = Money(currency: .usd, minorUnits: 5_000)
+        let funding = LedgerTransaction(
+            id: fundingID,
+            date: startDate,
+            note: "Loan to Alex",
+            kind: .transfer,
+            categoryID: nil,
+            outflows: [MoneyMovement(accountID: usdCash.id, money: originalAmount)],
+            inflows: [],
+            loanID: loanID,
+            loanActivity: .funding,
+            loanPrincipalAmount: originalAmount
+        )
+        let loan = Loan(
+            id: loanID,
+            counterparty: "Alex",
+            direction: .lent,
+            currency: .usd,
+            startingAmount: originalAmount,
+            startedAt: startDate,
+            dueDate: dueDate,
+            settlementAccountID: usdCash.id,
+            fundingTransactionID: fundingID
+        )
+        let euroToDollar = ExchangeRate(
+            baseCurrency: .eur,
+            quoteCurrency: .usd,
+            quoteUnitsPerBaseUnit: try XCTUnwrap(Decimal(string: "1.1111111111"))
+        )
+        let firstPaymentID = UUID()
+        let firstPaymentTransaction = LedgerTransaction(
+            date: startDate.addingTimeInterval(86_400),
+            note: "Loan collection from Alex",
+            kind: .transfer,
+            categoryID: nil,
+            outflows: [],
+            inflows: [MoneyMovement(
+                accountID: eurBank.id,
+                money: Money(currency: .eur, minorUnits: 1_800)
+            )],
+            exchangeRate: euroToDollar,
+            loanID: loanID,
+            loanPaymentID: firstPaymentID,
+            loanActivity: .payment,
+            loanPrincipalAmount: Money(currency: .usd, minorUnits: 2_000)
+        )
+        let firstPayment = LoanPayment(
+            id: firstPaymentID,
+            date: firstPaymentTransaction.date,
+            amount: Money(currency: .usd, minorUnits: 2_000),
+            transactionID: firstPaymentTransaction.id
+        )
+        var partiallyPaidLoan = loan
+        partiallyPaidLoan.payments = [firstPayment]
+        var partialData = FinanceData(
+            accounts: [usdCash, eurBank],
+            categories: [],
+            transactions: [funding, firstPaymentTransaction],
+            loans: [partiallyPaidLoan],
+            exchangeRates: [euroToDollar]
+        )
+
+        XCTAssertNil(FinanceDataValidator.validate(partialData))
+        XCTAssertEqual(partiallyPaidLoan.outstandingAmount.minorUnits, 3_000)
+        XCTAssertEqual(partiallyPaidLoan.dueDate, dueDate)
+        XCTAssertEqual(
+            financeConvertedMinorUnits(
+                firstPaymentTransaction.inflows[0].money,
+                to: .usd,
+                using: firstPaymentTransaction.exchangeRate
+            ),
+            2_000
+        )
+
+        var overpaidLoan = partiallyPaidLoan
+        overpaidLoan.payments[0].amount = Money(currency: .usd, minorUnits: 5_001)
+        var overpaidPaymentTransaction = firstPaymentTransaction
+        overpaidPaymentTransaction.loanPrincipalAmount = overpaidLoan.payments[0].amount
+        var overpaidData = partialData
+        overpaidData.loans = [overpaidLoan]
+        overpaidData.transactions[1] = overpaidPaymentTransaction
+        XCTAssertNotNil(FinanceDataValidator.validate(overpaidData))
+
+        let finalPaymentID = UUID()
+        let finalPaymentDate = startDate.addingTimeInterval(172_800)
+        let finalPaymentTransaction = LedgerTransaction(
+            date: finalPaymentDate,
+            note: "Loan collection from Alex",
+            kind: .transfer,
+            categoryID: nil,
+            outflows: [],
+            inflows: [MoneyMovement(
+                accountID: usdCash.id,
+                money: Money(currency: .usd, minorUnits: 3_000)
+            )],
+            loanID: loanID,
+            loanPaymentID: finalPaymentID,
+            loanActivity: .payment,
+            loanPrincipalAmount: Money(currency: .usd, minorUnits: 3_000)
+        )
+        let finalPayment = LoanPayment(
+            id: finalPaymentID,
+            date: finalPaymentDate,
+            amount: Money(currency: .usd, minorUnits: 3_000),
+            transactionID: finalPaymentTransaction.id
+        )
+        partiallyPaidLoan.payments.append(finalPayment)
+        partialData.loans = [partiallyPaidLoan]
+        partialData.transactions.append(finalPaymentTransaction)
+
+        XCTAssertNil(FinanceDataValidator.validate(partialData))
+        XCTAssertEqual(partiallyPaidLoan.outstandingAmount.minorUnits, 0)
+        XCTAssertTrue(partiallyPaidLoan.isSettled)
+        XCTAssertEqual(partiallyPaidLoan.dueDate, dueDate)
+        XCTAssertEqual(partialData.transactions.count, 3)
+        XCTAssertEqual(partiallyPaidLoan.payments.count, 2)
+
+        let backup = try LedgerBackupCodec.encodeBundle(partialData, attachmentData: [:])
+        XCTAssertEqual(try LedgerBackupCodec.decodeBundle(backup).data, partialData)
     }
 
     func testAttentionStateRoundTripsWithFinanceData() throws {

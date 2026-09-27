@@ -149,6 +149,7 @@ struct ScheduledTransactionsView: View {
                 await NotificationService.refreshScheduledTransactionNotifications(
                     schedules: schedules
                 )
+                await NotificationService.refreshLoanNotifications(loans: store.data.loans)
             }
         }
     }

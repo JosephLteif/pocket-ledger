@@ -302,15 +302,24 @@ struct AccountDetailView: View {
 
     private func totalsScopeCard(_ account: Account) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Toggle("Include in totals and metrics", isOn: Binding(
-                get: { account.includeInTotals },
-                set: { store.setAccountIncludedInTotals(accountID: account.id, included: $0) }
-            ))
-            Text(account.includeInTotals
-                 ? "This account contributes to balances and spending metrics."
-                 : "This account stays visible here but is excluded from balances and spending metrics.")
-                .font(.footnote)
-                .foregroundStyle(PocketLedgerTheme.textSecondary)
+            if store.isManagedLegacyLoanAccount(account.id) {
+                Label("Managed in Loans", systemImage: "arrow.left.arrow.right.circle")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PocketLedgerTheme.accent)
+                Text("This account remains as the history for the converted loan balances.")
+                    .font(.footnote)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            } else {
+                Toggle("Include in totals and metrics", isOn: Binding(
+                    get: { account.includeInTotals },
+                    set: { store.setAccountIncludedInTotals(accountID: account.id, included: $0) }
+                ))
+                Text(account.includeInTotals
+                     ? "This account contributes to balances and spending metrics."
+                     : "This account stays visible here but is excluded from balances and spending metrics.")
+                    .font(.footnote)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            }
         }
         .tint(PocketLedgerTheme.accent)
         .padding(16)
@@ -387,15 +396,22 @@ struct AccountDetailView: View {
             .font(.caption)
             .foregroundStyle(PocketLedgerTheme.textTertiary)
 
-            Button {
-                isPresentingBalanceEditor = true
-            } label: {
-                Label("Adjust current balance", systemImage: "slider.horizontal.3")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
+            if store.isManagedLegacyLoanAccount(account.id) {
+                Text("This account’s balance is represented by the managed loans.")
+                    .font(.footnote)
+                    .foregroundStyle(PocketLedgerTheme.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Button {
+                    isPresentingBalanceEditor = true
+                } label: {
+                    Label("Adjust current balance", systemImage: "slider.horizontal.3")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .tint(PocketLedgerTheme.accent)
             }
-            .buttonStyle(.glassProminent)
-            .tint(PocketLedgerTheme.accent)
         }
         .padding(20)
         .pocketGroupedSurface(cornerRadius: 22)

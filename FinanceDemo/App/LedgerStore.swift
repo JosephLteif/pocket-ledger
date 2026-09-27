@@ -250,6 +250,10 @@ final class LedgerStore: ObservableObject {
             lastActionStatus = "Transaction not found"
             return false
         }
+        guard data.transactions[index].loanID == nil else {
+            lastActionStatus = "Edit loan activity from the loan details."
+            return false
+        }
 
         guard validate(transaction, allowArchivedReferences: true) else { return false }
 
@@ -260,6 +264,10 @@ final class LedgerStore: ObservableObject {
 
     @discardableResult
     func deleteTransaction(id: UUID) -> Bool {
+        guard !data.transactions.contains(where: { $0.id == id && $0.loanID != nil }) else {
+            lastActionStatus = "Remove loan activity from the loan details."
+            return false
+        }
         var updated = data
         let originalCount = updated.transactions.count
         updated.transactions.removeAll { $0.id == id }
@@ -312,6 +320,7 @@ final class LedgerStore: ObservableObject {
         var updated = data
         var changed = false
         for index in updated.transactions.indices where ids.contains(updated.transactions[index].id) {
+            guard updated.transactions[index].loanID == nil else { continue }
             updated.transactions[index].categoryID = categoryID
             changed = true
         }
@@ -336,6 +345,7 @@ final class LedgerStore: ObservableObject {
         var changed = 0
         for index in updated.transactions.indices where ids.contains(updated.transactions[index].id) {
             var transaction = updated.transactions[index]
+            guard transaction.loanID == nil else { continue }
             guard transaction.outflows.count + transaction.inflows.count == 1 else { continue }
 
             if let movementIndex = transaction.outflows.indices.first,
@@ -370,7 +380,7 @@ final class LedgerStore: ObservableObject {
     func deleteTransactions(ids: Set<UUID>) -> Bool {
         var updated = data
         let originalCount = updated.transactions.count
-        updated.transactions.removeAll { ids.contains($0.id) }
+        updated.transactions.removeAll { ids.contains($0.id) && $0.loanID == nil }
         guard updated.transactions.count != originalCount else {
             lastActionStatus = "No transactions selected"
             return false
@@ -385,6 +395,10 @@ final class LedgerStore: ObservableObject {
     func duplicateTransaction(id: UUID) -> Bool {
         guard let transaction = data.transactions.first(where: { $0.id == id }) else {
             lastActionStatus = "Transaction not found"
+            return false
+        }
+        guard transaction.loanID == nil else {
+            lastActionStatus = "Duplicate loan activity from the loan details."
             return false
         }
 
@@ -617,6 +631,191 @@ final class LedgerStore: ObservableObject {
         return materializedCount
     }
 
+    var legacyLoanAccountsNeedingSetup: [Account] {
+        data.accounts.filter { account in
+            account.type == .loan
+                && !data.loans.contains { $0.legacyAccountID == account.id }
+                && !data.managedLegacyLoanAccountIDs.contains(account.id)
+        }
+    }
+
+    func isManagedLegacyLoanAccount(_ accountID: UUID) -> Bool {
+        data.managedLegacyLoanAccountIDs.contains(accountID)
+            || data.loans.contains { $0.legacyAccountID == accountID }
+    }
+
+    func loan(with id: UUID) -> Loan? {
+        ledgerIndex.loan(with: id)
+    }
+
+    @discardableResult
+    func addLoan(_ loan: Loan, fundingTransaction: LedgerTransaction) -> Bool {
+        guard !data.loans.contains(where: { $0.id == loan.id }),
+              loan.legacyAccountID == nil,
+              loan.startedAt <= .now,
+              loan.fundingTransactionID == fundingTransaction.id,
+              fundingTransaction.loanID == loan.id else {
+            lastActionStatus = "The loan funding entry is invalid."
+            return false
+        }
+
+        var updated = data
+        updated.loans.append(loan)
+        updated.transactions.append(fundingTransaction)
+        guard FinanceDataValidator.validate(updated) == nil else {
+            lastActionStatus = "The loan could not be saved. Check its amount and funding account."
+            return false
+        }
+        return persist(updated, successMessage: "Loan added")
+    }
+
+    @discardableResult
+    func updateLoan(_ loan: Loan) -> Bool {
+        guard let index = data.loans.firstIndex(where: { $0.id == loan.id }) else {
+            lastActionStatus = "Loan not found"
+            return false
+        }
+        var updated = data
+        updated.loans[index] = loan
+        guard FinanceDataValidator.validate(updated) == nil else {
+            lastActionStatus = "The loan could not be updated."
+            return false
+        }
+        return persist(updated, successMessage: "Loan updated")
+    }
+
+    @discardableResult
+    func recordLoanPayment(
+        _ payment: LoanPayment,
+        for loanID: UUID,
+        transaction: LedgerTransaction
+    ) -> Bool {
+        guard let index = data.loans.firstIndex(where: { $0.id == loanID }) else {
+            lastActionStatus = "Loan not found"
+            return false
+        }
+        let loan = data.loans[index]
+        guard !loan.isSettled,
+              payment.amount.currency == loan.currency,
+              payment.amount.minorUnits > 0,
+              payment.amount.minorUnits <= loan.outstandingAmount.minorUnits,
+              payment.date <= .now,
+              payment.transactionID == transaction.id,
+              transaction.loanID == loanID,
+              transaction.loanPaymentID == payment.id,
+              transaction.loanActivity == .payment,
+              transaction.loanPrincipalAmount == payment.amount else {
+            lastActionStatus = "Enter a payment no greater than the remaining loan balance."
+            return false
+        }
+
+        var updated = data
+        updated.loans[index].payments.append(payment)
+        updated.transactions.append(transaction)
+        guard FinanceDataValidator.validate(updated) == nil else {
+            lastActionStatus = "The payment could not be saved. Check the account and exchange rate."
+            return false
+        }
+        return persist(updated, successMessage: "Loan payment recorded")
+    }
+
+    @discardableResult
+    func updateLoanPayment(
+        _ payment: LoanPayment,
+        for loanID: UUID,
+        transaction: LedgerTransaction
+    ) -> Bool {
+        guard let loanIndex = data.loans.firstIndex(where: { $0.id == loanID }),
+              let paymentIndex = data.loans[loanIndex].payments.firstIndex(where: { $0.id == payment.id }),
+              let transactionIndex = data.transactions.firstIndex(where: { $0.id == payment.transactionID }),
+              payment.transactionID == transaction.id,
+              transaction.loanID == loanID,
+              transaction.loanPaymentID == payment.id,
+              transaction.loanActivity == .payment,
+              transaction.loanPrincipalAmount == payment.amount else {
+            lastActionStatus = "Loan payment not found"
+            return false
+        }
+
+        let loan = data.loans[loanIndex]
+        let availableToUpdate = loan.outstandingAmount.minorUnits
+            + loan.payments[paymentIndex].amount.minorUnits
+        guard payment.amount.currency == loan.currency,
+              payment.amount.minorUnits > 0,
+              payment.amount.minorUnits <= availableToUpdate,
+              payment.date <= .now else {
+            lastActionStatus = "Enter a payment no greater than the remaining loan balance."
+            return false
+        }
+
+        var updated = data
+        updated.loans[loanIndex].payments[paymentIndex] = payment
+        updated.transactions[transactionIndex] = transaction
+        guard FinanceDataValidator.validate(updated) == nil else {
+            lastActionStatus = "The payment could not be updated. Check the account and exchange rate."
+            return false
+        }
+        return persist(updated, successMessage: "Loan payment updated")
+    }
+
+    @discardableResult
+    func deleteLoanPayment(loanID: UUID, paymentID: UUID) -> Bool {
+        guard let loanIndex = data.loans.firstIndex(where: { $0.id == loanID }),
+              let paymentIndex = data.loans[loanIndex].payments.firstIndex(where: { $0.id == paymentID }) else {
+            lastActionStatus = "Loan payment not found"
+            return false
+        }
+        let transactionID = data.loans[loanIndex].payments[paymentIndex].transactionID
+        var updated = data
+        updated.loans[loanIndex].payments.remove(at: paymentIndex)
+        updated.transactions.removeAll { $0.id == transactionID }
+        guard FinanceDataValidator.validate(updated) == nil else {
+            lastActionStatus = "The loan payment could not be removed."
+            return false
+        }
+        return persist(updated, successMessage: "Loan payment removed")
+    }
+
+    @discardableResult
+    func convertLegacyLoanAccount(accountID: UUID, into loans: [Loan]) -> Bool {
+        guard let accountIndex = data.accounts.firstIndex(where: { $0.id == accountID }),
+              data.accounts[accountIndex].type == .loan,
+              !isManagedLegacyLoanAccount(accountID) else {
+            lastActionStatus = "Choose an existing loan account to convert."
+            return false
+        }
+        let account = data.accounts[accountIndex]
+        let currentBalance = balance(for: account)
+        let startingTotal = loans.reduce(Int64.zero) { $0 + $1.startingAmount.minorUnits }
+        let validZeroBalanceConversion = currentBalance.minorUnits == 0 && loans.isEmpty
+        let validPositiveBalanceConversion = currentBalance.minorUnits > 0 && !loans.isEmpty
+            && startingTotal == currentBalance.minorUnits
+        guard currentBalance.minorUnits >= 0,
+              loans.allSatisfy({ loan in
+                  loan.currency == account.currency
+                      && loan.startingAmount.currency == account.currency
+                      && loan.startingAmount.minorUnits > 0
+                      && loan.legacyAccountID == accountID
+                      && loan.fundingTransactionID == nil
+                      && loan.payments.isEmpty
+              }),
+              validZeroBalanceConversion || validPositiveBalanceConversion else {
+            lastActionStatus = "Split the current balance across loans without changing its total."
+            return false
+        }
+
+        var updated = data
+        updated.accounts[accountIndex].includeInTotals = false
+        updated.accounts[accountIndex].isArchived = true
+        updated.managedLegacyLoanAccountIDs.insert(accountID)
+        updated.loans.append(contentsOf: loans)
+        guard FinanceDataValidator.validate(updated) == nil else {
+            lastActionStatus = "The existing loan account could not be converted."
+            return false
+        }
+        return persist(updated, successMessage: "Existing loan account converted")
+    }
+
     @discardableResult
     func addAccount(_ account: Account) -> Bool {
         guard !account.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -639,16 +838,27 @@ final class LedgerStore: ObservableObject {
             return false
         }
         let original = data.accounts[index]
+        var accountToSave = account
+        if isManagedLegacyLoanAccount(account.id) {
+            guard account.type == .loan,
+                  account.currency == original.currency,
+                  account.openingBalance == original.openingBalance else {
+                lastActionStatus = "A converted loan account can only change its name."
+                return false
+            }
+            accountToSave.includeInTotals = false
+            accountToSave.isArchived = true
+        }
 
-        var updated = original.currency == account.currency
+        var updated = original.currency == accountToSave.currency
             ? data
             : FinanceAccountCurrencyMigration.migrating(
                 data,
                 accountID: account.id,
                 from: original.currency,
-                to: account.currency
+                to: accountToSave.currency
             )
-        updated.accounts[index] = account
+        updated.accounts[index] = accountToSave
         return persist(updated, successMessage: "Account updated")
     }
 
@@ -656,6 +866,10 @@ final class LedgerStore: ObservableObject {
     func setAccountArchived(accountID: UUID, isArchived: Bool) -> Bool {
         guard let index = data.accounts.firstIndex(where: { $0.id == accountID }) else {
             lastActionStatus = "Account not found"
+            return false
+        }
+        if isManagedLegacyLoanAccount(accountID), !isArchived {
+            lastActionStatus = "This archived account is retained as the history for managed loans."
             return false
         }
         var updated = data
@@ -724,6 +938,10 @@ final class LedgerStore: ObservableObject {
     func setAccountIncludedInTotals(accountID: UUID, included: Bool) -> Bool {
         guard let accountIndex = data.accounts.firstIndex(where: { $0.id == accountID }) else {
             lastActionStatus = "Account not found"
+            return false
+        }
+        if isManagedLegacyLoanAccount(accountID), included {
+            lastActionStatus = "This balance is represented by managed loans."
             return false
         }
 
@@ -1187,6 +1405,10 @@ final class LedgerStore: ObservableObject {
             lastActionStatus = "Balance update failed: currency mismatch."
             return false
         }
+        guard !isManagedLegacyLoanAccount(accountID) else {
+            lastActionStatus = "Update the managed loan balance from Loans."
+            return false
+        }
 
         let currentBalance = balance(for: account)
         let difference = targetBalance.minorUnits - currentBalance.minorUnits
@@ -1263,11 +1485,19 @@ final class LedgerStore: ObservableObject {
     }
 
     func assetBalance(for currency: LedgerCurrency) -> Money {
-        availableBalance(for: currency)
+        Money(
+            currency: currency,
+            minorUnits: availableBalance(for: currency).minorUnits
+                + ledgerIndex.lentLoanBalance(for: currency).minorUnits
+        )
     }
 
     func liabilityBalance(for currency: LedgerCurrency) -> Money {
-        loanBalance(for: currency)
+        Money(
+            currency: currency,
+            minorUnits: loanBalance(for: currency).minorUnits
+                + ledgerIndex.borrowedLoanBalance(for: currency).minorUnits
+        )
     }
 
     func netWorth(for currency: LedgerCurrency) -> Money {
@@ -1394,6 +1624,7 @@ final class LedgerStore: ObservableObject {
         }
 
         let schedulesChanged = data.scheduledTransactions != updated.scheduledTransactions
+        let loansChanged = data.loans != updated.loans
         let shortcutInputsChanged = data.accounts != updated.accounts
             || data.categories != updated.categories
             || data.templates != updated.templates
@@ -1436,6 +1667,12 @@ final class LedgerStore: ObservableObject {
                 )
             }
         }
+        if loansChanged {
+            let loans = updated.loans
+            Task {
+                await NotificationService.refreshLoanNotifications(loans: loans)
+            }
+        }
         lastActionStatus = successMessage
         return true
     }
@@ -1445,6 +1682,7 @@ final class LedgerStore: ObservableObject {
         let indexInputsChanged = data.accounts != updated.accounts
             || data.categories != updated.categories
             || data.transactions != updated.transactions
+            || data.loans != updated.loans
         data = updated
         if indexInputsChanged {
             ledgerIndex = LedgerIndex(data: updated)

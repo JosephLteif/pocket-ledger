@@ -30,6 +30,30 @@ struct AccountsView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
+            NavigationLink {
+                LoansView(store: store)
+            } label: {
+                HStack(spacing: 12) {
+                    PocketIcon(systemImage: "arrow.left.arrow.right.circle.fill", tint: PocketLedgerTheme.accent, size: 38)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Loans")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(PocketLedgerTheme.textPrimary)
+                        Text("Track money lent, repayments, and due dates")
+                            .font(.caption)
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    }
+                    Spacer()
+                    if !store.legacyLoanAccountsNeedingSetup.isEmpty {
+                        Text("\(store.legacyLoanAccountsNeedingSetup.count) to review")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(PocketLedgerTheme.warning)
+                    }
+                }
+                .padding(.vertical, 5)
+            }
+            .listRowBackground(PocketLedgerTheme.surface)
+
             ForEach(AccountType.allCases) { accountType in
                 let accounts = store.activeAccounts.filter { $0.type == accountType }
                 if !accounts.isEmpty {
@@ -355,36 +379,53 @@ struct AccountsView: View {
                 ForEach(Array(archivedAccounts.enumerated()), id: \.element.id) { entry in
                     let account = entry.element
                     HStack(spacing: 12) {
-                        PocketIcon(
-                            systemImage: account.type.systemImage,
-                            tint: PocketLedgerTheme.textTertiary,
-                            size: 34
-                        )
+                        NavigationLink {
+                            AccountDetailView(store: store, security: security, accountID: account.id)
+                        } label: {
+                            HStack(spacing: 12) {
+                                PocketIcon(
+                                    systemImage: account.type.systemImage,
+                                    tint: PocketLedgerTheme.textTertiary,
+                                    size: 34
+                                )
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(account.name)
-                                .font(.subheadline.weight(.semibold))
-                            Text("\(account.type.displayName) · \(account.currency.rawValue)")
-                                .font(.caption)
-                                .foregroundStyle(PocketLedgerTheme.textTertiary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(account.name)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(PocketLedgerTheme.textPrimary)
+                                    Text("\(account.type.displayName) · \(account.currency.rawValue)")
+                                        .font(.caption)
+                                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+                                }
+                            }
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
 
                         Spacer(minLength: 8)
 
-                        Button("Restore", systemImage: "arrow.uturn.backward") {
-                            _ = store.setAccountArchived(accountID: account.id, isArchived: false)
+                        if store.isManagedLegacyLoanAccount(account.id) {
+                            Text("Managed in Loans")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        } else {
+                            Button("Restore", systemImage: "arrow.uturn.backward") {
+                                _ = store.setAccountArchived(accountID: account.id, isArchived: false)
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .buttonStyle(.borderless)
                         }
-                        .font(.subheadline.weight(.semibold))
-                        .buttonStyle(.borderless)
                     }
                     .frame(minHeight: 68)
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                        PocketCircularSwipeAction(
-                            title: "Restore",
-                            systemImage: "arrow.uturn.backward",
-                            tint: PocketLedgerTheme.accent
-                        ) {
-                            _ = store.setAccountArchived(accountID: account.id, isArchived: false)
+                        if !store.isManagedLegacyLoanAccount(account.id) {
+                            PocketCircularSwipeAction(
+                                title: "Restore",
+                                systemImage: "arrow.uturn.backward",
+                                tint: PocketLedgerTheme.accent
+                            ) {
+                                _ = store.setAccountArchived(accountID: account.id, isArchived: false)
+                            }
                         }
                     }
                     .listRowInsets(
@@ -559,19 +600,24 @@ struct AccountEditor: View {
                                 .tag(accountType)
                         }
                     }
+                    .disabled(isManagedLegacyLoan)
                     if hasCurrencyImpact {
                         Text("Changing currency updates this account's opening balance and all related transactions. Amounts keep their displayed numeric value; no exchange-rate conversion is applied.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                     Toggle("Include in totals and metrics", isOn: $includeInTotals)
-                    Text("Turn this off for assets or investments you want to track separately.")
+                        .disabled(isManagedLegacyLoan)
+                    Text(isManagedLegacyLoan
+                         ? "This account is retained as the history for loans managed in Loans."
+                         : "Turn this off for assets or investments you want to track separately.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
 
                 Section("Opening balance") {
                     CurrencyInputField("Amount", text: $openingBalance, currency: $currency)
+                        .disabled(isManagedLegacyLoan)
                     Text("The amount is stored in the account's own currency.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -623,6 +669,11 @@ struct AccountEditor: View {
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )
+    }
+
+    private var isManagedLegacyLoan: Bool {
+        guard let account else { return false }
+        return store.isManagedLegacyLoanAccount(account.id)
     }
 
     private func save() {

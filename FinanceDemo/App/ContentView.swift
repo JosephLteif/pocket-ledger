@@ -40,10 +40,12 @@ struct ContentView: View {
                 openPendingQuickExpense()
                 store.processDueScheduledTransactions()
                 let schedules = store.data.scheduledTransactions
+                let loans = store.data.loans
                 Task {
                     await NotificationService.refreshScheduledTransactionNotifications(
                         schedules: schedules
                     )
+                    await NotificationService.refreshLoanNotifications(loans: loans)
                 }
             } else if phase == .inactive {
                 if security.isPasscodeEnabled && !security.isBiometricPromptActive {
@@ -81,6 +83,7 @@ struct ContentView: View {
             await NotificationService.refreshScheduledTransactionNotifications(
                 schedules: store.data.scheduledTransactions
             )
+            await NotificationService.refreshLoanNotifications(loans: store.data.loans)
             await FinanceIntentIndexing.shared.refresh()
             if !setupCompleted && store.data.accounts.isEmpty && store.data.categories.isEmpty {
                 isShowingSetup = true

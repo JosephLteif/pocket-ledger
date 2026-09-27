@@ -1082,6 +1082,59 @@ struct TransactionRow: View {
     }
 
     var body: some View {
+        renderedRow
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if canEditTransaction {
+                    Button(role: .destructive) {
+                        isShowingDeleteConfirmation = true
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 54, height: 54)
+                            .background(.red, in: Circle())
+                    }
+                    .tint(.red)
+                    .accessibilityLabel("Delete")
+                    Button(action: onEdit) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.black)
+                            .frame(width: 54, height: 54)
+                            .background(.yellow, in: Circle())
+                    }
+                    .tint(.yellow)
+                    .accessibilityLabel("Edit")
+                }
+            }
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                if canEditTransaction {
+                    Button(action: onDuplicate) {
+                        Image(systemName: "plus.square.on.square")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 54, height: 54)
+                            .background(PocketLedgerTheme.accent, in: Circle())
+                    }
+                    .tint(PocketLedgerTheme.accent)
+                    .accessibilityLabel("Duplicate")
+                    Button(action: onSaveTemplate) {
+                        Image(systemName: "rectangle.stack.badge.plus")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 54, height: 54)
+                            .background(PocketLedgerTheme.positive, in: Circle())
+                    }
+                    .tint(PocketLedgerTheme.positive)
+                    .accessibilityLabel("Template")
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var renderedRow: some View {
         if usesCustomScrollSwipeFallback {
             rowWithActions
                 .simultaneousGesture(customSwipeGesture)
@@ -1124,52 +1177,6 @@ struct TransactionRow: View {
                 Button("Delete", systemImage: "trash", role: .destructive) {
                     isShowingDeleteConfirmation = true
                 }
-            }
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if canEditTransaction {
-                Button(role: .destructive) {
-                    isShowingDeleteConfirmation = true
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 54, height: 54)
-                        .background(.red, in: Circle())
-                }
-                .tint(.red)
-                .accessibilityLabel("Delete")
-                Button(action: onEdit) {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.black)
-                        .frame(width: 54, height: 54)
-                        .background(.yellow, in: Circle())
-                }
-                .tint(.yellow)
-                .accessibilityLabel("Edit")
-            }
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            if canEditTransaction {
-                Button(action: onDuplicate) {
-                    Image(systemName: "plus.square.on.square")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 54, height: 54)
-                        .background(PocketLedgerTheme.accent, in: Circle())
-                }
-                .tint(PocketLedgerTheme.accent)
-                .accessibilityLabel("Duplicate")
-                Button(action: onSaveTemplate) {
-                    Image(systemName: "rectangle.stack.badge.plus")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 54, height: 54)
-                        .background(PocketLedgerTheme.positive, in: Circle())
-                }
-                .tint(PocketLedgerTheme.positive)
-                .accessibilityLabel("Template")
             }
         }
         .confirmationDialog(

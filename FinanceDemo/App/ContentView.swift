@@ -6,6 +6,7 @@ struct ContentView: View {
     @StateObject private var store = LedgerStore()
     @StateObject private var security = AppSecurityService()
     @StateObject private var intentSearchRouter = FinanceIntentSearchRouter.shared
+    @StateObject private var visualBillScanRouter = VisualBillScanRouter.shared
     @State private var addAction: AddAction?
     @State private var searchText = ""
     @State private var isSearchPresented = false
@@ -60,6 +61,12 @@ struct ContentView: View {
         .onChange(of: intentSearchRouter.pendingSearch?.id) { _, _ in
             openPendingIntentSearch()
         }
+        .onChange(of: visualBillScanRouter.pendingBillScan?.id) { _, _ in
+            openPendingVisualBillScan()
+        }
+        .onChange(of: isUnlocked) { _, _ in
+            openPendingVisualBillScan()
+        }
         .task {
             areBalancesRevealed = false
             openPendingIntentSearch()
@@ -68,6 +75,7 @@ struct ContentView: View {
                 return
             }
             openPendingQuickExpense()
+            openPendingVisualBillScan()
             store.processDueScheduledTransactions()
             await NotificationService.refreshScheduledTransactionNotifications(
                 schedules: store.data.scheduledTransactions
@@ -140,6 +148,15 @@ struct ContentView: View {
         selectedTabBinding.wrappedValue = .search
         isSearchPresented = true
         isSearchFieldFocused = true
+    }
+
+    private func openPendingVisualBillScan() {
+        guard !security.isPasscodeEnabled || isUnlocked,
+              let request = visualBillScanRouter.consumePendingBillScan() else {
+            return
+        }
+        selectedTabBinding.wrappedValue = .transactions
+        addAction = .visualBillScan(id: request.id, imageData: request.imageData)
     }
 
     private var unlockedContent: some View {
@@ -241,6 +258,8 @@ struct ContentView: View {
             switch action {
             case .scanBill:
                 BillScannerView(store: store)
+            case .visualBillScan(_, let imageData):
+                BillScannerView(store: store, initialImageData: imageData)
             case .expense:
                 TransactionEditor(store: store, initialKind: .expense)
             case .prefilledExpense(_, let amount, let note):
@@ -294,6 +313,7 @@ struct ContentView: View {
 
 enum AddAction: Identifiable {
     case scanBill
+    case visualBillScan(id: UUID, imageData: Data)
     case expense
     case prefilledExpense(id: UUID, amount: Money, note: String)
     case income
@@ -306,6 +326,8 @@ enum AddAction: Identifiable {
         switch self {
         case .scanBill:
             return "scanBill"
+        case .visualBillScan(let id, _):
+            return "visual-bill-scan-\(id.uuidString)"
         case .expense:
             return "expense"
         case .prefilledExpense(let id, _, _):

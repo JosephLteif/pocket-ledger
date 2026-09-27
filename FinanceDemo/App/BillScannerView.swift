@@ -424,6 +424,7 @@ private enum BillScannerParser {
 @MainActor
 struct BillScannerView: View {
     @ObservedObject var store: LedgerStore
+    let initialImageData: Data?
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedPhoto: PhotosPickerItem?
@@ -442,6 +443,12 @@ struct BillScannerView: View {
     @State private var attachmentFileName = "receipt.jpg"
     @State private var attachmentContentType = "image/jpeg"
     @State private var errorMessage: String?
+    @State private var didLoadInitialImage = false
+
+    init(store: LedgerStore, initialImageData: Data? = nil) {
+        _store = ObservedObject(wrappedValue: store)
+        self.initialImageData = initialImageData
+    }
 
     var body: some View {
         NavigationStack {
@@ -573,6 +580,15 @@ struct BillScannerView: View {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
+            }
+            .task {
+                guard !didLoadInitialImage, let initialImageData else { return }
+                didLoadInitialImage = true
+                guard let image = UIImage(data: initialImageData) else {
+                    errorMessage = BillScannerError.invalidImage.localizedDescription
+                    return
+                }
+                handleImage(image, data: initialImageData)
             }
         }
     }

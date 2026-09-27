@@ -4,6 +4,7 @@ enum DashboardWidget: String, CaseIterable, Codable, Hashable, Identifiable {
     case balance
     case attention
     case accounts
+    case loans
     case monthSummary
     case recentActivity
     case upcoming
@@ -21,6 +22,8 @@ enum DashboardWidget: String, CaseIterable, Codable, Hashable, Identifiable {
             return "Needs attention"
         case .accounts:
             return "Accounts"
+        case .loans:
+            return "Loans"
         case .monthSummary:
             return "This month"
         case .recentActivity:
@@ -44,6 +47,8 @@ enum DashboardWidget: String, CaseIterable, Codable, Hashable, Identifiable {
             return "Items that need a review"
         case .accounts:
             return "A quick view of account balances"
+        case .loans:
+            return "Money lent, borrowed, and due"
         case .monthSummary:
             return "Current month spending activity"
         case .recentActivity:
@@ -67,6 +72,8 @@ enum DashboardWidget: String, CaseIterable, Codable, Hashable, Identifiable {
             return "exclamationmark.triangle.fill"
         case .accounts:
             return "building.columns.fill"
+        case .loans:
+            return "arrow.left.arrow.right.circle.fill"
         case .monthSummary:
             return "chart.bar.xaxis"
         case .recentActivity:
@@ -100,6 +107,7 @@ struct DashboardPreferences: Codable, Equatable {
             .monthSummary,
             .recentActivity,
             .accounts,
+            .loans,
             .upcoming,
             .cashFlow,
             .budgetPulse,

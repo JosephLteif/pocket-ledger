@@ -863,6 +863,62 @@ final class LedgerStore: ObservableObject {
     }
 
     @discardableResult
+    func deleteAccount(id: UUID) -> Bool {
+        guard data.accounts.contains(where: { $0.id == id }) else {
+            lastActionStatus = "Account not found"
+            return false
+        }
+
+        let directlyLinkedTransactions = data.transactions.filter { transaction in
+            (transaction.outflows + transaction.inflows).contains { $0.accountID == id }
+        }
+        var affectedLoanIDs = Set(data.loans.filter {
+            $0.settlementAccountID == id || $0.legacyAccountID == id
+        }.map(\.id))
+        affectedLoanIDs.formUnion(directlyLinkedTransactions.compactMap(\.loanID))
+
+        let deletedTransactions = data.transactions.filter { transaction in
+            transaction.loanID.map(affectedLoanIDs.contains) == true
+                || (transaction.outflows + transaction.inflows).contains { $0.accountID == id }
+        }
+        let deletedTransactionIDs = Set(deletedTransactions.map(\.id))
+        let retainedTransactions = data.transactions.filter { !deletedTransactionIDs.contains($0.id) }
+        let candidateAttachmentIDs = Set(deletedTransactions.flatMap(\.attachmentIDs))
+        let orphanedAttachments = data.attachments.filter { attachment in
+            candidateAttachmentIDs.contains(attachment.id)
+                && !retainedTransactions.contains { $0.attachmentIDs.contains(attachment.id) }
+        }
+
+        var updated = data
+        updated.accounts.removeAll { $0.id == id }
+        updated.transactions.removeAll { deletedTransactionIDs.contains($0.id) }
+        updated.loans.removeAll { affectedLoanIDs.contains($0.id) }
+        updated.managedLegacyLoanAccountIDs.remove(id)
+        updated.scheduledTransactions.removeAll { schedule in
+            (schedule.outflows + schedule.inflows).contains { $0.accountID == id }
+        }
+        updated.templates.removeAll { template in
+            (template.outflows + template.inflows).contains { $0.accountID == id }
+        }
+        updated.attachments.removeAll { attachment in
+            orphanedAttachments.contains(where: { $0.id == attachment.id })
+        }
+        updated.reconciliations.removeValue(forKey: id)
+
+        if let validationError = FinanceDataValidator.validate(updated) {
+            lastActionStatus = "Account was not deleted: \(validationError.localizedDescription)"
+            return false
+        }
+        guard persist(updated, successMessage: "Account and related history deleted") else {
+            return false
+        }
+        for attachment in orphanedAttachments {
+            storage.deleteAttachment(relativePath: attachment.relativePath)
+        }
+        return true
+    }
+
+    @discardableResult
     func setAccountArchived(accountID: UUID, isArchived: Bool) -> Bool {
         guard let index = data.accounts.firstIndex(where: { $0.id == accountID }) else {
             lastActionStatus = "Account not found"

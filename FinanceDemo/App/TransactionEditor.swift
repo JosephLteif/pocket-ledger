@@ -140,6 +140,37 @@ private struct MovementLineEditor: View {
     }
 }
 
+private enum TransactionEditorType: String, CaseIterable, Identifiable, Hashable {
+    case expense
+    case income
+    case transfer
+    case loan
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        guard let transactionKind else { return "Loan" }
+        return transactionKind.displayName
+    }
+
+    var transactionKind: TransactionKind? {
+        switch self {
+        case .expense: return .expense
+        case .income: return .income
+        case .transfer: return .transfer
+        case .loan: return nil
+        }
+    }
+
+    init(_ kind: TransactionKind) {
+        switch kind {
+        case .expense: self = .expense
+        case .income: self = .income
+        case .transfer: self = .transfer
+        }
+    }
+}
+
 @MainActor
 struct TransactionEditor: View {
     private static let lastAccountKey = "pocketLedger.lastTransactionAccount"
@@ -151,6 +182,9 @@ struct TransactionEditor: View {
     @State private var templateName = ""
     @State private var date = Date.now
     @State private var kind: TransactionKind = .expense
+    @State private var isPresentingLoanEditor = false
+    @State private var dismissAfterLoanSave = false
+    @State private var loanCreatedNotice = false
     @State private var timing: TransactionTiming = .now
     @State private var scheduleFrequency: ScheduleFrequency = .once
     @State private var monthlyRule: ScheduleMonthlyRule = .dayOfMonth
@@ -187,6 +221,7 @@ struct TransactionEditor: View {
     private let editingTransactionID: UUID?
     private let editingTemplateID: UUID?
     private let isCreatingTemplate: Bool
+    private let hasPrefilledTransactionContent: Bool
     private let initialAttachmentData: Data?
     private let initialAttachmentFileName: String?
     private let initialAttachmentContentType: String?
@@ -360,6 +395,7 @@ struct TransactionEditor: View {
         editingTransactionID = transaction?.id
         editingTemplateID = editingTemplate?.id
         isCreatingTemplate = createTemplate
+        hasPrefilledTransactionContent = sourceTransaction != nil
         self.initialAttachmentData = initialAttachmentData
         self.initialAttachmentFileName = initialAttachmentFileName
         self.initialAttachmentContentType = initialAttachmentContentType
@@ -370,14 +406,22 @@ struct TransactionEditor: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("Type", selection: $kind) {
-                        ForEach(TransactionKind.allCases) { transactionKind in
-                            Text(transactionKind.displayName).tag(transactionKind)
+                    Picker("Type", selection: transactionEditorTypeBinding) {
+                        ForEach(availableTransactionEditorTypes) { editorType in
+                            Text(editorType.displayName).tag(editorType)
                         }
                     }
                     .pickerStyle(.segmented)
                 } header: {
                     Text("Transaction type")
+                }
+
+                if loanCreatedNotice {
+                    Section {
+                        Label("Loan created. Your transaction draft is still open.", systemImage: "checkmark.circle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(PocketLedgerTheme.positive)
+                    }
                 }
 
                 if let saveValidationMessage {
@@ -497,6 +541,20 @@ struct TransactionEditor: View {
                     includeUncategorized: true
                 )
             }
+            .sheet(isPresented: $isPresentingLoanEditor, onDismiss: {
+                if dismissAfterLoanSave {
+                    dismissAfterLoanSave = false
+                    dismiss()
+                }
+            }) {
+                LoanEditor(store: store, onSave: {
+                    if hasUnsavedChanges {
+                        loanCreatedNotice = true
+                    } else {
+                        dismissAfterLoanSave = true
+                    }
+                })
+            }
             .fileImporter(
                 isPresented: $isShowingAttachmentImporter,
                 allowedContentTypes: [.image, .pdf],
@@ -519,6 +577,29 @@ struct TransactionEditor: View {
             return nil
         }
         return FinanceTransactionEntity(transaction: transaction, data: store.data)
+    }
+
+    private var transactionEditorTypeBinding: Binding<TransactionEditorType> {
+        Binding(
+            get: { isPresentingLoanEditor ? .loan : TransactionEditorType(kind) },
+            set: { editorType in
+                if editorType == .loan {
+                    isPresentingLoanEditor = true
+                } else if let transactionKind = editorType.transactionKind {
+                    kind = transactionKind
+                }
+            }
+        )
+    }
+
+    private var availableTransactionEditorTypes: [TransactionEditorType] {
+        guard editingTransactionID == nil,
+              !isEditingScheduledTransaction,
+              !isTemplateEditor,
+              !hasPrefilledTransactionContent else {
+            return TransactionEditorType.allCases.filter { $0 != .loan }
+        }
+        return TransactionEditorType.allCases
     }
 
     private var isEditingScheduledTransaction: Bool {

@@ -15,6 +15,7 @@ private enum LoanListFilter: String, CaseIterable, Identifiable {
 @MainActor
 struct LoansView: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject var security: AppSecurityService
     @State private var filter: LoanListFilter = .all
     @State private var isPresentingLoanEditor = false
     @State private var notificationMessage: String?
@@ -128,13 +129,15 @@ struct LoansView: View {
         .navigationTitle("Loans")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    isPresentingLoanEditor = true
-                } label: {
-                    Image(systemName: "plus")
+            PocketLedgerToolbar(security: security) {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        isPresentingLoanEditor = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Add loan")
                 }
-                .accessibilityLabel("Add loan")
             }
         }
         .sheet(isPresented: $isPresentingLoanEditor) {
@@ -474,9 +477,10 @@ private struct LegacyLoanDraft: Identifiable {
 }
 
 @MainActor
-private struct LoanEditor: View {
+struct LoanEditor: View {
     @ObservedObject var store: LedgerStore
     let loan: Loan?
+    let onSave: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var counterparty: String
     @State private var direction: LoanDirection
@@ -489,9 +493,10 @@ private struct LoanEditor: View {
     @State private var selectedAccountID: UUID?
     @State private var errorMessage: String?
 
-    init(store: LedgerStore, loan: Loan? = nil) {
+    init(store: LedgerStore, loan: Loan? = nil, onSave: (() -> Void)? = nil) {
         _store = ObservedObject(wrappedValue: store)
         self.loan = loan
+        self.onSave = onSave
         _counterparty = State(initialValue: loan?.counterparty ?? "")
         _direction = State(initialValue: loan?.direction ?? .borrowed)
         _amountText = State(initialValue: "")
@@ -647,6 +652,7 @@ private struct LoanEditor: View {
                 errorMessage = store.lastActionStatus ?? "The loan could not be updated."
                 return
             }
+            onSave?()
             dismiss()
             return
         }
@@ -696,6 +702,7 @@ private struct LoanEditor: View {
             errorMessage = store.lastActionStatus ?? "The loan could not be saved."
             return
         }
+        onSave?()
         dismiss()
     }
 }

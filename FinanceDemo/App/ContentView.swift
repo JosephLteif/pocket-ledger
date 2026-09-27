@@ -277,6 +277,8 @@ struct ContentView: View {
                 TransactionEditor(store: store, initialKind: .income)
             case .transfer:
                 TransactionEditor(store: store, initialKind: .transfer)
+            case .loan:
+                LoanEditor(store: store)
             case .scheduled:
                 TransactionEditor(store: store, initialKind: .expense, initialTiming: .scheduled)
             case .template(let templateID):
@@ -328,6 +330,7 @@ enum AddAction: Identifiable {
     case prefilledExpense(id: UUID, amount: Money, note: String)
     case income
     case transfer
+    case loan
     case scheduled
     case template(UUID)
     case recent(UUID)
@@ -346,6 +349,8 @@ enum AddAction: Identifiable {
             return "income"
         case .transfer:
             return "transfer"
+        case .loan:
+            return "loan"
         case .scheduled:
             return "scheduled"
         case .template(let id):
@@ -392,6 +397,7 @@ struct AddTransactionToolbar: ToolbarContent {
                 Section("Add transaction") {
                     Button("Income", systemImage: "arrow.down.left") { onAction(.income) }
                     Button("Transfer", systemImage: "arrow.left.arrow.right") { onAction(.transfer) }
+                    Button("Loan", systemImage: "banknote") { onAction(.loan) }
                 }
 
                 Section("Other") {

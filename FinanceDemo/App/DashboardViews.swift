@@ -49,6 +49,13 @@ struct MoreView: View {
 
                 Section("Planning") {
                     NavigationLink {
+                        LoansView(store: store, security: security)
+                    } label: {
+                        Label("Loans", systemImage: "arrow.left.arrow.right.circle.fill")
+                    }
+                    .listRowBackground(PocketLedgerTheme.surface)
+
+                    NavigationLink {
                         BudgetsView(store: store, security: security)
                     } label: {
                         Label("Budgets", systemImage: "chart.bar.doc.horizontal")
@@ -281,6 +288,8 @@ struct DashboardView: View {
             attentionSnapshot
         case .accounts:
             accountBreakdown
+        case .loans:
+            loanSnapshot
         case .monthSummary:
             monthSnapshot
         case .recentActivity:
@@ -512,6 +521,113 @@ struct DashboardView: View {
             RoundedRectangle(cornerRadius: 20)
                 .stroke(PocketLedgerTheme.divider, lineWidth: 1)
         }
+    }
+
+    private var loanSnapshot: some View {
+        let activeLoans = store.data.loans.filter { !$0.isSettled }
+        let currencies = LedgerCurrency.allCases.filter { currency in
+            activeLoans.contains { $0.currency == currency }
+        }
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        let dueSoonLimit = calendar.date(byAdding: .day, value: 7, to: today) ?? today
+        let overdueCount = activeLoans.filter { loan in
+            loan.dueDate.map { calendar.startOfDay(for: $0) < today } == true
+        }.count
+        let dueSoonCount = activeLoans.filter { loan in
+            guard let dueDate = loan.dueDate else { return false }
+            let day = calendar.startOfDay(for: dueDate)
+            return day >= today && day < dueSoonLimit
+        }.count
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Loans")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(PocketLedgerTheme.textPrimary)
+                    Text(activeLoans.isEmpty ? "No active loans" : "\(activeLoans.count) active")
+                        .font(.caption)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                }
+                Spacer()
+                NavigationLink {
+                    LoansView(store: store, security: security)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+                }
+                .accessibilityLabel("Open loans")
+            }
+
+            if activeLoans.isEmpty {
+                Button {
+                    onAddAction(.loan)
+                } label: {
+                    Label("Add a loan", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(PocketLedgerTheme.accent)
+            } else {
+                ForEach(currencies) { currency in
+                    HStack(spacing: 12) {
+                        Text(currency.rawValue)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(PocketLedgerTheme.textTertiary)
+                        Spacer(minLength: 4)
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text("Lent")
+                                .font(.caption2)
+                                .foregroundStyle(PocketLedgerTheme.textTertiary)
+                            ProtectedAmountText(
+                                value: store.ledgerIndex.lentLoanBalance(for: currency).formatted,
+                                isRevealed: areBalancesRevealed
+                            )
+                                .font(.caption.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(PocketLedgerTheme.income)
+                        }
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text("Borrowed")
+                                .font(.caption2)
+                                .foregroundStyle(PocketLedgerTheme.textTertiary)
+                            ProtectedAmountText(
+                                value: store.ledgerIndex.borrowedLoanBalance(for: currency).formatted,
+                                isRevealed: areBalancesRevealed
+                            )
+                                .font(.caption.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(PocketLedgerTheme.warning)
+                        }
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    loanStatusCount(title: "Due soon", count: dueSoonCount, tint: PocketLedgerTheme.accent)
+                    loanStatusCount(title: "Overdue", count: overdueCount, tint: PocketLedgerTheme.warning)
+                }
+            }
+        }
+        .padding(16)
+        .pocketGroupedSurface(cornerRadius: 20)
+        .overlay {
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(PocketLedgerTheme.divider, lineWidth: 1)
+        }
+        .accessibilityIdentifier("dashboard-loans")
+    }
+
+    private func loanStatusCount(title: String, count: Int, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("\(count)")
+                .font(.headline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(tint)
+            Text(title.uppercased())
+                .font(.caption2.weight(.bold))
+                .tracking(0.5)
+                .foregroundStyle(PocketLedgerTheme.textTertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func protectedBalanceText(_ value: String) -> some View {

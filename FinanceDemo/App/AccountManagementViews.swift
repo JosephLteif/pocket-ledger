@@ -8,6 +8,8 @@ struct AccountsView: View {
     let onAddAction: (AddAction) -> Void
     @State private var isPresentingAccount = false
     @State private var editingAccount: Account?
+    @State private var accountToDelete: Account?
+    @State private var accountDeletionError: String?
     @State private var isArchivedAccountsExpanded = false
     @State private var isAccountSummaryExpanded = false
     @State private var expandedPositionCurrency: LedgerCurrency?
@@ -31,7 +33,7 @@ struct AccountsView: View {
                 .listRowSeparator(.hidden)
 
             NavigationLink {
-                LoansView(store: store)
+                LoansView(store: store, security: security)
             } label: {
                 HStack(spacing: 12) {
                     PocketIcon(systemImage: "arrow.left.arrow.right.circle.fill", tint: PocketLedgerTheme.accent, size: 38)
@@ -103,6 +105,25 @@ struct AccountsView: View {
         }
         .sheet(isPresented: $isPresentingAccount, onDismiss: { editingAccount = nil }) {
             AccountEditor(store: store, account: editingAccount)
+        }
+        .confirmationDialog(
+            "Delete account and history?",
+            isPresented: deleteAccountConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Account", role: .destructive) {
+                guard let accountToDelete else { return }
+                _ = deleteAccount(accountToDelete)
+                self.accountToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { accountToDelete = nil }
+        } message: {
+            Text(accountDeletionMessage)
+        }
+        .alert("Account not deleted", isPresented: accountDeletionErrorPresented) {
+            Button("OK") { accountDeletionError = nil }
+        } message: {
+            Text(accountDeletionError ?? "")
         }
         .onChange(of: archivedAccounts.isEmpty) { _, isEmpty in
             if isEmpty {
@@ -299,6 +320,9 @@ struct AccountsView: View {
                     Button("Archive", systemImage: "archivebox") {
                         _ = store.setAccountArchived(accountID: account.id, isArchived: true)
                     }
+                    Button("Delete Account", systemImage: "trash", role: .destructive) {
+                        accountToDelete = account
+                    }
                 }
                 .draggable(account.id.uuidString)
                 .dropDestination(for: String.self) { items, _ in
@@ -320,6 +344,14 @@ struct AccountsView: View {
                         tint: PocketLedgerTheme.warning
                     ) {
                         _ = store.setAccountArchived(accountID: account.id, isArchived: true)
+                    }
+                    PocketCircularSwipeAction(
+                        title: "Delete account",
+                        systemImage: "trash",
+                        tint: .red,
+                        role: .destructive
+                    ) {
+                        accountToDelete = account
                     }
                 }
                 .swipeActions(edge: .leading, allowsFullSwipe: false) {
@@ -428,6 +460,16 @@ struct AccountsView: View {
                             }
                         }
                     }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        PocketCircularSwipeAction(
+                            title: "Delete account",
+                            systemImage: "trash",
+                            tint: .red,
+                            role: .destructive
+                        ) {
+                            accountToDelete = account
+                        }
+                    }
                     .listRowInsets(
                         EdgeInsets(
                             top: 0,
@@ -486,6 +528,34 @@ struct AccountsView: View {
     private func presentAccount(_ account: Account?) {
         editingAccount = account
         isPresentingAccount = true
+    }
+
+    private var deleteAccountConfirmationPresented: Binding<Bool> {
+        Binding(
+            get: { accountToDelete != nil },
+            set: { if !$0 { accountToDelete = nil } }
+        )
+    }
+
+    private var accountDeletionErrorPresented: Binding<Bool> {
+        Binding(
+            get: { accountDeletionError != nil },
+            set: { if !$0 { accountDeletionError = nil } }
+        )
+    }
+
+    private var accountDeletionMessage: String {
+        guard let accountToDelete else { return "This permanently removes the account and its related history." }
+        return "This permanently removes \(accountToDelete.name), every transaction that used it, linked loans, and any schedules or templates that use it. Transfers are removed in full, including the other account movement."
+    }
+
+    @discardableResult
+    private func deleteAccount(_ account: Account) -> Bool {
+        guard store.deleteAccount(id: account.id) else {
+            accountDeletionError = store.lastActionStatus ?? "The account could not be deleted."
+            return false
+        }
+        return true
     }
 }
 

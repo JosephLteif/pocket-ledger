@@ -129,7 +129,17 @@ enum FoundationModelService {
         }
 
         do {
-            let items = try await extractReceiptItems(from: trimmedText, using: model)
+            let items: [ReceiptItem]
+            if #available(iOS 27.0, *) {
+                items = try await extractReceiptItems(from: trimmedText, using: model)
+            } else {
+                let session = LanguageModelSession()
+                let response = try await session.respond(
+                    to: receiptPrompt(for: trimmedText),
+                    generating: ReceiptExtraction.self
+                )
+                items = response.content.items.compactMap(validReceiptItem)
+            }
             guard !items.isEmpty else {
                 return ReceiptAnalysis(
                     items: [],
@@ -161,12 +171,21 @@ enum FoundationModelService {
         }
     }
 
+    @available(iOS 27.0, *)
     private static func extractReceiptItems<Model: LanguageModel>(
         from text: String,
         using model: Model
     ) async throws -> [ReceiptItem] {
         let session = LanguageModelSession(model: model)
-        let prompt = """
+        let response = try await session.respond(
+            to: receiptPrompt(for: text),
+            generating: ReceiptExtraction.self
+        )
+        return response.content.items.compactMap(validReceiptItem)
+    }
+
+    private static func receiptPrompt(for text: String) -> String {
+        """
         Extract only purchased line items from this shopping receipt OCR.
 
         Return only the requested structured receipt items, with no explanation.
@@ -183,8 +202,6 @@ enum FoundationModelService {
         Receipt OCR:
         \(text.prefix(9000))
         """
-        let response = try await session.respond(to: prompt, generating: ReceiptExtraction.self)
-        return response.content.items.compactMap(validReceiptItem)
     }
 
     static func classifyImportAccounts(

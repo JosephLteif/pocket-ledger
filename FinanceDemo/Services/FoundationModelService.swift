@@ -44,6 +44,21 @@ enum FoundationModelService {
         let lineTotal: String
     }
 
+    private struct ReceiptTextResponse: Decodable {
+        let items: [ReceiptTextItem]
+    }
+
+    private struct ReceiptTextItem: Decodable {
+        let name: String
+        let quantity: Int
+        let unitPrice: String
+        let lineTotal: String
+    }
+
+    private enum ReceiptTextResponseError: Error {
+        case missingJSON
+    }
+
     struct AccountMappingResult: Sendable {
         let suggestions: [String: ImportAccountSuggestion]
         let warning: String?
@@ -177,19 +192,33 @@ enum FoundationModelService {
         using model: Model
     ) async throws -> [ReceiptItem] {
         let session = LanguageModelSession(model: model)
-        let response = try await session.respond(
-            to: receiptPrompt(for: text),
-            generating: ReceiptExtraction.self
-        )
-        return response.content.items.compactMap(validReceiptItem)
+        let response = try await session.respond(to: receiptPrompt(for: text))
+        let output = response.content
+        guard let start = output.firstIndex(of: "{"),
+              let end = output.lastIndex(of: "}"),
+              start <= end else {
+            throw ReceiptTextResponseError.missingJSON
+        }
+
+        let json = String(output[start...end])
+        let extraction = try JSONDecoder().decode(ReceiptTextResponse.self, from: Data(json.utf8))
+        return extraction.items.compactMap { item in
+            validReceiptItem(
+                name: item.name,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                lineTotal: item.lineTotal
+            )
+        }
     }
 
     private static func receiptPrompt(for text: String) -> String {
         """
         Extract only purchased line items from this shopping receipt OCR.
 
-        Return only the requested structured receipt items, with no explanation.
+        Return one valid JSON object and no markdown or explanation.
         The result must contain an items array with name, quantity, unitPrice, and lineTotal fields.
+        Encode quantity as a whole number and unitPrice and lineTotal as strings containing plain numeric text.
 
         Rules:
         - Include every product or service that was purchased and has a visible price.
@@ -372,22 +401,36 @@ enum FoundationModelService {
     }
 
     private static func validReceiptItem(_ payload: ReceiptItemPayload) -> ReceiptItem? {
-        let name = payload.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        validReceiptItem(
+            name: payload.name,
+            quantity: payload.quantity,
+            unitPrice: payload.unitPrice,
+            lineTotal: payload.lineTotal
+        )
+    }
+
+    private static func validReceiptItem(
+        name rawName: String,
+        quantity: Int,
+        unitPrice: String,
+        lineTotal: String
+    ) -> ReceiptItem? {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard name.count >= 2,
               name.count <= 120,
               name.rangeOfCharacter(from: .letters) != nil,
-              (1...99).contains(payload.quantity),
+              (1...99).contains(quantity),
               !isMetadataName(name) else {
             return nil
         }
 
-        let unitPriceText = normalizedAmountText(payload.unitPrice)
-        let lineTotalText = normalizedAmountText(payload.lineTotal)
+        let unitPriceText = normalizedAmountText(unitPrice)
+        let lineTotalText = normalizedAmountText(lineTotal)
         guard unitPriceText != nil || lineTotalText != nil else { return nil }
 
         return ReceiptItem(
             name: name,
-            quantity: payload.quantity,
+            quantity: quantity,
             unitPriceText: unitPriceText,
             lineTotalText: lineTotalText
         )

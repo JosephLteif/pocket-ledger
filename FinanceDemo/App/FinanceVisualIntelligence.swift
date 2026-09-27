@@ -5,13 +5,8 @@ import ImageIO
 import UniformTypeIdentifiers
 import VideoToolbox
 import Vision
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(VisualIntelligence)
 import VisualIntelligence
-@available(iOS 27.0, *)
-typealias FinanceVisualContentDescriptor = VisualIntelligence.SemanticContentDescriptor
-#else
-@available(iOS 26.0, *)
-typealias FinanceVisualContentDescriptor = SemanticContentDescriptor
 #endif
 
 @MainActor
@@ -34,6 +29,15 @@ final class VisualBillScanRouter: ObservableObject {
         return pendingBillScan
     }
 }
+
+#if !compiler(>=6.4) || canImport(VisualIntelligence)
+#if compiler(>=6.4)
+@available(iOS 27.0, *)
+typealias FinanceVisualContentDescriptor = VisualIntelligence.SemanticContentDescriptor
+#else
+@available(iOS 26.0, *)
+typealias FinanceVisualContentDescriptor = SemanticContentDescriptor
+#endif
 
 #if compiler(>=6.4)
 @available(iOS 27.0, *)
@@ -215,3 +219,4 @@ private final class VisualBillScanEntityCache {
         cachedEntityIDs.removeAll { $0 == identifier }
     }
 }
+#endif

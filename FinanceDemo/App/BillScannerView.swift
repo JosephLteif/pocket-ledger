@@ -672,6 +672,17 @@ struct BillScannerView: View {
                 billTotalOverrideText = nil
             }
         )
+        let unitPriceText = Binding<String>(
+            get: { item.wrappedValue.unitPriceText },
+            set: { newValue in
+                let oldPrice = Money.parse(item.wrappedValue.unitPriceText, currency: currency)?.minorUnits
+                let newPrice = Money.parse(newValue, currency: currency)?.minorUnits
+                item.wrappedValue.unitPriceText = newValue
+                guard oldPrice != newPrice else { return }
+                item.wrappedValue.lineTotalOverrideText = nil
+                billTotalOverrideText = nil
+            }
+        )
         let lineTotalOverrideText = Binding<String>(
             get: {
                 let lineItem = item.wrappedValue
@@ -684,6 +695,14 @@ struct BillScannerView: View {
             set: {
                 item.wrappedValue.lineTotalOverrideText = $0
                 billTotalOverrideText = nil
+                guard let total = Money.parse($0, currency: currency), total.minorUnits > 0 else { return }
+                var unitPriceMinorUnits = Decimal(total.minorUnits)
+                    / Decimal(max(item.wrappedValue.quantity, 1))
+                var roundedUnitPriceMinorUnits = Decimal()
+                NSDecimalRound(&roundedUnitPriceMinorUnits, &unitPriceMinorUnits, 0, .plain)
+                item.wrappedValue.unitPriceText = currency.formattedInput(
+                    minorUnits: NSDecimalNumber(decimal: roundedUnitPriceMinorUnits).int64Value
+                )
             }
         )
 
@@ -733,14 +752,7 @@ struct BillScannerView: View {
                     .font(.subheadline)
             }
 
-            CurrencyInputField("Unit price", text: item.unitPriceText, currency: $currency)
-                .onChange(of: item.wrappedValue.unitPriceText) { oldValue, newValue in
-                    let oldPrice = Money.parse(oldValue, currency: currency)?.minorUnits
-                    let newPrice = Money.parse(newValue, currency: currency)?.minorUnits
-                    guard oldPrice != newPrice else { return }
-                    item.wrappedValue.lineTotalOverrideText = nil
-                    billTotalOverrideText = nil
-                }
+            CurrencyInputField("Unit price", text: unitPriceText, currency: $currency)
 
             HStack {
                 Text("Item total")

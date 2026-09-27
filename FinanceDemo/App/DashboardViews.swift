@@ -40,7 +40,7 @@ struct MoreView: View {
 
                 Section("Insights") {
                     NavigationLink {
-                        MetricsView(store: store)
+                        MetricsView(store: store, security: security)
                     } label: {
                         Label("Metrics", systemImage: "chart.xyaxis.line")
                     }
@@ -49,7 +49,7 @@ struct MoreView: View {
 
                 Section("Planning") {
                     NavigationLink {
-                        BudgetsView(store: store)
+                        BudgetsView(store: store, security: security)
                     } label: {
                         Label("Budgets", systemImage: "chart.bar.doc.horizontal")
                     }
@@ -116,8 +116,9 @@ struct MoreView: View {
             .navigationTitle("More")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                BalanceVisibilityToolbarItem(security: security)
-                AddTransactionToolbar(store: store, onAction: onAddAction)
+                PocketLedgerToolbar(security: security) {
+                    AddTransactionToolbar(store: store, onAction: onAddAction)
+                }
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
@@ -219,18 +220,19 @@ struct DashboardView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar(.visible, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        presentedSheet = .customization
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
+                PocketLedgerToolbar(security: security) {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            presentedSheet = .customization
+                        } label: {
+                            Image(systemName: "slider.horizontal.3")
+                        }
+                        .accessibilityLabel("Customize dashboard")
+                        .accessibilityHint("Choose which widgets appear and reorder them")
+                        .accessibilityIdentifier("dashboard-customize")
                     }
-                    .accessibilityLabel("Customize dashboard")
-                    .accessibilityHint("Choose which widgets appear and reorder them")
-                    .accessibilityIdentifier("dashboard-customize")
+                    AddTransactionToolbar(store: store, onAction: onAddAction)
                 }
-                BalanceVisibilityToolbarItem(security: security)
-                AddTransactionToolbar(store: store, onAction: onAddAction)
             }
             .sheet(item: $presentedSheet) { sheet in
                 switch sheet {
@@ -440,7 +442,7 @@ struct DashboardView: View {
                 }
                 Spacer()
                 NavigationLink {
-                    AccountsView(store: store, security: security)
+                    AccountsView(store: store, security: security, onAddAction: onAddAction)
                 } label: {
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.bold))
@@ -542,6 +544,7 @@ struct DashboardView: View {
                     TransactionsView(
                         store: store,
                         onAddExpense: onAddExpense,
+                        security: security,
                         initialFilter: .all,
                         initialPeriod: .thisMonth
                     )
@@ -559,6 +562,7 @@ struct DashboardView: View {
                     TransactionsView(
                         store: store,
                         onAddExpense: onAddExpense,
+                        security: security,
                         initialFilter: .expense,
                         initialPeriod: .thisMonth,
                         initialSearch: snapshot.topCategory ?? ""
@@ -868,7 +872,7 @@ struct DashboardView: View {
                 HStack {
                     sectionHeader(title: "Budget pulse", detail: "This month")
                     NavigationLink {
-                        BudgetsView(store: store)
+                        BudgetsView(store: store, security: security)
                     } label: {
                         Image(systemName: "chevron.right")
                             .font(.caption.weight(.bold))
@@ -1146,18 +1150,20 @@ private struct AttentionInboxView: View {
             TransactionsView(
                 store: store,
                 onAddExpense: onAddExpense,
+                security: security,
                 initialFilter: .uncategorized
             )
         case .transferTransactions:
             TransactionsView(
                 store: store,
                 onAddExpense: onAddExpense,
+                security: security,
                 initialFilter: .transfer
             )
         case .scheduledTransactions:
             ScheduledTransactionsView(store: store)
         case .budgets:
-            BudgetsView(store: store)
+            BudgetsView(store: store, security: security)
         }
     }
 }

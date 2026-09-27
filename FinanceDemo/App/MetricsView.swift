@@ -131,6 +131,7 @@ private struct CategoryMetricsDetailSnapshot {
 @MainActor
 struct MetricsView: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject var security: AppSecurityService
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var period: MetricsPeriod = .month
@@ -189,14 +190,16 @@ struct MetricsView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar(.visible, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        isExportOptionsPresented = true
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
+                PocketLedgerToolbar(security: security) {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            isExportOptionsPresented = true
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        .accessibilityLabel("Share metrics PDF report")
+                        .accessibilityHint("Creates a shareable PDF report")
                     }
-                    .accessibilityLabel("Share metrics PDF report")
-                    .accessibilityHint("Creates a shareable PDF report")
                 }
             }
             .onAppear(perform: refreshSnapshot)
@@ -560,6 +563,7 @@ struct MetricsView: View {
                     NavigationLink {
                         TransactionsView(
                             store: store,
+                            security: security,
                             initialFilter: .expense,
                             initialPeriod: .custom,
                             initialAccountID: metric.accountID,
@@ -912,7 +916,11 @@ private struct CategoryMetricsDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $isShowingTransactionDetail) {
             if let transactionToOpenID {
-                MetricsTransactionDetailView(store: store, transactionID: transactionToOpenID)
+                MetricsTransactionDetailView(
+                    store: store,
+                    security: security,
+                    transactionID: transactionToOpenID
+                )
             }
         }
         .toolbar(.visible, for: .navigationBar)
@@ -1178,6 +1186,7 @@ private struct CategoryMetricsDetailView: View {
 @MainActor
 private struct MetricsTransactionDetailView: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject var security: AppSecurityService
     let transactionID: UUID
 
     @State private var editingTransaction: LedgerTransaction?
@@ -1218,12 +1227,14 @@ private struct MetricsTransactionDetailView: View {
         .navigationTitle("Transaction")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Edit", systemImage: "pencil") {
-                    editingTransaction = transaction
+            PocketLedgerToolbar(security: security) {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Edit", systemImage: "pencil") {
+                        editingTransaction = transaction
+                    }
+                    .disabled(transaction == nil)
+                    .accessibilityIdentifier("metrics-transaction-edit")
                 }
-                .disabled(transaction == nil)
-                .accessibilityIdentifier("metrics-transaction-edit")
             }
         }
         .sheet(item: $editingTransaction) { transaction in

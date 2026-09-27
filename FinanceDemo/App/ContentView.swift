@@ -170,8 +170,9 @@ struct ContentView: View {
                         )
                         .searchFocused($isSearchFieldFocused)
                         .toolbar {
-                            AddTransactionToolbar(store: store, onAction: { addAction = $0 })
-                            BalanceVisibilityToolbarItem(security: security)
+                            PocketLedgerToolbar(security: security) {
+                                AddTransactionToolbar(store: store, onAction: { addAction = $0 })
+                            }
                         }
                 }
             }
@@ -186,11 +187,9 @@ struct ContentView: View {
                     TransactionsView(
                         store: store,
                         onAddExpense: { addAction = .expense },
-                        onAddAction: { addAction = $0 }
+                        onAddAction: { addAction = $0 },
+                        security: security
                     )
-                    .toolbar {
-                        BalanceVisibilityToolbarItem(security: security)
-                    }
                 }
             }
             .accessibilityIdentifier("tab-transactions")
@@ -201,14 +200,11 @@ struct ContentView: View {
                 value: AppTab.accounts
             ) {
                 NavigationStack {
-                    AccountsView(store: store, security: security)
-                        .toolbar {
-                            AddTransactionToolbar(
-                                store: store,
-                                onAction: { addAction = $0 },
-                                systemImage: "plus.circle"
-                            )
-                        }
+                    AccountsView(
+                        store: store,
+                        security: security,
+                        onAddAction: { addAction = $0 }
+                    )
                 }
             }
             .accessibilityIdentifier("tab-accounts")

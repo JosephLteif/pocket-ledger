@@ -5,6 +5,7 @@ import SwiftUI
 struct AccountsView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
+    let onAddAction: (AddAction) -> Void
     @State private var isPresentingAccount = false
     @State private var editingAccount: Account?
     @State private var isArchivedAccountsExpanded = false
@@ -66,14 +67,20 @@ struct AccountsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            BalanceVisibilityToolbarItem(security: security)
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    presentAccount(nil)
-                } label: {
-                    Image(systemName: "person.crop.circle.badge.plus")
+            PocketLedgerToolbar(security: security) {
+                AddTransactionToolbar(
+                    store: store,
+                    onAction: onAddAction,
+                    systemImage: "plus.circle"
+                )
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        presentAccount(nil)
+                    } label: {
+                        Image(systemName: "person.crop.circle.badge.plus")
+                    }
+                    .accessibilityLabel("Add account")
                 }
-                .accessibilityLabel("Add account")
             }
         }
         .sheet(isPresented: $isPresentingAccount, onDismiss: { editingAccount = nil }) {

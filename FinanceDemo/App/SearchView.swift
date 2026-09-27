@@ -197,6 +197,7 @@ struct GlobalSearchView: View {
                                     NavigationLink {
                                         TransactionsView(
                                             store: store,
+                                            security: security,
                                             initialCategoryID: category.id
                                         )
                                     } label: {
@@ -240,7 +241,11 @@ struct GlobalSearchView: View {
 
                                 if results.transactionCount > results.transactions.count {
                                     NavigationLink {
-                                        TransactionsView(store: store, initialSearch: query)
+                                        TransactionsView(
+                                            store: store,
+                                            security: security,
+                                            initialSearch: query
+                                        )
                                     } label: {
                                         Label("See all matching transactions", systemImage: "arrow.right")
                                             .font(.subheadline.weight(.semibold))

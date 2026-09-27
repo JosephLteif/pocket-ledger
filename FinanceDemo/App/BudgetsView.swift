@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 struct BudgetsView: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject var security: AppSecurityService
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var editingBudget: LedgerBudget?
     @State private var isPresentingEditor = false
@@ -47,12 +48,14 @@ struct BudgetsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: presentNewBudget) {
-                    Image(systemName: "plus")
+            PocketLedgerToolbar(security: security) {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: presentNewBudget) {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Add budget")
+                    .accessibilityHint("Creates a new monthly budget")
                 }
-                .accessibilityLabel("Add budget")
-                .accessibilityHint("Creates a new monthly budget")
             }
         }
         .sheet(isPresented: $isPresentingEditor, onDismiss: { editingBudget = nil }) {
@@ -119,6 +122,7 @@ struct BudgetsView: View {
                 NavigationLink {
                     TransactionsView(
                         store: store,
+                        security: security,
                         initialFilter: .expense,
                         initialPeriod: .thisMonth,
                         initialCategoryID: budget.categoryID,

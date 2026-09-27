@@ -261,6 +261,7 @@ struct TransactionsView: View {
     @ObservedObject var store: LedgerStore
     let onAddExpense: () -> Void
     private let onAddAction: ((AddAction) -> Void)?
+    private let security: AppSecurityService
     @State private var selectedFilter: TransactionFilter
     @State private var selectedPeriod: TransactionPeriod
     @State private var selectedQuickFilter: TransactionQuickFilter
@@ -290,6 +291,7 @@ struct TransactionsView: View {
         store: LedgerStore,
         onAddExpense: @escaping () -> Void = {},
         onAddAction: ((AddAction) -> Void)? = nil,
+        security: AppSecurityService,
         initialFilter: TransactionFilter = .all,
         initialPeriod: TransactionPeriod = .all,
         initialSearch: String = "",
@@ -303,6 +305,7 @@ struct TransactionsView: View {
         _store = ObservedObject(wrappedValue: store)
         self.onAddExpense = onAddExpense
         self.onAddAction = onAddAction
+        self.security = security
         _selectedFilter = State(initialValue: initialFilter)
         _selectedPeriod = State(initialValue: initialPeriod)
         _drilldownCategoryID = State(initialValue: initialCategoryID)
@@ -418,32 +421,34 @@ struct TransactionsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                if isSelectingTransactions {
-                    Button("Done") {
-                        isSelectingTransactions = false
-                        selectedTransactionIDs.removeAll()
+            PocketLedgerToolbar(security: security) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    if isSelectingTransactions {
+                        Button("Done") {
+                            isSelectingTransactions = false
+                            selectedTransactionIDs.removeAll()
+                        }
+                    } else {
+                        Button {
+                            isSelectingTransactions = true
+                        } label: {
+                            Image(systemName: "checklist")
+                        }
+                        .accessibilityLabel("Select transactions")
+                        .accessibilityIdentifier("select-transactions")
                     }
-                } else {
-                    Button {
-                        isSelectingTransactions = true
-                    } label: {
-                        Image(systemName: "checklist")
-                    }
-                    .accessibilityLabel("Select transactions")
-                    .accessibilityIdentifier("select-transactions")
                 }
-            }
-            if let onAddAction {
-                AddTransactionToolbar(store: store, onAction: onAddAction)
-            } else {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        isPresentingBillScanner = true
-                    } label: {
-                        Image(systemName: "doc.viewfinder")
+                if let onAddAction {
+                    AddTransactionToolbar(store: store, onAction: onAddAction)
+                } else {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            isPresentingBillScanner = true
+                        } label: {
+                            Image(systemName: "doc.viewfinder")
+                        }
+                        .accessibilityLabel("Scan bill")
                     }
-                    .accessibilityLabel("Scan bill")
                 }
             }
         }

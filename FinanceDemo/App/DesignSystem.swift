@@ -362,10 +362,29 @@ struct BalanceVisibilityToolbarItem: ToolbarContent {
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var isRevealed = false
 
     var body: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItem(placement: .primaryAction) {
             BalanceVisibilityControl(security: security, isRevealed: $isRevealed)
                 .accessibilityIdentifier("balance-visibility-control")
         }
+    }
+}
+
+@MainActor
+struct PocketLedgerToolbar<Content: ToolbarContent>: ToolbarContent {
+    let security: AppSecurityService
+    private let content: Content
+
+    init(
+        security: AppSecurityService,
+        @ToolbarContentBuilder content: () -> Content
+    ) {
+        self.security = security
+        self.content = content()
+    }
+
+    var body: some ToolbarContent {
+        BalanceVisibilityToolbarItem(security: security)
+        content
     }
 }
 

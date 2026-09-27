@@ -32,30 +32,6 @@ struct AccountsView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
-            NavigationLink {
-                LoansView(store: store, security: security)
-            } label: {
-                HStack(spacing: 12) {
-                    PocketIcon(systemImage: "arrow.left.arrow.right.circle.fill", tint: PocketLedgerTheme.accent, size: 38)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Loans")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(PocketLedgerTheme.textPrimary)
-                        Text("Track money lent, repayments, and due dates")
-                            .font(.caption)
-                            .foregroundStyle(PocketLedgerTheme.textSecondary)
-                    }
-                    Spacer()
-                    if !store.legacyLoanAccountsNeedingSetup.isEmpty {
-                        Text("\(store.legacyLoanAccountsNeedingSetup.count) to review")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(PocketLedgerTheme.warning)
-                    }
-                }
-                .padding(.vertical, 5)
-            }
-            .listRowBackground(PocketLedgerTheme.surface)
-
             ForEach(AccountType.allCases) { accountType in
                 let accounts = store.activeAccounts.filter { $0.type == accountType }
                 if !accounts.isEmpty {
@@ -79,6 +55,7 @@ struct AccountsView: View {
                 .listRowSeparator(.hidden)
         }
         .listStyle(.plain)
+        .pocketSwipeActionsContainer()
         .listSectionSpacing(20)
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
@@ -320,8 +297,11 @@ struct AccountsView: View {
                     Button("Archive", systemImage: "archivebox") {
                         _ = store.setAccountArchived(accountID: account.id, isArchived: true)
                     }
-                    Button("Delete Account", systemImage: "trash", role: .destructive) {
+                    Button(role: .destructive) {
                         accountToDelete = account
+                    } label: {
+                        Label("Delete Account", systemImage: "trash")
+                            .foregroundStyle(.red)
                     }
                 }
                 .draggable(account.id.uuidString)

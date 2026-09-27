@@ -412,6 +412,7 @@ struct TransactionsView: View {
             }
         }
         .listStyle(.plain)
+        .pocketSwipeActionsContainer()
         .listSectionSpacing(20)
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
@@ -1120,8 +1121,11 @@ struct TransactionRow: View {
                 Button("Edit", systemImage: "pencil", action: onEdit)
                 Button("Duplicate", systemImage: "plus.square.on.square", action: onDuplicate)
                 Button("Save as template", systemImage: "rectangle.stack.badge.plus", action: onSaveTemplate)
-                Button("Delete", systemImage: "trash", role: .destructive) {
+                Button(role: .destructive) {
                     isShowingDeleteConfirmation = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                        .foregroundStyle(.red)
                 }
             }
         }

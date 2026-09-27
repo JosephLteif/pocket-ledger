@@ -428,6 +428,8 @@ struct BillScannerView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var isShowingSourceOptions = false
+    @State private var isShowingPhotoPicker = false
     @State private var previewImage: UIImage?
     @State private var recognizedText = ""
     @State private var lineItems: [BillLineItem] = []
@@ -439,6 +441,10 @@ struct BillScannerView: View {
     @State private var isShowingAccountEditor = false
     @State private var transactionEditorRequest: BillTransactionEditorRequest?
     @FocusState private var focusedLineTotalID: UUID?
+    @FocusState private var focusedLineItemNameID: UUID?
+    @FocusState private var isBillTotalFocused = false
+    @State private var editingLineItemNameID: UUID?
+    @State private var billTotalOverrideText: String?
     @State private var attachmentData: Data?
     @State private var attachmentFileName = "receipt.jpg"
     @State private var attachmentContentType = "image/jpeg"
@@ -454,11 +460,9 @@ struct BillScannerView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("Take or choose a bill photo. Pocket Ledger will read likely item lines, then you can keep only your items and adjust their quantities.")
+                    Text("Add a photo or PDF, then review the detected items.")
                         .font(.subheadline)
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
-
-                    sourceButtons
 
                     if let previewImage {
                         Image(uiImage: previewImage)
@@ -504,9 +508,7 @@ struct BillScannerView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(PocketLedgerTheme.textSecondary)
 
-                            Button {
-                                lineItems = [BillLineItem(name: "")]
-                            } label: {
+                            Button(action: addManualItem) {
                                 Label("Add item manually", systemImage: "plus.circle")
                             }
                             .foregroundStyle(PocketLedgerTheme.accent)
@@ -533,6 +535,7 @@ struct BillScannerView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 28)
             }
+            .scrollDismissesKeyboard(.interactively)
             .pocketScreen()
             .navigationTitle("Scan bill")
             .navigationBarTitleDisplayMode(.inline)
@@ -540,14 +543,54 @@ struct BillScannerView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        isShowingSourceOptions = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Add bill photo or PDF")
+                }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("Done") { focusedLineTotalID = nil }
+                    Button("Done", action: dismissKeyboard)
                 }
             }
+            .confirmationDialog("Add a bill", isPresented: $isShowingSourceOptions, titleVisibility: .visible) {
+                Button {
+                    isShowingPhotoPicker = true
+                } label: {
+                    Label("Choose photo", systemImage: "photo")
+                }
+
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button {
+                        isShowingCamera = true
+                    } label: {
+                        Label("Take photo", systemImage: "camera")
+                    }
+                }
+
+                Button {
+                    isShowingDocumentImporter = true
+                } label: {
+                    Label("Choose PDF", systemImage: "doc.richtext")
+                }
+            }
+            .photosPicker(
+                isPresented: $isShowingPhotoPicker,
+                selection: $selectedPhoto,
+                matching: .images,
+                photoLibrary: .shared()
+            )
             .onChange(of: selectedPhoto) { _, item in
                 guard let item else { return }
                 loadPhoto(item)
+            }
+            .onChange(of: currency) { _, newCurrency in
+                if let billTotalOverrideText {
+                    self.billTotalOverrideText = newCurrency.formattedInput(billTotalOverrideText)
+                }
             }
             .fileImporter(
                 isPresented: $isShowingDocumentImporter,
@@ -593,43 +636,6 @@ struct BillScannerView: View {
         }
     }
 
-    private var sourceButtons: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-            PhotosPicker(
-                selection: $selectedPhoto,
-                matching: .images,
-                photoLibrary: .shared()
-            ) {
-                Label("Choose photo", systemImage: "photo")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glassProminent)
-            .tint(PocketLedgerTheme.accent)
-
-            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                Button {
-                    isShowingCamera = true
-                } label: {
-                    Label("Camera", systemImage: "camera")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glass)
-                .tint(PocketLedgerTheme.accent)
-            }
-            }
-
-            Button {
-                isShowingDocumentImporter = true
-            } label: {
-                Label("Choose PDF", systemImage: "doc.richtext")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glass)
-            .tint(PocketLedgerTheme.accent)
-        }
-    }
-
     private var reviewItems: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -648,9 +654,7 @@ struct BillScannerView: View {
                 lineItemEditor($item)
             }
 
-            Button {
-                lineItems.append(BillLineItem(name: ""))
-            } label: {
+            Button(action: addManualItem) {
                 Label("Add item manually", systemImage: "plus.circle")
             }
             .foregroundStyle(PocketLedgerTheme.accent)
@@ -660,52 +664,109 @@ struct BillScannerView: View {
     }
 
     private func lineItemEditor(_ item: Binding<BillLineItem>) -> some View {
+        let itemID = item.wrappedValue.id
         let total = item.wrappedValue.total(in: currency)
+        let isSelected = Binding<Bool>(
+            get: { item.wrappedValue.isSelected },
+            set: {
+                item.wrappedValue.isSelected = $0
+                billTotalOverrideText = nil
+            }
+        )
+        let lineTotalOverrideText = Binding<String>(
+            get: { item.wrappedValue.lineTotalOverrideText },
+            set: {
+                item.wrappedValue.lineTotalOverrideText = $0
+                billTotalOverrideText = nil
+            }
+        )
 
         return VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: item.isSelected) {
-                Text(item.wrappedValue.name.isEmpty ? "Untitled item" : item.wrappedValue.name)
-                    .font(.subheadline.weight(.semibold))
+            HStack(spacing: 10) {
+                Toggle("Include item", isOn: isSelected)
+                    .labelsHidden()
+                    .accessibilityLabel("Include \(item.wrappedValue.name.isEmpty ? "item" : item.wrappedValue.name)")
+                    .accessibilityValue(item.wrappedValue.isSelected ? "Selected" : "Not selected")
+
+                if editingLineItemNameID == itemID {
+                    TextField("Item name", text: item.name)
+                        .focused($focusedLineItemNameID, equals: itemID)
+                        .submitLabel(.done)
+                        .onSubmit(finishLineItemNameEditing)
+                } else {
+                    Text(item.wrappedValue.name.isEmpty ? "Untitled item" : item.wrappedValue.name)
+                        .font(.subheadline.weight(.semibold))
+                }
+
+                Spacer(minLength: 4)
+
+                Button {
+                    if editingLineItemNameID == itemID {
+                        finishLineItemNameEditing()
+                    } else {
+                        editingLineItemNameID = itemID
+                        focusedLineItemNameID = itemID
+                    }
+                } label: {
+                    Image(systemName: editingLineItemNameID == itemID ? "checkmark" : "pencil")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(PocketLedgerTheme.accent)
+                .accessibilityLabel(editingLineItemNameID == itemID ? "Finish editing item name" : "Edit item name")
             }
 
-            TextField("Item name", text: item.name)
-
-            Stepper(value: item.quantity, in: 1...99) {
+            Stepper(value: Binding(
+                get: { item.wrappedValue.quantity },
+                set: { quantity in
+                    item.wrappedValue.quantity = quantity
+                    item.wrappedValue.lineTotalOverrideText = ""
+                    billTotalOverrideText = nil
+                }
+            ), in: 1...99) {
                 Text("Quantity \(item.wrappedValue.quantity)")
                     .font(.subheadline)
             }
 
             CurrencyInputField("Unit price", text: item.unitPriceText, currency: $currency)
+                .onChange(of: item.wrappedValue.unitPriceText) { oldValue, newValue in
+                    let oldPrice = Money.parse(oldValue, currency: currency)?.minorUnits
+                    let newPrice = Money.parse(newValue, currency: currency)?.minorUnits
+                    guard oldPrice != newPrice else { return }
+                    item.wrappedValue.lineTotalOverrideText = ""
+                    billTotalOverrideText = nil
+                }
 
             HStack {
                 Text("Current total")
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
                 Spacer()
-                if focusedLineTotalID == item.wrappedValue.id {
-                    TextField("Enter total", text: item.lineTotalOverrideText)
+                if focusedLineTotalID == itemID {
+                    TextField("Enter total", text: lineTotalOverrideText)
                         .keyboardType(.decimalPad)
-                        .focused($focusedLineTotalID, equals: item.wrappedValue.id)
+                        .focused($focusedLineTotalID, equals: itemID)
                         .multilineTextAlignment(.trailing)
                         .font(.subheadline.weight(.semibold).monospacedDigit())
                         .frame(minWidth: 80, maxWidth: 150)
                         .onChange(of: currency) { _, newCurrency in
-                            item.wrappedValue.lineTotalOverrideText = newCurrency.formattedInput(
-                                item.wrappedValue.lineTotalOverrideText
+                            lineTotalOverrideText.wrappedValue = newCurrency.formattedInput(
+                                lineTotalOverrideText.wrappedValue
                             )
                         }
                 } else {
                     Button {
+                        billTotalOverrideText = nil
                         if item.wrappedValue.lineTotalOverrideText.isEmpty, let total {
-                            let units = Decimal(total.minorUnits) / Decimal(total.currency.minorUnitScale)
-                            item.wrappedValue.lineTotalOverrideText = currency.formattedInput(
-                                NSDecimalNumber(decimal: units).stringValue
-                            )
+                            item.wrappedValue.lineTotalOverrideText = editableAmountText(for: total)
                         }
-                        focusedLineTotalID = item.wrappedValue.id
+                        focusedLineTotalID = itemID
                     } label: {
-                        Text(total?.formatted ?? "Enter a price")
-                            .font(.subheadline.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(total == nil ? PocketLedgerTheme.textTertiary : PocketLedgerTheme.textPrimary)
+                        HStack(spacing: 6) {
+                            Text(total?.formatted ?? "Enter a price")
+                            Image(systemName: "pencil")
+                                .font(.caption2)
+                        }
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(total == nil ? PocketLedgerTheme.textTertiary : PocketLedgerTheme.textPrimary)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Edit item total")
@@ -723,16 +784,32 @@ struct BillScannerView: View {
 
     @ViewBuilder
     private var totalCard: some View {
-        if let total = selectedTotal {
+        if !lineItems.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Selected total")
+                        Text("Bill total")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(PocketLedgerTheme.textSecondary)
-                        Text(total.formatted)
-                            .font(.system(size: 30, weight: .bold, design: .rounded))
-                            .monospacedDigit()
+                        if isBillTotalFocused {
+                            TextField("Enter total", text: billTotalInput)
+                                .keyboardType(.decimalPad)
+                                .focused($isBillTotalFocused)
+                                .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
+                                .frame(minWidth: 120, maxWidth: 200)
+                        } else {
+                            Button(action: beginBillTotalEditing) {
+                                HStack(spacing: 8) {
+                                    Text(currentBillTotal?.formatted ?? "Enter a price")
+                                    Image(systemName: "pencil")
+                                        .font(.caption)
+                                }
+                                .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
+                                .foregroundStyle(currentBillTotal == nil ? PocketLedgerTheme.textTertiary : PocketLedgerTheme.textPrimary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Edit bill total")
+                        }
                     }
                     Spacer()
                     Image(systemName: "checkmark.circle.fill")
@@ -746,6 +823,7 @@ struct BillScannerView: View {
                 }
                 .buttonStyle(.glassProminent)
                 .tint(PocketLedgerTheme.accent)
+                .disabled(currentBillTotal == nil)
 
                 if !hasMatchingAccount {
                     Text("Add a \(currency.rawValue) account first to use this total.")
@@ -762,11 +840,6 @@ struct BillScannerView: View {
             }
             .padding(16)
             .pocketGlassSurface(cornerRadius: 20, tint: PocketLedgerTheme.accent.opacity(0.08))
-        } else {
-            Text("Select at least one item and enter a valid price for every selected line.")
-                .font(.footnote)
-                .foregroundStyle(PocketLedgerTheme.textSecondary)
-                .padding(.top, 4)
         }
     }
 
@@ -788,6 +861,30 @@ struct BillScannerView: View {
             minorUnits = nextTotal
         }
         return Money(currency: currency, minorUnits: minorUnits)
+    }
+
+    private var currentBillTotal: Money? {
+        guard let billTotalOverrideText else { return selectedTotal }
+        guard let total = Money.parse(billTotalOverrideText, currency: currency), total.minorUnits > 0 else {
+            return nil
+        }
+        return total
+    }
+
+    private var billTotalInput: Binding<String> {
+        Binding(
+            get: {
+                self.billTotalOverrideText
+                    ?? self.selectedTotal.map { self.editableAmountText(for: $0) }
+                    ?? ""
+            },
+            set: { self.billTotalOverrideText = $0 }
+        )
+    }
+
+    private func editableAmountText(for money: Money) -> String {
+        let units = Decimal(money.minorUnits) / Decimal(money.currency.minorUnitScale)
+        return currency.formattedInput(NSDecimalNumber(decimal: units).stringValue)
     }
 
     private var hasMatchingAccount: Bool {
@@ -872,6 +969,7 @@ struct BillScannerView: View {
             previewImage = nil
             recognizedText = ""
             lineItems = []
+            billTotalOverrideText = nil
             scanStatusMessage = "PDF ready. Add the transaction details, then review the attachment before saving."
             transactionEditorRequest = BillTransactionEditorRequest(total: nil)
         } catch {
@@ -884,6 +982,7 @@ struct BillScannerView: View {
         errorMessage = nil
         recognizedText = ""
         lineItems = []
+        billTotalOverrideText = nil
         scanStatusMessage = nil
 
         do {
@@ -900,13 +999,46 @@ struct BillScannerView: View {
     }
 
     private func useTotalInTransaction() {
-        guard let total = selectedTotal else { return }
+        guard let total = currentBillTotal else { return }
         guard hasMatchingAccount else {
             errorMessage = "Add a \(currency.rawValue) account before adding this bill as a transaction."
             return
         }
 
         transactionEditorRequest = BillTransactionEditorRequest(total: total)
+    }
+
+    private func addManualItem() {
+        let item = BillLineItem(name: "")
+        lineItems.append(item)
+        billTotalOverrideText = nil
+        editingLineItemNameID = item.id
+        focusedLineItemNameID = item.id
+    }
+
+    private func finishLineItemNameEditing() {
+        editingLineItemNameID = nil
+        focusedLineItemNameID = nil
+    }
+
+    private func beginBillTotalEditing() {
+        if billTotalOverrideText == nil, let selectedTotal {
+            billTotalOverrideText = editableAmountText(for: selectedTotal)
+        }
+        isBillTotalFocused = true
+    }
+
+    private func dismissKeyboard() {
+        focusedLineTotalID = nil
+        focusedLineItemNameID = nil
+        editingLineItemNameID = nil
+        isBillTotalFocused = false
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
     }
 }
 

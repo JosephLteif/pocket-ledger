@@ -57,12 +57,6 @@ struct AccountsView: View {
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
         .pocketScreen()
-        .safeAreaInset(edge: .top, spacing: 0) {
-            screenSubtitle
-                .padding(.horizontal, 16)
-                .padding(.vertical, 4)
-                .background(PocketLedgerTheme.background)
-        }
         .navigationTitle("Accounts")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
@@ -245,13 +239,6 @@ struct AccountsView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
         }
-    }
-
-    private var screenSubtitle: some View {
-        Text("Tap for activity · hold for options · drag to reorder")
-            .font(.footnote)
-            .foregroundStyle(PocketLedgerTheme.textSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func accountSection(type: AccountType, accounts: [Account]) -> some View {

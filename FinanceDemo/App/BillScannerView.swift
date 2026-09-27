@@ -442,7 +442,7 @@ struct BillScannerView: View {
     @State private var transactionEditorRequest: BillTransactionEditorRequest?
     @FocusState private var focusedLineTotalID: UUID?
     @FocusState private var focusedLineItemNameID: UUID?
-    @FocusState private var isBillTotalFocused = false
+    @FocusState private var isBillTotalFocused: Bool
     @State private var editingLineItemNameID: UUID?
     @State private var billTotalOverrideText: String?
     @State private var attachmentData: Data?

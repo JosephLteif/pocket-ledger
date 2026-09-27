@@ -197,12 +197,8 @@ private enum BillOCRService {
         for provider: FoundationModelService.ReceiptAnalysis.Provider
     ) -> String {
         switch provider {
-        case .privateCloudCompute:
-            return "Private Cloud Compute cleaned up the receipt items. Review the selection before saving."
         case .onDevice:
             return "On-device AI cleaned up the receipt items. Review the selection before saving."
-        case .onDeviceFallback:
-            return "Private Cloud Compute was unavailable, so on-device AI cleaned up the receipt items. Review the selection before saving."
         }
     }
 }

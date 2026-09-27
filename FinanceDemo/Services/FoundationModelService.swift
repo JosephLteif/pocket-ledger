@@ -11,9 +11,7 @@ enum FoundationModelService {
 
     struct ReceiptAnalysis: Sendable {
         enum Provider: Sendable {
-            case privateCloudCompute
             case onDevice
-            case onDeviceFallback
         }
 
         enum Status: Sendable {
@@ -109,38 +107,10 @@ enum FoundationModelService {
             )
         }
 
-        var attemptedPrivateCloudCompute = false
-        if #available(iOS 27.0, *) {
-            attemptedPrivateCloudCompute = true
-            let model = PrivateCloudComputeLanguageModel()
-            if case .available = model.availability {
-                do {
-                    let items = try await extractReceiptItems(from: trimmedText, using: model)
-                    if !items.isEmpty {
-                        return ReceiptAnalysis(items: items, status: .applied(.privateCloudCompute))
-                    }
-                } catch is CancellationError {
-                    return ReceiptAnalysis(
-                        items: [],
-                        status: .failed("Receipt analysis was cancelled, so Vision OCR was used instead.")
-                    )
-                } catch {
-                    // PCC can fail because of network or service availability; try the local model next.
-                }
-            }
-        }
-
         let model = SystemLanguageModel.default
         guard case .available = model.availability else {
             let message = receiptAvailabilityMessage(for: model.availability)
-            return ReceiptAnalysis(
-                items: [],
-                status: .unavailable(
-                    attemptedPrivateCloudCompute
-                        ? "Private Cloud Compute was unavailable. \(message)"
-                        : message
-                )
-            )
+            return ReceiptAnalysis(items: [], status: .unavailable(message))
         }
 
         do {
@@ -158,16 +128,12 @@ enum FoundationModelService {
             guard !items.isEmpty else {
                 return ReceiptAnalysis(
                     items: [],
-                    status: .failed(
-                        attemptedPrivateCloudCompute
-                            ? "Private Cloud Compute and on-device AI found no usable priced items, so Vision OCR was used instead."
-                            : "On-device AI found no usable priced items, so Vision OCR was used instead."
-                    )
+                    status: .failed("On-device AI found no usable priced items, so Vision OCR was used instead.")
                 )
             }
             return ReceiptAnalysis(
                 items: items,
-                status: .applied(attemptedPrivateCloudCompute ? .onDeviceFallback : .onDevice)
+                status: .applied(.onDevice)
             )
         } catch is CancellationError {
             return ReceiptAnalysis(
@@ -177,11 +143,7 @@ enum FoundationModelService {
         } catch {
             return ReceiptAnalysis(
                 items: [],
-                status: .failed(
-                    attemptedPrivateCloudCompute
-                        ? "Private Cloud Compute and on-device AI could not finish this scan, so Vision OCR was used instead."
-                        : "On-device AI could not finish this scan, so Vision OCR was used instead."
-                )
+                status: .failed("On-device AI could not finish this scan, so Vision OCR was used instead.")
             )
         }
     }

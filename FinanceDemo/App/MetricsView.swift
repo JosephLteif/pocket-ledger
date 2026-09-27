@@ -537,6 +537,7 @@ struct MetricsView: View {
                     NavigationLink {
                         CategoryMetricsDetailView(
                             store: store,
+                            security: security,
                             categoryID: metric.categoryID,
                             categoryTitle: metric.title,
                             currency: metric.currency,
@@ -846,6 +847,7 @@ struct MetricsView: View {
 @MainActor
 private struct CategoryMetricsDetailView: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject var security: AppSecurityService
 
     let categoryID: UUID?
     let categoryTitle: String
@@ -863,6 +865,7 @@ private struct CategoryMetricsDetailView: View {
 
     init(
         store: LedgerStore,
+        security: AppSecurityService,
         categoryID: UUID?,
         categoryTitle: String,
         currency: LedgerCurrency,
@@ -870,6 +873,7 @@ private struct CategoryMetricsDetailView: View {
         selectedInterval: DateInterval
     ) {
         self.store = store
+        self.security = security
         self.categoryID = categoryID
         self.categoryTitle = categoryTitle
         self.currency = currency
@@ -1062,6 +1066,7 @@ private struct CategoryMetricsDetailView: View {
                         NavigationLink {
                             CategoryMetricsDetailView(
                                 store: store,
+                                security: security,
                                 categoryID: metric.categoryID,
                                 categoryTitle: metric.title,
                                 currency: currency,

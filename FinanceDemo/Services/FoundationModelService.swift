@@ -10,8 +10,14 @@ enum FoundationModelService {
     }
 
     struct ReceiptAnalysis: Sendable {
+        enum Provider: Sendable {
+            case privateCloudCompute
+            case onDevice
+            case onDeviceFallback
+        }
+
         enum Status: Sendable {
-            case applied
+            case applied(Provider)
             case unavailable(String)
             case failed(String)
         }
@@ -88,51 +94,97 @@ enum FoundationModelService {
             )
         }
 
+        var attemptedPrivateCloudCompute = false
+        if #available(iOS 27.0, *) {
+            attemptedPrivateCloudCompute = true
+            let model = PrivateCloudComputeLanguageModel()
+            if case .available = model.availability {
+                do {
+                    let items = try await extractReceiptItems(from: trimmedText, using: model)
+                    if !items.isEmpty {
+                        return ReceiptAnalysis(items: items, status: .applied(.privateCloudCompute))
+                    }
+                } catch is CancellationError {
+                    return ReceiptAnalysis(
+                        items: [],
+                        status: .failed("Receipt analysis was cancelled, so Vision OCR was used instead.")
+                    )
+                } catch {
+                    // PCC can fail because of network or service availability; try the local model next.
+                }
+            }
+        }
+
         let model = SystemLanguageModel.default
         guard case .available = model.availability else {
+            let message = receiptAvailabilityMessage(for: model.availability)
             return ReceiptAnalysis(
                 items: [],
-                status: .unavailable(receiptAvailabilityMessage(for: model.availability))
+                status: .unavailable(
+                    attemptedPrivateCloudCompute
+                        ? "Private Cloud Compute was unavailable. \(message)"
+                        : message
+                )
             )
         }
 
         do {
-            let session = LanguageModelSession()
-            let prompt = """
-            Extract only purchased line items from this shopping receipt OCR.
-
-            Return only the requested structured receipt items, with no explanation.
-            The result must contain an items array with name, quantity, unitPrice, and lineTotal fields.
-
-            Rules:
-            - Include every product or service that was purchased and has a visible price.
-            - Exclude store names, addresses, street numbers, phone numbers, dates, times, invoice or receipt numbers, tax IDs, card or payment details, loyalty numbers, cashier or terminal details, subtotal, tax, discount, change, payment, and grand total lines.
-            - Use quantity 1 when no quantity is visible. Use the exact numeric values from the OCR; do not invent missing prices.
-            - Include unitPrice when visible and lineTotal when visible. If only one price is visible, put it in lineTotal.
-            - Clean obvious OCR noise from item names, but do not create an item that is not supported by the OCR.
-            - If there are no priced purchased items, return {"items":[]}.
-
-            Receipt OCR:
-            \(trimmedText.prefix(9000))
-            """
-            let response = try await session.respond(
-                to: prompt,
-                generating: ReceiptExtraction.self
-            )
-            let items = response.content.items.compactMap(validReceiptItem)
+            let items = try await extractReceiptItems(from: trimmedText, using: model)
             guard !items.isEmpty else {
                 return ReceiptAnalysis(
                     items: [],
-                    status: .failed("Apple Intelligence found no usable priced items, so Vision OCR was used instead.")
+                    status: .failed(
+                        attemptedPrivateCloudCompute
+                            ? "Private Cloud Compute and on-device AI found no usable priced items, so Vision OCR was used instead."
+                            : "On-device AI found no usable priced items, so Vision OCR was used instead."
+                    )
                 )
             }
-            return ReceiptAnalysis(items: items, status: .applied)
+            return ReceiptAnalysis(
+                items: items,
+                status: .applied(attemptedPrivateCloudCompute ? .onDeviceFallback : .onDevice)
+            )
+        } catch is CancellationError {
+            return ReceiptAnalysis(
+                items: [],
+                status: .failed("Receipt analysis was cancelled, so Vision OCR was used instead.")
+            )
         } catch {
             return ReceiptAnalysis(
                 items: [],
-                status: .failed("Apple Intelligence could not finish this scan, so Vision OCR was used instead.")
+                status: .failed(
+                    attemptedPrivateCloudCompute
+                        ? "Private Cloud Compute and on-device AI could not finish this scan, so Vision OCR was used instead."
+                        : "On-device AI could not finish this scan, so Vision OCR was used instead."
+                )
             )
         }
+    }
+
+    private static func extractReceiptItems<Model: LanguageModel>(
+        from text: String,
+        using model: Model
+    ) async throws -> [ReceiptItem] {
+        let session = LanguageModelSession(model: model)
+        let prompt = """
+        Extract only purchased line items from this shopping receipt OCR.
+
+        Return only the requested structured receipt items, with no explanation.
+        The result must contain an items array with name, quantity, unitPrice, and lineTotal fields.
+
+        Rules:
+        - Include every product or service that was purchased and has a visible price.
+        - Exclude store names, addresses, street numbers, phone numbers, dates, times, invoice or receipt numbers, tax IDs, card or payment details, loyalty numbers, cashier or terminal details, subtotal, tax, discount, change, payment, and grand total lines.
+        - Use quantity 1 when no quantity is visible. Use the exact numeric values from the OCR; do not invent missing prices.
+        - Include unitPrice when visible and lineTotal when visible. If only one price is visible, put it in lineTotal.
+        - Clean obvious OCR noise from item names, but do not create an item that is not supported by the OCR.
+        - If there are no priced purchased items, return {"items":[]}.
+
+        Receipt OCR:
+        \(text.prefix(9000))
+        """
+        let response = try await session.respond(to: prompt, generating: ReceiptExtraction.self)
+        return response.content.items.compactMap(validReceiptItem)
     }
 
     static func classifyImportAccounts(

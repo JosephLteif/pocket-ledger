@@ -155,19 +155,19 @@ private enum BillOCRService {
         }
 
         switch analysis.status {
-        case .applied where !aiItems.isEmpty:
+        case .applied(let provider) where !aiItems.isEmpty:
             return BillScanResult(
                 text: visionResult.text,
                 items: aiItems,
                 currency: visionResult.currency,
-                statusMessage: "Apple Intelligence cleaned up the receipt items on-device. Review the selection before saving."
+                statusMessage: receiptAnalysisMessage(for: provider)
             )
         case .applied:
             return BillScanResult(
                 text: visionResult.text,
                 items: visionResult.items,
                 currency: visionResult.currency,
-                statusMessage: "Apple Intelligence returned no usable prices, so Vision OCR was used instead. Review the items before saving."
+                statusMessage: "AI cleanup returned no usable prices, so Vision OCR was used instead. Review the items before saving."
             )
         case .unavailable(let message), .failed(let message):
             return BillScanResult(
@@ -176,6 +176,19 @@ private enum BillOCRService {
                 currency: visionResult.currency,
                 statusMessage: message
             )
+        }
+    }
+
+    private static func receiptAnalysisMessage(
+        for provider: FoundationModelService.ReceiptAnalysis.Provider
+    ) -> String {
+        switch provider {
+        case .privateCloudCompute:
+            return "Private Cloud Compute cleaned up the receipt items. Review the selection before saving."
+        case .onDevice:
+            return "On-device AI cleaned up the receipt items. Review the selection before saving."
+        case .onDeviceFallback:
+            return "Private Cloud Compute was unavailable, so on-device AI cleaned up the receipt items. Review the selection before saving."
         }
     }
 }
@@ -424,12 +437,14 @@ private enum BillScannerParser {
 @MainActor
 struct BillScannerView: View {
     @ObservedObject var store: LedgerStore
+    let initialSource: BillScanSource?
     let initialImageData: Data?
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var isShowingSourceOptions = false
     @State private var isShowingPhotoPicker = false
+    @State private var isShowingFullScreenImage = false
     @State private var previewImage: UIImage?
     @State private var recognizedText = ""
     @State private var lineItems: [BillLineItem] = []
@@ -451,8 +466,13 @@ struct BillScannerView: View {
     @State private var errorMessage: String?
     @State private var didLoadInitialImage = false
 
-    init(store: LedgerStore, initialImageData: Data? = nil) {
+    init(
+        store: LedgerStore,
+        initialSource: BillScanSource? = nil,
+        initialImageData: Data? = nil
+    ) {
         _store = ObservedObject(wrappedValue: store)
+        self.initialSource = initialSource
         self.initialImageData = initialImageData
     }
 
@@ -465,16 +485,31 @@ struct BillScannerView: View {
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
 
                     if let previewImage {
-                        Image(uiImage: previewImage)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity)
-                            .frame(maxHeight: 260)
-                            .clipShape(RoundedRectangle(cornerRadius: 18))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 18)
-                                    .stroke(PocketLedgerTheme.divider, lineWidth: 1)
-                            }
+                        Button {
+                            isShowingFullScreenImage = true
+                        } label: {
+                            Image(uiImage: previewImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity)
+                                .frame(maxHeight: 260)
+                                .clipShape(RoundedRectangle(cornerRadius: 18))
+                                .overlay(alignment: .bottomTrailing) {
+                                    Label("View full screen", systemImage: "arrow.up.left.and.arrow.down.right")
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 7)
+                                        .background(.ultraThinMaterial, in: Capsule())
+                                        .padding(10)
+                                }
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 18)
+                                        .stroke(PocketLedgerTheme.divider, lineWidth: 1)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open bill image full screen")
+                        .accessibilityHint("Pinch to zoom and drag to inspect the receipt")
                     }
 
                     if isScanning {
@@ -624,7 +659,23 @@ struct BillScannerView: View {
             } message: {
                 Text(errorMessage ?? "")
             }
+            .fullScreenCover(isPresented: $isShowingFullScreenImage) {
+                if let previewImage {
+                    BillImageFullScreenView(image: previewImage)
+                }
+            }
             .task {
+                switch initialSource {
+                case .photoLibrary:
+                    isShowingPhotoPicker = true
+                case .camera:
+                    isShowingCamera = true
+                case .pdf:
+                    isShowingDocumentImporter = true
+                case nil:
+                    break
+                }
+
                 guard !didLoadInitialImage, let initialImageData else { return }
                 didLoadInitialImage = true
                 guard let image = UIImage(data: initialImageData) else {
@@ -1038,6 +1089,76 @@ struct BillScannerView: View {
             from: nil,
             for: nil
         )
+    }
+}
+
+@MainActor
+private struct BillImageFullScreenView: View {
+    let image: UIImage
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZoomableBillImageView(image: image)
+                .background(.black)
+                .ignoresSafeArea()
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+@MainActor
+private struct ZoomableBillImageView: UIViewRepresentable {
+    let image: UIImage
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scrollView = UIScrollView()
+        scrollView.backgroundColor = .black
+        scrollView.minimumZoomScale = 1
+        scrollView.maximumZoomScale = 5
+        scrollView.bouncesZoom = true
+        scrollView.delegate = context.coordinator
+
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            imageView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
+            imageView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor)
+        ])
+        context.coordinator.imageView = imageView
+        return scrollView
+    }
+
+    func updateUIView(_ scrollView: UIScrollView, context: Context) {
+        guard let imageView = context.coordinator.imageView, imageView.image !== image else { return }
+        imageView.image = image
+        scrollView.setZoomScale(1, animated: false)
+    }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        weak var imageView: UIImageView?
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+            imageView
+        }
     }
 }
 

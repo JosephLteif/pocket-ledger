@@ -854,7 +854,8 @@ struct TransactionEditor: View {
                 }
             }
 
-            TextField("What was this for?", text: $note)
+            TextField("What was this for?", text: $note, axis: .vertical)
+                .lineLimit(2...5)
         }
     }
 

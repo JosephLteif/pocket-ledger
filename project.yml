@@ -63,6 +63,7 @@ targets:
     entitlements:
       path: FinanceDemo/Config/FinanceDemo.entitlements
       properties:
+        com.apple.developer.private-cloud-compute: true
         com.apple.security.application-groups:
           - group.com.josephlteif.financedemo
     dependencies:

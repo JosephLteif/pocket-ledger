@@ -1296,7 +1296,7 @@ struct TransactionRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(transaction.note)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
+                    .lineLimit(2)
                 Text(displaySubtitle)
                     .font(.caption)
                     .foregroundStyle(PocketLedgerTheme.textSecondary)

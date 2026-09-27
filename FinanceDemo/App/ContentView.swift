@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 @MainActor
 struct ContentView: View {
@@ -256,8 +257,8 @@ struct ContentView: View {
         )
         .sheet(item: $addAction) { action in
             switch action {
-            case .scanBill:
-                BillScannerView(store: store)
+            case .scanBill(let source):
+                BillScannerView(store: store, initialSource: source)
             case .visualBillScan(_, let imageData):
                 BillScannerView(store: store, initialImageData: imageData)
             case .expense:
@@ -311,8 +312,14 @@ struct ContentView: View {
 
 }
 
+enum BillScanSource: String {
+    case photoLibrary
+    case camera
+    case pdf
+}
+
 enum AddAction: Identifiable {
-    case scanBill
+    case scanBill(BillScanSource)
     case visualBillScan(id: UUID, imageData: Data)
     case expense
     case prefilledExpense(id: UUID, amount: Money, note: String)
@@ -324,8 +331,8 @@ enum AddAction: Identifiable {
 
     var id: String {
         switch self {
-        case .scanBill:
-            return "scanBill"
+        case .scanBill(let source):
+            return "scanBill-\(source.rawValue)"
         case .visualBillScan(let id, _):
             return "visual-bill-scan-\(id.uuidString)"
         case .expense:
@@ -385,7 +392,19 @@ struct AddTransactionToolbar: ToolbarContent {
                 }
 
                 Section("Other") {
-                    Button("Scan bill", systemImage: "doc.text.viewfinder") { onAction(.scanBill) }
+                    Menu("Scan bill", systemImage: "doc.text.viewfinder") {
+                        Button("Choose photo", systemImage: "photo") {
+                            onAction(.scanBill(.photoLibrary))
+                        }
+                        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                            Button("Take photo", systemImage: "camera") {
+                                onAction(.scanBill(.camera))
+                            }
+                        }
+                        Button("Choose PDF", systemImage: "doc.richtext") {
+                            onAction(.scanBill(.pdf))
+                        }
+                    }
                     Button("Scheduled", systemImage: "calendar.badge.clock") { onAction(.scheduled) }
                 }
 

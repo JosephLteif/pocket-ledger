@@ -445,6 +445,7 @@ struct BillScannerView: View {
     @State private var isShowingSourceOptions = false
     @State private var isShowingPhotoPicker = false
     @State private var isShowingFullScreenImage = false
+    @State private var pendingCameraImage: UIImage?
     @State private var previewImage: UIImage?
     @State private var recognizedText = ""
     @State private var lineItems: [BillLineItem] = []
@@ -633,9 +634,9 @@ struct BillScannerView: View {
                 allowsMultipleSelection: false,
                 onCompletion: importDocument
             )
-            .sheet(isPresented: $isShowingCamera) {
+            .fullScreenCover(isPresented: $isShowingCamera, onDismiss: processPendingCameraImage) {
                 BillCameraView { image in
-                    handleImage(image)
+                    pendingCameraImage = image
                 }
             }
             .sheet(item: $transactionEditorRequest) { request in
@@ -682,7 +683,7 @@ struct BillScannerView: View {
                     errorMessage = BillScannerError.invalidImage.localizedDescription
                     return
                 }
-                handleImage(image, data: initialImageData)
+                handleImage(image)
             }
         }
     }
@@ -980,7 +981,7 @@ struct BillScannerView: View {
                     throw BillScannerError.invalidImage
                 }
                 selectedPhoto = nil
-                handleImage(image, data: data)
+                handleImage(image)
             } catch {
                 selectedPhoto = nil
                 errorMessage = error.localizedDescription
@@ -989,20 +990,51 @@ struct BillScannerView: View {
     }
 
     private func handleImage(_ image: UIImage) {
-        guard let data = image.jpegData(compressionQuality: 0.9) else {
+        guard let resizedImage = resizedBillImage(image),
+              let data = resizedImage.jpegData(compressionQuality: 0.88) else {
             errorMessage = BillScannerError.invalidImage.localizedDescription
             return
         }
-        handleImage(image, data: data)
-    }
-
-    private func handleImage(_ image: UIImage, data: Data) {
-        previewImage = image
+        previewImage = resizedImage
         attachmentData = data
         attachmentFileName = "receipt-\(UUID().uuidString.lowercased()).jpg"
         attachmentContentType = "image/jpeg"
         Task { @MainActor in
             await scan(data: data)
+        }
+    }
+
+    private func processPendingCameraImage() {
+        guard let image = pendingCameraImage else { return }
+        pendingCameraImage = nil
+        handleImage(image)
+    }
+
+    private func resizedBillImage(_ image: UIImage) -> UIImage? {
+        let sourceSize: CGSize
+        if let cgImage = image.cgImage {
+            let rotated = [.left, .leftMirrored, .right, .rightMirrored].contains(image.imageOrientation)
+            sourceSize = rotated
+                ? CGSize(width: cgImage.height, height: cgImage.width)
+                : CGSize(width: cgImage.width, height: cgImage.height)
+        } else {
+            sourceSize = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        }
+
+        guard sourceSize.width > 0, sourceSize.height > 0 else { return nil }
+        let factor = min(1, 2400 / max(sourceSize.width, sourceSize.height))
+        let targetSize = CGSize(
+            width: max(1, (sourceSize.width * factor).rounded(.down)),
+            height: max(1, (sourceSize.height * factor).rounded(.down))
+        )
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+
+        return UIGraphicsImageRenderer(size: targetSize, format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: targetSize))
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
         }
     }
 

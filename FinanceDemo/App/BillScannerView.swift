@@ -717,8 +717,8 @@ struct BillScannerView: View {
                 Spacer()
             }
 
-            ForEach($lineItems) { $item in
-                lineItemEditor($item)
+            ForEach(lineItems) { item in
+                lineItemEditor(lineItemBinding(for: item))
             }
 
             Button(action: addManualItem) {
@@ -846,6 +846,17 @@ struct BillScannerView: View {
             RoundedRectangle(cornerRadius: 18)
                 .stroke(PocketLedgerTheme.divider, lineWidth: 1)
         }
+    }
+
+    private func lineItemBinding(for item: BillLineItem) -> Binding<BillLineItem> {
+        let itemID = item.id
+        return Binding(
+            get: { lineItems.first { $0.id == itemID } ?? item },
+            set: { updatedItem in
+                guard let index = lineItems.firstIndex(where: { $0.id == itemID }) else { return }
+                lineItems[index] = updatedItem
+            }
+        )
     }
 
     @ViewBuilder

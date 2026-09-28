@@ -8,10 +8,6 @@ private struct WatchSyncDataInput: @unchecked Sendable {
     let data: FinanceData
 }
 
-private struct WatchSyncSnapshotOutput: @unchecked Sendable {
-    let snapshot: WatchLedgerSnapshot
-}
-
 enum WatchSyncPublisher {
     static func isEligibleForDelivery(
         sessionSupported: Bool,
@@ -119,14 +115,14 @@ enum WatchSyncPublisher {
                 isWatchAppInstalled: session.isWatchAppInstalled
             ) else { return }
 
-            let output = await Task.detached(priority: .utility) {
-                WatchSyncSnapshotOutput(snapshot: makeSnapshot(from: input.data))
+            let snapshot = await Task.detached(priority: .utility) {
+                makeSnapshot(from: input.data)
             }.value
             guard isEligibleForDelivery(
                 sessionSupported: true,
                 isActivated: session.activationState == .activated,
                 isWatchAppInstalled: session.isWatchAppInstalled
-            ), let context = WatchSyncCodec.dictionary(for: output.snapshot) else { return }
+            ), let context = WatchSyncCodec.dictionary(for: snapshot) else { return }
 
             try? session.updateApplicationContext(context)
             if session.isComplicationEnabled {

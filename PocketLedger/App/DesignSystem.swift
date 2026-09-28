@@ -554,7 +554,7 @@ struct PocketCircularSwipeAction: View {
     let systemImage: String
     let tint: Color
     var iconColor: Color = .white
-    var titleColor: Color = PocketLedgerTheme.textSecondary
+    var titleColor: Color = .white
     var role: ButtonRole? = nil
     let action: () -> Void
 

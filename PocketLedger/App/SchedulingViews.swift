@@ -449,8 +449,7 @@ struct ScheduledTransactionsView: View {
             PocketCircularSwipeAction(
                 title: "Edit",
                 systemImage: "pencil",
-                tint: .yellow,
-                iconColor: .black
+                tint: .yellow
             ) {
                 editorRoute = .edit(schedule)
             }

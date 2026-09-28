@@ -274,6 +274,7 @@ struct AccountsView: View {
                         balance: store.balance(for: account),
                         areBalancesRevealed: areBalancesRevealed
                     )
+                        .padding(.horizontal, 12)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -303,19 +304,11 @@ struct AccountsView: View {
                     guard let draggedID = items.first.flatMap(UUID.init(uuidString:)) else { return false }
                     return store.moveAccount(accountID: draggedID, beforeAccountID: account.id)
                 }
-                .background {
-                    ledgerGroupedRowBackground(
-                        isFirst: entry.offset == 0,
-                        isLast: entry.offset == accounts.count - 1
-                    )
-                }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     PocketCircularSwipeAction(
                         title: "Edit",
                         systemImage: "pencil",
-                        tint: .yellow,
-                        iconColor: .black,
-                        titleColor: .black
+                        tint: .yellow
                     ) {
                         presentAccount(account)
                     }
@@ -353,12 +346,17 @@ struct AccountsView: View {
                 .listRowInsets(
                     EdgeInsets(
                         top: 0,
-                        leading: PocketLedgerTheme.screenHorizontalPadding * 2,
+                        leading: PocketLedgerTheme.screenHorizontalPadding,
                         bottom: 0,
-                        trailing: PocketLedgerTheme.screenHorizontalPadding * 2
+                        trailing: PocketLedgerTheme.screenHorizontalPadding
                     )
                 )
-                .listRowBackground(Color.clear)
+                .listRowBackground(
+                    ledgerGroupedRowBackground(
+                        isFirst: entry.offset == 0,
+                        isLast: entry.offset == accounts.count - 1
+                    )
+                )
                 .listRowSeparatorTint(PocketLedgerTheme.divider)
                 .listRowSeparator(
                     entry.offset == accounts.count - 1 ? .hidden : .visible,
@@ -401,11 +399,13 @@ struct AccountsView: View {
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(account.name)
-                                    .font(.subheadline.weight(.semibold))
+                                    .font(.body.weight(.semibold))
                                     .foregroundStyle(PocketLedgerTheme.textPrimary)
+                                    .lineLimit(2)
                                 Text("\(account.type.displayName) · \(account.currency.rawValue)")
-                                    .font(.caption)
+                                    .font(.subheadline)
                                     .foregroundStyle(PocketLedgerTheme.textTertiary)
+                                    .lineLimit(1)
                             }
 
                             Spacer(minLength: 8)
@@ -414,18 +414,15 @@ struct AccountsView: View {
                                 Text("Managed in Loans")
                                     .font(.caption.weight(.medium))
                                     .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.trailing)
                             }
                         }
+                        .padding(.horizontal, 12)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .frame(minHeight: 68)
-                    .background {
-                        ledgerGroupedRowBackground(
-                            isFirst: entry.offset == 0,
-                            isLast: entry.offset == archivedAccounts.count - 1
-                        )
-                    }
+                    .frame(minHeight: 84)
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
                         if !store.isManagedLegacyLoanAccount(account.id) {
                             PocketCircularSwipeAction(
@@ -452,12 +449,17 @@ struct AccountsView: View {
                     .listRowInsets(
                         EdgeInsets(
                             top: 0,
-                            leading: PocketLedgerTheme.screenHorizontalPadding * 2,
+                            leading: PocketLedgerTheme.screenHorizontalPadding,
                             bottom: 0,
-                            trailing: PocketLedgerTheme.screenHorizontalPadding * 2
+                            trailing: PocketLedgerTheme.screenHorizontalPadding
                         )
                     )
-                    .listRowBackground(Color.clear)
+                    .listRowBackground(
+                        ledgerGroupedRowBackground(
+                            isFirst: entry.offset == 0,
+                            isLast: entry.offset == archivedAccounts.count - 1
+                        )
+                    )
                     .listRowSeparatorTint(PocketLedgerTheme.divider)
                     .listRowSeparator(
                         entry.offset == archivedAccounts.count - 1 ? .hidden : .visible,
@@ -560,36 +562,43 @@ private struct AccountRow: View {
                 tint: account.type == .loan || !account.includeInTotals
                     ? PocketLedgerTheme.warning
                     : PocketLedgerTheme.income,
-                size: 36
+                size: 42
             )
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(account.name)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.body.weight(.semibold))
+                    .lineLimit(2)
                 Text(account.type.displayName)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(PocketLedgerTheme.textTertiary)
+                    .lineLimit(1)
                 if !account.includeInTotals {
                     Text("Excluded from totals")
                         .font(.caption2.weight(.medium))
+                        .lineLimit(1)
                         .foregroundStyle(PocketLedgerTheme.warning)
                 }
                 if account.isArchived {
                     Text("Archived")
                         .font(.caption2.weight(.medium))
+                        .lineLimit(1)
                         .foregroundStyle(PocketLedgerTheme.textTertiary)
                 }
             }
+            .layoutPriority(1)
 
-            Spacer()
+            Spacer(minLength: 8)
 
             ProtectedAmountText(value: balance.formatted, isRevealed: areBalancesRevealed)
                 .font(.subheadline.weight(.semibold).monospacedDigit())
                 .foregroundStyle(account.type == .loan || !account.includeInTotals
                     ? PocketLedgerTheme.warning
                     : PocketLedgerTheme.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
-        .frame(minHeight: 68)
+        .frame(minHeight: 84)
     }
 }
 

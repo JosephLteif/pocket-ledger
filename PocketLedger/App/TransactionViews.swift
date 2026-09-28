@@ -1085,18 +1085,56 @@ struct TransactionRow: View {
     }
 
     var body: some View {
-        swipeInteractionRow
-            .padding(.horizontal, -swipeActionHorizontalInset)
-            .confirmationDialog(
-                "Delete transaction?",
-                isPresented: $isShowingDeleteConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive, action: onDelete)
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text(transaction.note)
+        Group {
+            if usesCustomScrollSwipeFallback {
+                swipeInteractionRow
+                    .padding(.horizontal, -swipeActionHorizontalInset)
+            } else {
+                swipeInteractionRow
+                    .padding(.horizontal, -swipeActionHorizontalInset)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        if canEditTransaction {
+                            PocketCircularSwipeAction(
+                                title: "Delete",
+                                systemImage: "trash",
+                                tint: .red,
+                                role: .destructive
+                            ) {
+                                isShowingDeleteConfirmation = true
+                            }
+                            PocketCircularSwipeAction(
+                                title: "Edit",
+                                systemImage: "pencil",
+                                tint: .yellow
+                            ) { onEdit() }
+                        }
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                        if canEditTransaction {
+                            PocketCircularSwipeAction(
+                                title: "Duplicate",
+                                systemImage: "plus.square.on.square",
+                                tint: PocketLedgerTheme.accent
+                            ) { onDuplicate() }
+                            PocketCircularSwipeAction(
+                                title: "Template",
+                                systemImage: "rectangle.stack.badge.plus",
+                                tint: PocketLedgerTheme.positive
+                            ) { onSaveTemplate() }
+                        }
+                    }
             }
+        }
+        .confirmationDialog(
+            "Delete transaction?",
+            isPresented: $isShowingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive, action: onDelete)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(transaction.note)
+        }
     }
 
     @ViewBuilder
@@ -1114,42 +1152,6 @@ struct TransactionRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.clear)
                 .contentShape(Rectangle())
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    if canEditTransaction {
-                        PocketCircularSwipeAction(
-                            title: "Delete",
-                            systemImage: "trash",
-                            tint: .red,
-                            titleColor: .white,
-                            role: .destructive
-                        ) {
-                            isShowingDeleteConfirmation = true
-                        }
-                        PocketCircularSwipeAction(
-                            title: "Edit",
-                            systemImage: "pencil",
-                            tint: .yellow,
-                            iconColor: .black,
-                            titleColor: .black
-                        ) { onEdit() }
-                    }
-                }
-                .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                    if canEditTransaction {
-                        PocketCircularSwipeAction(
-                            title: "Duplicate",
-                            systemImage: "plus.square.on.square",
-                            tint: PocketLedgerTheme.accent,
-                            titleColor: .white
-                        ) { onDuplicate() }
-                        PocketCircularSwipeAction(
-                            title: "Template",
-                            systemImage: "rectangle.stack.badge.plus",
-                            tint: PocketLedgerTheme.positive,
-                            titleColor: .white
-                        ) { onSaveTemplate() }
-                    }
-                }
         }
     }
 
@@ -1218,7 +1220,6 @@ struct TransactionRow: View {
                     "Edit",
                     systemImage: "pencil",
                     tint: .yellow,
-                    iconColor: .black,
                     action: onEdit
                 )
                 scrollSwipeAction("Delete", systemImage: "trash", tint: .red) {
@@ -1254,6 +1255,8 @@ struct TransactionRow: View {
             closeSwipeActions()
             action()
         }
+        .frame(maxHeight: .infinity)
+        .background(tint)
     }
 
     private var customSwipeGesture: some Gesture {

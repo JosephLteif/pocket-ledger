@@ -568,8 +568,7 @@ struct PocketCircularSwipeAction: View {
                 titleColor: titleColor
             )
         }
-        .buttonStyle(.plain)
-        .tint(.clear)
+        .tint(tint)
         .accessibilityLabel(title)
     }
 }

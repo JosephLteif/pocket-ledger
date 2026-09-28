@@ -303,6 +303,12 @@ struct AccountsView: View {
                     guard let draggedID = items.first.flatMap(UUID.init(uuidString:)) else { return false }
                     return store.moveAccount(accountID: draggedID, beforeAccountID: account.id)
                 }
+                .background {
+                    ledgerGroupedRowBackground(
+                        isFirst: entry.offset == 0,
+                        isLast: entry.offset == accounts.count - 1
+                    )
+                }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     PocketCircularSwipeAction(
                         title: "Edit",
@@ -352,12 +358,7 @@ struct AccountsView: View {
                         trailing: PocketLedgerTheme.screenHorizontalPadding * 2
                     )
                 )
-                .listRowBackground(
-                    ledgerGroupedRowBackground(
-                        isFirst: entry.offset == 0,
-                        isLast: entry.offset == accounts.count - 1
-                    )
-                )
+                .listRowBackground(Color.clear)
                 .listRowSeparatorTint(PocketLedgerTheme.divider)
                 .listRowSeparator(
                     entry.offset == accounts.count - 1 ? .hidden : .visible,
@@ -419,6 +420,12 @@ struct AccountsView: View {
                     }
                     .buttonStyle(.plain)
                     .frame(minHeight: 68)
+                    .background {
+                        ledgerGroupedRowBackground(
+                            isFirst: entry.offset == 0,
+                            isLast: entry.offset == archivedAccounts.count - 1
+                        )
+                    }
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
                         if !store.isManagedLegacyLoanAccount(account.id) {
                             PocketCircularSwipeAction(
@@ -450,12 +457,7 @@ struct AccountsView: View {
                             trailing: PocketLedgerTheme.screenHorizontalPadding * 2
                         )
                     )
-                    .listRowBackground(
-                        ledgerGroupedRowBackground(
-                            isFirst: entry.offset == 0,
-                            isLast: entry.offset == archivedAccounts.count - 1
-                        )
-                    )
+                    .listRowBackground(Color.clear)
                     .listRowSeparatorTint(PocketLedgerTheme.divider)
                     .listRowSeparator(
                         entry.offset == archivedAccounts.count - 1 ? .hidden : .visible,

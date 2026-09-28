@@ -604,6 +604,9 @@ struct TransactionsView: View {
         count: Int
     ) -> some View {
         transactionRow(for: transaction)
+            .background {
+                ledgerGroupedRowBackground(isFirst: index == 0, isLast: index == count - 1)
+            }
             .listRowInsets(
                 EdgeInsets(
                     top: 0,
@@ -612,9 +615,7 @@ struct TransactionsView: View {
                     trailing: PocketLedgerTheme.screenHorizontalPadding * 2
                 )
             )
-            .listRowBackground(
-                ledgerGroupedRowBackground(isFirst: index == 0, isLast: index == count - 1)
-            )
+            .listRowBackground(Color.clear)
             .listRowSeparatorTint(PocketLedgerTheme.divider)
             .listRowSeparator(index == count - 1 ? .hidden : .visible, edges: .bottom)
     }

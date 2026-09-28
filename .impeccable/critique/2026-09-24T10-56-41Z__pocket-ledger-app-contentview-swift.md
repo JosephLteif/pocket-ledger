@@ -5,17 +5,17 @@ max_score: 40
 na_heuristics:
 p0_count: 0
 p1_count: 1
-target_identity: "file:C:\\Programming\\Finance-App\\FinanceDemo\\App\\ContentView.swift"
+target_identity: "file:C:\\Programming\\Finance-App\\PocketLedger\\App\\ContentView.swift"
 target_fingerprint: "sha256:819f13f5f876e75f837f73e456297ec7e16fd4c5e741641a66be90afad0724cb"
-target_path: "C:\\Programming\\Finance-App\\FinanceDemo\\App\\ContentView.swift"
+target_path: "C:\\Programming\\Finance-App\\PocketLedger\\App\\ContentView.swift"
 timestamp: 2026-09-24T10-56-41Z
-slug: financedemo-app-contentview-swift
+slug: pocket-ledger-app-contentview-swift
 ---
 # Pocket Ledger UI Critique
 
 Method: dual-agent (A: /root/design_review · B: /root/detector_evidence)
 
-Target: `FinanceDemo/App/ContentView.swift`, with related SwiftUI flows in `SearchView.swift`, `CategoryPicker.swift`, and app screens. This was a source review; no rendered app or screenshot was available.
+Target: `PocketLedger/App/ContentView.swift`, with related SwiftUI flows in `SearchView.swift`, `CategoryPicker.swift`, and app screens. This was a source review; no rendered app or screenshot was available.
 
 ## Design Health Score
 
@@ -37,7 +37,7 @@ Target: `FinanceDemo/App/ContentView.swift`, with related SwiftUI flows in `Sear
 
 **Source assessment:** The workflows are product-specific: the UI handles separate accounts and currencies, exchange rates, returns/change, schedules, templates, and local ledger history. The source also shows a shared theme system and native navigation. I cannot judge whether the visual composition feels distinctive or category-interchangeable without seeing rendered screens.
 
-**Detector:** `impeccable detect --json FinanceDemo/App/ContentView.swift` returned exit 0 and `[]` (0 findings). The CLI describes generic regex matching for non-HTML input but does not name SwiftUI support, so this is not evidence that the rendered native interface is clean. No false positives were reported.
+**Detector:** `impeccable detect --json PocketLedger/App/ContentView.swift` returned exit 0 and `[]` (0 findings). The CLI describes generic regex matching for non-HTML input but does not name SwiftUI support, so this is not evidence that the rendered native interface is clean. No false positives were reported.
 
 ## Overall Impression
 

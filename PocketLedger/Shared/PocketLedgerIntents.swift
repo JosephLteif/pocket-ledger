@@ -27,24 +27,6 @@ enum FinanceIntentQuickExpenseRequest {
     }
 }
 
-struct AddDemoExpenseIntent: AppIntent {
-    static let title: LocalizedStringResource = "Add Pocket Ledger Widget Quick Expense"
-    static let description = IntentDescription("Opens a five dollar USD expense in Pocket Ledger for review.")
-    static let openAppWhenRun = true
-    static let isDiscoverable = false
-    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
-
-    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        guard let amount = FinanceIntentQuickExpenseRequest.stage(
-            amountText: "5",
-            note: "Quick widget expense"
-        ) else {
-            return .result(value: "Expense not ready", dialog: "Pocket Ledger could not prepare the expense. Try again.")
-        }
-        return .result(value: amount.formatted, dialog: "Review and save this expense in Pocket Ledger.")
-    }
-}
-
 struct QuickExpenseControlConfiguration: ControlConfigurationIntent {
     static let title: LocalizedStringResource = "Pocket Ledger Quick Expense"
     static let description = IntentDescription("Choose the USD amount used by the Pocket Ledger Control Center action.")
@@ -87,7 +69,7 @@ struct AddConfiguredExpenseIntent: AppIntent {
     }
 }
 
-struct GetDemoBalanceIntent: AppIntent {
+struct GetBalanceIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Balance"
     static let description = IntentDescription("Reads the current Pocket Ledger balances by currency.")
     static let openAppWhenRun = false

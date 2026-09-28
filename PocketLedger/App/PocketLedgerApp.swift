@@ -1,10 +1,10 @@
 import SwiftUI
 
 @main
-struct FinanceDemoApp: App {
+struct PocketLedgerApp: App {
     init() {
         NotificationService.configureForegroundPresentation()
-        FinanceDemoShortcuts.updateAppShortcutParameters()
+        PocketLedgerShortcuts.updateAppShortcutParameters()
         WatchConnectivityService.shared.activate()
     }
 

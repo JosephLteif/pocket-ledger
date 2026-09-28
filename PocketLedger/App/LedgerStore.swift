@@ -1708,7 +1708,7 @@ final class LedgerStore: ObservableObject {
         replaceData(updated)
         WidgetCenter.shared.reloadTimelines(ofKind: "BalanceWidget")
         if shortcutInputsChanged {
-            FinanceDemoShortcuts.updateAppShortcutParameters()
+            PocketLedgerShortcuts.updateAppShortcutParameters()
         }
         if spotlightInputsChanged {
             Task {

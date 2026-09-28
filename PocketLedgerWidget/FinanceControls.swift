@@ -3,7 +3,7 @@ import SwiftUI
 import WidgetKit
 
 struct AddExpenseControl: ControlWidget {
-    static let kind = "com.josephlteif.financedemo.add-expense"
+    static let kind = "com.josephlteif.pocketledger.add-expense"
 
     var body: some ControlWidgetConfiguration {
         AppIntentControlConfiguration(

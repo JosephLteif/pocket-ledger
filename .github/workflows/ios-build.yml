@@ -55,8 +55,8 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild \
-            -project ios-native-finance-demo.xcodeproj \
-            -scheme FinanceDemo \
+            -project PocketLedger.xcodeproj \
+            -scheme PocketLedger \
             -configuration Release \
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
@@ -71,15 +71,15 @@ jobs:
       - name: Archive iOS app
         run: |
           set -euo pipefail
-          tar -czf "$GITHUB_WORKSPACE/FinanceDemo-app.tar.gz" \
+          tar -czf "$GITHUB_WORKSPACE/PocketLedger-app.tar.gz" \
             -C "$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos" \
-            FinanceDemo.app
+            PocketLedger.app
 
       - name: Upload iOS app
         uses: actions/upload-artifact@v7
         with:
-          name: FinanceDemo-ios-build
-          path: FinanceDemo-app.tar.gz
+          name: PocketLedger-ios-build
+          path: PocketLedger-app.tar.gz
           retention-days: 1
 
   build-watch:
@@ -116,8 +116,8 @@ jobs:
           device_log="$RUNNER_TEMP/xcodebuild-watch-device.log"
 
           xcodebuild \
-            -project ios-native-finance-demo.xcodeproj \
-            -scheme FinanceDemoWatch \
+            -project PocketLedger.xcodeproj \
+            -scheme PocketLedgerWatch \
             -configuration Debug \
             -sdk watchsimulator \
             -destination "generic/platform=watchOS Simulator" \
@@ -131,8 +131,8 @@ jobs:
           simulator_pid=$!
 
           xcodebuild \
-            -project ios-native-finance-demo.xcodeproj \
-            -scheme FinanceDemoWatch \
+            -project PocketLedger.xcodeproj \
+            -scheme PocketLedgerWatch \
             -configuration Release \
             -sdk watchos \
             -destination "generic/platform=watchOS" \
@@ -161,15 +161,15 @@ jobs:
       - name: Archive watch app
         run: |
           set -euo pipefail
-          tar -czf "$GITHUB_WORKSPACE/FinanceDemo-watch.tar.gz" \
+          tar -czf "$GITHUB_WORKSPACE/PocketLedger-watch.tar.gz" \
             -C "$RUNNER_TEMP/WatchDeviceDerivedData/Build/Products/Release-watchos" \
-            FinanceDemoWatch.app
+            PocketLedgerWatch.app
 
       - name: Upload watch app
         uses: actions/upload-artifact@v7
         with:
-          name: FinanceDemo-watch-build
-          path: FinanceDemo-watch.tar.gz
+          name: PocketLedger-watch-build
+          path: PocketLedger-watch.tar.gz
           retention-days: 1
 
   test-ios:
@@ -215,8 +215,8 @@ jobs:
 
           build_status=0
           xcodebuild \
-            -project ios-native-finance-demo.xcodeproj \
-            -scheme FinanceDemo \
+            -project PocketLedger.xcodeproj \
+            -scheme PocketLedger \
             -configuration Debug \
             -sdk iphonesimulator \
             -destination "generic/platform=iOS Simulator" \
@@ -243,8 +243,8 @@ jobs:
           set -euo pipefail
           test -n "$SIMULATOR_ID" || { echo "The test simulator was not selected"; exit 1; }
           xcodebuild \
-            -project ios-native-finance-demo.xcodeproj \
-            -scheme FinanceDemo \
+            -project PocketLedger.xcodeproj \
+            -scheme PocketLedger \
             -configuration Debug \
             -sdk iphonesimulator \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
@@ -256,7 +256,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
             test-without-building \
-            -only-testing:FinanceDemoTests 2>&1 | tee "$RUNNER_TEMP/xcodebuild-logic-tests.log"
+            -only-testing:PocketLedgerTests 2>&1 | tee "$RUNNER_TEMP/xcodebuild-logic-tests.log"
 
   package:
     name: Package unsigned IPA
@@ -268,13 +268,13 @@ jobs:
       - name: Download iOS app
         uses: actions/download-artifact@v7
         with:
-          name: FinanceDemo-ios-build
+          name: PocketLedger-ios-build
           path: ios-build
 
       - name: Download watch app
         uses: actions/download-artifact@v7
         with:
-          name: FinanceDemo-watch-build
+          name: PocketLedger-watch-build
           path: watch-build
 
       - name: Embed watch app and verify bundle
@@ -282,25 +282,25 @@ jobs:
           set -euo pipefail
           PACKAGE_ROOT="$RUNNER_TEMP/package"
           mkdir -p "$PACKAGE_ROOT"
-          tar -xzf ios-build/FinanceDemo-app.tar.gz -C "$PACKAGE_ROOT"
-          tar -xzf watch-build/FinanceDemo-watch.tar.gz -C "$PACKAGE_ROOT"
+          tar -xzf ios-build/PocketLedger-app.tar.gz -C "$PACKAGE_ROOT"
+          tar -xzf watch-build/PocketLedger-watch.tar.gz -C "$PACKAGE_ROOT"
 
-          APP_PATH="$PACKAGE_ROOT/FinanceDemo.app"
-          WATCH_SOURCE_PATH="$PACKAGE_ROOT/FinanceDemoWatch.app"
+          APP_PATH="$PACKAGE_ROOT/PocketLedger.app"
+          WATCH_SOURCE_PATH="$PACKAGE_ROOT/PocketLedgerWatch.app"
           test -d "$APP_PATH" || { echo "Missing iOS app: $APP_PATH"; exit 1; }
           test -d "$WATCH_SOURCE_PATH" || { echo "Missing watch app: $WATCH_SOURCE_PATH"; exit 1; }
           mkdir -p "$APP_PATH/Watch"
-          ditto "$WATCH_SOURCE_PATH" "$APP_PATH/Watch/FinanceDemoWatch.app"
+          ditto "$WATCH_SOURCE_PATH" "$APP_PATH/Watch/PocketLedgerWatch.app"
 
           test -d "$APP_PATH/PlugIns" || { echo "Missing PlugIns directory: $APP_PATH/PlugIns"; exit 1; }
-          WATCH_APP_PATH="$APP_PATH/Watch/FinanceDemoWatch.app"
+          WATCH_APP_PATH="$APP_PATH/Watch/PocketLedgerWatch.app"
           test -d "$WATCH_APP_PATH" || { echo "Missing embedded watch app: $WATCH_APP_PATH"; exit 1; }
-          test ! -e "$APP_PATH/PlugIns/FinanceDemoWatch.app" || {
+          test ! -e "$APP_PATH/PlugIns/PocketLedgerWatch.app" || {
             echo "Watch app was embedded as an iOS plug-in instead of a Watch bundle."
             exit 1
           }
-          test -d "$WATCH_APP_PATH/PlugIns/FinanceDemoWatchWidget.appex" || {
-            echo "Missing embedded watch complication: $WATCH_APP_PATH/PlugIns/FinanceDemoWatchWidget.appex"
+          test -d "$WATCH_APP_PATH/PlugIns/PocketLedgerWatchWidget.appex" || {
+            echo "Missing embedded watch complication: $WATCH_APP_PATH/PlugIns/PocketLedgerWatchWidget.appex"
             exit 1
           }
           WIDGET_PATH=""
@@ -322,26 +322,26 @@ jobs:
           echo "Widget extension: $WIDGET_PATH"
           echo "Compiled asset catalog: $APP_PATH/Assets.car"
           echo "Display name: $DISPLAY_NAME"
-          file "$APP_PATH/FinanceDemo"
+          file "$APP_PATH/PocketLedger"
 
       - name: Package unsigned IPA
         run: |
           set -euo pipefail
-          APP_PATH="$RUNNER_TEMP/package/FinanceDemo.app"
+          APP_PATH="$RUNNER_TEMP/package/PocketLedger.app"
           PACKAGE_ROOT="$RUNNER_TEMP/unsigned-ipa"
-          IPA_PATH="$GITHUB_WORKSPACE/FinanceDemo-unsigned.ipa"
+          IPA_PATH="$GITHUB_WORKSPACE/PocketLedger-unsigned.ipa"
           rm -rf "$PACKAGE_ROOT"
           rm -f "$IPA_PATH"
           mkdir -p "$PACKAGE_ROOT/Payload"
-          ditto "$APP_PATH" "$PACKAGE_ROOT/Payload/FinanceDemo.app"
+          ditto "$APP_PATH" "$PACKAGE_ROOT/Payload/PocketLedger.app"
           ditto -c -k --sequesterRsrc --keepParent "$PACKAGE_ROOT/Payload" "$IPA_PATH"
           test -f "$IPA_PATH"
           unzip -t "$IPA_PATH"
-          unzip -Z1 "$IPA_PATH" | grep -Eq '^Payload/FinanceDemo\.app/PlugIns/[^/]+\.appex(/|$)' || {
+          unzip -Z1 "$IPA_PATH" | grep -Eq '^Payload/PocketLedger\.app/PlugIns/[^/]+\.appex(/|$)' || {
             echo "Packaged IPA does not contain an embedded widget extension."
             exit 1
           }
-          unzip -Z1 "$IPA_PATH" | grep -Eq '^Payload/FinanceDemo\.app/Watch/FinanceDemoWatch\.app(/|$)' || {
+          unzip -Z1 "$IPA_PATH" | grep -Eq '^Payload/PocketLedger\.app/Watch/PocketLedgerWatch\.app(/|$)' || {
             echo "Packaged IPA does not contain the embedded watch app."
             exit 1
           }
@@ -361,8 +361,8 @@ jobs:
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v7
         with:
-          name: FinanceDemo-unsigned
+          name: PocketLedger-unsigned
           path: |
-            FinanceDemo-unsigned.ipa
+            PocketLedger-unsigned.ipa
             build-info.txt
           retention-days: 7

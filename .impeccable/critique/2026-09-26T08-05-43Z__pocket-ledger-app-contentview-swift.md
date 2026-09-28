@@ -5,11 +5,11 @@ max_score: 40
 na_heuristics: 
 p0_count: 0
 p1_count: 3
-target_identity: "file:C:\\Programming\\Finance-App\\FinanceDemo\\App\\ContentView.swift"
+target_identity: "file:C:\\Programming\\Finance-App\\PocketLedger\\App\\ContentView.swift"
 target_fingerprint: "sha256:278407b4b443117becd92c5616680ce475fd4b75c07ac8d7c3e2325d2efd22d3"
-target_path: "C:\\Programming\\Finance-App\\FinanceDemo\\App\\ContentView.swift"
+target_path: "C:\\Programming\\Finance-App\\PocketLedger\\App\\ContentView.swift"
 timestamp: 2026-09-26T08-05-43Z
-slug: financedemo-app-contentview-swift
+slug: pocket-ledger-app-contentview-swift
 ---
 # Pocket Ledger UX/UI review — 26 September 2026
 
@@ -19,11 +19,11 @@ The app has a coherent local-first identity and a strong native foundation. Its 
 
 ## Priority issues
 
-1. **P1 — Honor balance privacy in projected cash flow.** Home protects current balances but the optional cash-flow widget renders projected balances and scheduled changes directly. Current balance is visible or inferable while the hide control is active. Apply the same protected amount rendering to projected balances. Evidence: `FinanceDemo/App/DashboardViews.swift:166,345,695–721`. Suggested workflow: `$impeccable harden`.
-2. **P1 — Make historical currency changes explicit.** Account currency lives in Opening balance; an explanatory footnote says changing it preserves numbers while changing the currency of related history. Ordinary Save commits the change. Add an affected-record preview and concrete before/after example, explicit confirmation, and recovery. Evidence: `FinanceDemo/App/AccountManagementViews.swift:568–580,643`. Suggested workflow: `$impeccable harden`.
-3. **P1 — Complete imported income correction.** Income-only review rows expose received currency but no receiving-account picker. Add it so a single incorrect income row can be repaired before import. Evidence: `FinanceDemo/App/ImportWizardViews.swift:1797–1831`. Suggested workflow: `$impeccable harden`.
-4. **P2 — Make totals and drill-downs describe the same records.** Budget drill-down uses category text search rather than the budget's category identity and calculation scope. Carry exact category/descendants, period, inclusion rules, and reporting-currency semantics into the transaction list. Separately, Available balance includes physical assets and investments when included in totals; rename this total or distinguish spendable money from other holdings. Evidence: `FinanceDemo/App/BudgetsView.swift:118–125`; `FinanceDemo/Models/LedgerAnalytics.swift:189–193`. Suggested workflow: `$impeccable clarify`.
-5. **P2 — Make widget quick expenses intentional.** Medium widget adds a fixed USD 5 expense to the first eligible account and first active child category; Control Center exposes an amount but still chooses the account/category. Let users select a named saved preset with account/category/currency/amount, or open a prefilled editor. Evidence: `FinanceDemoWidget/BalanceWidget.swift:129–135`; `FinanceDemo/Shared/DemoIntents.swift:28–43,59–97`. Suggested workflow: `$impeccable shape`.
+1. **P1 — Honor balance privacy in projected cash flow.** Home protects current balances but the optional cash-flow widget renders projected balances and scheduled changes directly. Current balance is visible or inferable while the hide control is active. Apply the same protected amount rendering to projected balances. Evidence: `PocketLedger/App/DashboardViews.swift:166,345,695–721`. Suggested workflow: `$impeccable harden`.
+2. **P1 — Make historical currency changes explicit.** Account currency lives in Opening balance; an explanatory footnote says changing it preserves numbers while changing the currency of related history. Ordinary Save commits the change. Add an affected-record preview and concrete before/after example, explicit confirmation, and recovery. Evidence: `PocketLedger/App/AccountManagementViews.swift:568–580,643`. Suggested workflow: `$impeccable harden`.
+3. **P1 — Complete imported income correction.** Income-only review rows expose received currency but no receiving-account picker. Add it so a single incorrect income row can be repaired before import. Evidence: `PocketLedger/App/ImportWizardViews.swift:1797–1831`. Suggested workflow: `$impeccable harden`.
+4. **P2 — Make totals and drill-downs describe the same records.** Budget drill-down uses category text search rather than the budget's category identity and calculation scope. Carry exact category/descendants, period, inclusion rules, and reporting-currency semantics into the transaction list. Separately, Available balance includes physical assets and investments when included in totals; rename this total or distinguish spendable money from other holdings. Evidence: `PocketLedger/App/BudgetsView.swift:118–125`; `PocketLedger/Models/LedgerAnalytics.swift:189–193`. Suggested workflow: `$impeccable clarify`.
+5. **P2 — Make widget quick expenses intentional.** Medium widget adds a fixed USD 5 expense to the first eligible account and first active child category; Control Center exposes an amount but still chooses the account/category. Let users select a named saved preset with account/category/currency/amount, or open a prefilled editor. Evidence: `PocketLedgerWidget/BalanceWidget.swift:129–135`; `PocketLedger/Shared/PocketLedgerIntents.swift`. Suggested workflow: `$impeccable shape`.
 
 ## Improvements across the app
 

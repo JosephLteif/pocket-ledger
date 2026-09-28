@@ -77,11 +77,11 @@ struct GetBudgetStatusIntent: AppIntent {
     }
 }
 
-struct FinanceDemoShortcuts: AppShortcutsProvider {
+struct PocketLedgerShortcuts: AppShortcutsProvider {
     @AppShortcutsBuilder
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
-            intent: GetDemoBalanceIntent(),
+            intent: GetBalanceIntent(),
             phrases: [
                 "How much money do I have in \(.applicationName)",
                 "How much do I have in \(.applicationName)",

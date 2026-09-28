@@ -1,5 +1,5 @@
 import XCTest
-@testable import FinanceDemo
+@testable import PocketLedger
 
 final class DashboardPreferencesTests: XCTestCase {
     func testDefaultsPrioritizeDailySummaryWidgets() {

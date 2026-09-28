@@ -8,7 +8,7 @@ actor ScheduledTransactionLiveActivityService {
     private let maximumDuration: TimeInterval = 8 * 60 * 60
     private let processingGracePeriod: TimeInterval = 30 * 60
     private let logger = Logger(
-        subsystem: "com.josephlteif.financedemo",
+        subsystem: "com.josephlteif.pocketledger",
         category: "ScheduledLiveActivity"
     )
 

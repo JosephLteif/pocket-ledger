@@ -21,7 +21,7 @@ Read the full [privacy policy](https://josephlteif.github.io/pocket-ledger/priva
 
 ## Platforms
 
-The current project configuration targets iOS 26 and watchOS 26. The app is native SwiftUI and includes a WidgetKit extension and Apple Watch companion. Internal target and source names remain `FinanceDemo` for compatibility with the existing build and signing workflow.
+The current project configuration targets iOS 26 and watchOS 26. The app is native SwiftUI and includes a WidgetKit extension and Apple Watch companion. The app, extensions, and generated Xcode project use the Pocket Ledger name.
 
 ## Build an unsigned iOS artifact
 
@@ -35,12 +35,12 @@ The unsigned artifact is for development and sideloading; it is not an App Store
 
 ## Project layout
 
-- `FinanceDemo/App`: SwiftUI screens, ledger state, import/export, and app intents.
-- `FinanceDemo/Models`: ledger, finance, and reporting models.
-- `FinanceDemo/Services`: storage, security, receipt processing, Watch connectivity, and local notifications.
-- `FinanceDemo/Shared`: shared intents and Watch data contracts.
-- `FinanceDemoWidget`, `FinanceDemoWatch`, `FinanceDemoWatchWidget`: widgets and Watch targets.
-- `FinanceDemo/Config` and extension `Config` folders: entitlements and privacy manifests.
+- `PocketLedger/App`: SwiftUI screens, ledger state, import/export, and app intents.
+- `PocketLedger/Models`: ledger, finance, and reporting models.
+- `PocketLedger/Services`: storage, security, receipt processing, Watch connectivity, and local notifications.
+- `PocketLedger/Shared`: shared intents and Watch data contracts.
+- `PocketLedgerWidget`, `PocketLedgerWatch`, `PocketLedgerWatchWidget`: widgets and Watch targets.
+- `PocketLedger/Config` and extension `Config` folders: entitlements and privacy manifests.
 - `docs/`: public product, privacy, and support pages deployed with the Pages workflow.
 - `.github/workflows/`: unsigned app build and public site deployment workflows.
 

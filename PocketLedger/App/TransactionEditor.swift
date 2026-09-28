@@ -563,7 +563,7 @@ struct TransactionEditor: View {
             )
         }
         .userActivity(
-            "com.josephlteif.financedemo.viewing-transaction",
+            "com.josephlteif.pocketledger.viewing-transaction",
             element: visibleTransactionEntity
         ) { entity, activity in
             activity.title = "Viewing \(entity.note.isEmpty ? entity.kind : entity.note)"

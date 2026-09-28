@@ -604,9 +604,6 @@ struct TransactionsView: View {
         count: Int
     ) -> some View {
         transactionRow(for: transaction)
-            .background {
-                ledgerGroupedRowBackground(isFirst: index == 0, isLast: index == count - 1)
-            }
             .listRowInsets(
                 EdgeInsets(
                     top: 0,
@@ -615,7 +612,9 @@ struct TransactionsView: View {
                     trailing: PocketLedgerTheme.screenHorizontalPadding * 2
                 )
             )
-            .listRowBackground(Color.clear)
+            .listRowBackground(
+                ledgerGroupedRowBackground(isFirst: index == 0, isLast: index == count - 1)
+            )
             .listRowSeparatorTint(PocketLedgerTheme.divider)
             .listRowSeparator(index == count - 1 ? .hidden : .visible, edges: .bottom)
     }
@@ -1086,47 +1085,7 @@ struct TransactionRow: View {
     }
 
     var body: some View {
-        renderedRow
-            .padding(.horizontal, swipeActionHorizontalInset)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.clear)
-            .contentShape(Rectangle())
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                if canEditTransaction {
-                    PocketCircularSwipeAction(
-                        title: "Delete",
-                        systemImage: "trash",
-                        tint: .red,
-                        titleColor: .white,
-                        role: .destructive
-                    ) {
-                        isShowingDeleteConfirmation = true
-                    }
-                    PocketCircularSwipeAction(
-                        title: "Edit",
-                        systemImage: "pencil",
-                        tint: .yellow,
-                        iconColor: .black,
-                        titleColor: .black
-                    ) { onEdit() }
-                }
-            }
-            .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                if canEditTransaction {
-                    PocketCircularSwipeAction(
-                        title: "Duplicate",
-                        systemImage: "plus.square.on.square",
-                        tint: PocketLedgerTheme.accent,
-                        titleColor: .white
-                    ) { onDuplicate() }
-                    PocketCircularSwipeAction(
-                        title: "Template",
-                        systemImage: "rectangle.stack.badge.plus",
-                        tint: PocketLedgerTheme.positive,
-                        titleColor: .white
-                    ) { onSaveTemplate() }
-                }
-            }
+        swipeInteractionRow
             .padding(.horizontal, -swipeActionHorizontalInset)
             .confirmationDialog(
                 "Delete transaction?",
@@ -1141,12 +1100,56 @@ struct TransactionRow: View {
     }
 
     @ViewBuilder
-    private var renderedRow: some View {
+    private var swipeInteractionRow: some View {
         if usesCustomScrollSwipeFallback {
             rowWithActions
+                .padding(.horizontal, swipeActionHorizontalInset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.clear)
+                .contentShape(Rectangle())
                 .simultaneousGesture(customSwipeGesture)
         } else {
             rowButton
+                .padding(.horizontal, swipeActionHorizontalInset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.clear)
+                .contentShape(Rectangle())
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    if canEditTransaction {
+                        PocketCircularSwipeAction(
+                            title: "Delete",
+                            systemImage: "trash",
+                            tint: .red,
+                            titleColor: .white,
+                            role: .destructive
+                        ) {
+                            isShowingDeleteConfirmation = true
+                        }
+                        PocketCircularSwipeAction(
+                            title: "Edit",
+                            systemImage: "pencil",
+                            tint: .yellow,
+                            iconColor: .black,
+                            titleColor: .black
+                        ) { onEdit() }
+                    }
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                    if canEditTransaction {
+                        PocketCircularSwipeAction(
+                            title: "Duplicate",
+                            systemImage: "plus.square.on.square",
+                            tint: PocketLedgerTheme.accent,
+                            titleColor: .white
+                        ) { onDuplicate() }
+                        PocketCircularSwipeAction(
+                            title: "Template",
+                            systemImage: "rectangle.stack.badge.plus",
+                            tint: PocketLedgerTheme.positive,
+                            titleColor: .white
+                        ) { onSaveTemplate() }
+                    }
+                }
         }
     }
 
@@ -1211,9 +1214,6 @@ struct TransactionRow: View {
             Spacer(minLength: 0)
 
             if isTrailingSwipeActive {
-                scrollSwipeAction("Delete", systemImage: "trash", tint: .red) {
-                    isShowingDeleteConfirmation = true
-                }
                 scrollSwipeAction(
                     "Edit",
                     systemImage: "pencil",
@@ -1221,6 +1221,9 @@ struct TransactionRow: View {
                     iconColor: .black,
                     action: onEdit
                 )
+                scrollSwipeAction("Delete", systemImage: "trash", tint: .red) {
+                    isShowingDeleteConfirmation = true
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

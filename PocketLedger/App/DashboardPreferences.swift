@@ -115,6 +115,7 @@ struct DashboardPreferences: Codable, Equatable {
         ],
         disabledWidgets: [
             .accounts,
+            .loans,
             .upcoming,
             .cashFlow,
             .budgetPulse,

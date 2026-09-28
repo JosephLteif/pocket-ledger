@@ -11,6 +11,7 @@ final class DashboardPreferencesTests: XCTestCase {
                 .monthSummary,
                 .recentActivity,
                 .accounts,
+                .loans,
                 .upcoming,
                 .cashFlow,
                 .budgetPulse,

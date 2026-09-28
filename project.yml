@@ -1,4 +1,4 @@
-name: ios-native-finance-demo
+name: PocketLedger
 
 options:
   bundleIdPrefix: com.josephlteif
@@ -20,28 +20,28 @@ packages:
     from: 0.9.19
 
 targets:
-  FinanceDemo:
+  PocketLedger:
     type: application
     platform: iOS
     sources:
-      - path: FinanceDemo/App
-      - path: FinanceDemo/Models
-      - path: FinanceDemo/Services
-      - path: FinanceDemo/Shared
-      - path: FinanceDemo/WatchShared
-      - path: FinanceDemo/Resources/Assets.xcassets
+      - path: PocketLedger/App
+      - path: PocketLedger/Models
+      - path: PocketLedger/Services
+      - path: PocketLedger/Shared
+      - path: PocketLedger/WatchShared
+      - path: PocketLedger/Resources/Assets.xcassets
     resources:
-      - path: FinanceDemo/Config/PrivacyInfo.xcprivacy
+      - path: PocketLedger/Config/PrivacyInfo.xcprivacy
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.josephlteif.financedemo
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        INFOPLIST_FILE: FinanceDemo/Config/Info.plist
-        CODE_SIGN_ENTITLEMENTS: FinanceDemo/Config/FinanceDemo.entitlements
+        INFOPLIST_FILE: PocketLedger/Config/Info.plist
+        CODE_SIGN_ENTITLEMENTS: PocketLedger/Config/PocketLedger.entitlements
         TARGETED_DEVICE_FAMILY: 1
         SUPPORTS_MACCATALYST: NO
     info:
-      path: FinanceDemo/Config/Info.plist
+      path: PocketLedger/Config/Info.plist
       properties:
         CFBundleDisplayName: Pocket Ledger
         CFBundleName: Pocket Ledger
@@ -53,7 +53,7 @@ targets:
         NSSupportsLiveActivities: true
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
-            CFBundleURLName: com.josephlteif.financedemo
+            CFBundleURLName: com.josephlteif.pocketledger
             CFBundleURLSchemes:
               - pocketledger
         UILaunchScreen: {}
@@ -61,39 +61,39 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
     entitlements:
-      path: FinanceDemo/Config/FinanceDemo.entitlements
+      path: PocketLedger/Config/PocketLedger.entitlements
       properties:
         com.apple.security.application-groups:
           - group.com.josephlteif.financedemo
     dependencies:
       - package: ZIPFoundation
-      - target: FinanceDemoWidget
+      - target: PocketLedgerWidget
         embed: true
         codeSign: false
     scheme:
       gatherCoverageData: false
       testTargets:
-        - FinanceDemoTests
+        - PocketLedgerTests
 
-  FinanceDemoWidget:
+  PocketLedgerWidget:
     type: app-extension
     platform: iOS
     sources:
-      - path: FinanceDemo/Models
-      - path: FinanceDemo/Services/FinanceStorage.swift
-      - path: FinanceDemo/Shared
-      - path: FinanceDemo/WatchShared
-      - path: FinanceDemoWidget
+      - path: PocketLedger/Models
+      - path: PocketLedger/Services/FinanceStorage.swift
+      - path: PocketLedger/Shared
+      - path: PocketLedger/WatchShared
+      - path: PocketLedgerWidget
     resources:
-      - path: FinanceDemoWidget/Config/PrivacyInfo.xcprivacy
+      - path: PocketLedgerWidget/Config/PrivacyInfo.xcprivacy
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.josephlteif.financedemo.widget
-        INFOPLIST_FILE: FinanceDemoWidget/Config/Info.plist
-        CODE_SIGN_ENTITLEMENTS: FinanceDemoWidget/Config/FinanceDemoWidget.entitlements
+        INFOPLIST_FILE: PocketLedgerWidget/Config/Info.plist
+        CODE_SIGN_ENTITLEMENTS: PocketLedgerWidget/Config/PocketLedgerWidget.entitlements
         TARGETED_DEVICE_FAMILY: 1
     info:
-      path: FinanceDemoWidget/Config/Info.plist
+      path: PocketLedgerWidget/Config/Info.plist
       properties:
         CFBundleDisplayName: Pocket Ledger Balance
         CFBundleName: Pocket Ledger Widget
@@ -102,27 +102,27 @@ targets:
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:
-      path: FinanceDemoWidget/Config/FinanceDemoWidget.entitlements
+      path: PocketLedgerWidget/Config/PocketLedgerWidget.entitlements
       properties:
         com.apple.security.application-groups:
           - group.com.josephlteif.financedemo
 
-  FinanceDemoWatch:
+  PocketLedgerWatch:
     type: application
     platform: watchOS
     sources:
-      - path: FinanceDemo/Models/FinanceModel.swift
-      - path: FinanceDemo/WatchShared
-      - path: FinanceDemoWatch
+      - path: PocketLedger/Models/FinanceModel.swift
+      - path: PocketLedger/WatchShared
+      - path: PocketLedgerWatch
     resources:
-      - path: FinanceDemoWatch/Config/PrivacyInfo.xcprivacy
+      - path: PocketLedgerWatch/Config/PrivacyInfo.xcprivacy
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.josephlteif.financedemo.watchkitapp
         TARGETED_DEVICE_FAMILY: "4"
         SUPPORTS_MACCATALYST: NO
     info:
-      path: FinanceDemoWatch/Config/Info.plist
+      path: PocketLedgerWatch/Config/Info.plist
       properties:
         WKWatchKitApp: true
         CFBundleDisplayName: Pocket Ledger
@@ -132,31 +132,31 @@ targets:
         WKCompanionAppBundleIdentifier: com.josephlteif.financedemo
         WKRunsIndependentlyOfCompanionApp: false
     entitlements:
-      path: FinanceDemoWatch/Config/FinanceDemoWatch.entitlements
+      path: PocketLedgerWatch/Config/PocketLedgerWatch.entitlements
       properties:
         com.apple.security.application-groups:
           - group.com.josephlteif.financedemo
     dependencies:
-      - target: FinanceDemoWatchWidget
+      - target: PocketLedgerWatchWidget
         embed: true
         codeSign: false
     scheme: {}
 
-  FinanceDemoWatchWidget:
+  PocketLedgerWatchWidget:
     type: app-extension
     platform: watchOS
     sources:
-      - path: FinanceDemo/Models/FinanceModel.swift
-      - path: FinanceDemo/WatchShared
-      - path: FinanceDemoWatchWidget
+      - path: PocketLedger/Models/FinanceModel.swift
+      - path: PocketLedger/WatchShared
+      - path: PocketLedgerWatchWidget
     resources:
-      - path: FinanceDemoWatchWidget/Config/PrivacyInfo.xcprivacy
+      - path: PocketLedgerWatchWidget/Config/PrivacyInfo.xcprivacy
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.josephlteif.financedemo.watchkitapp.widget
         TARGETED_DEVICE_FAMILY: "4"
     info:
-      path: FinanceDemoWatchWidget/Config/Info.plist
+      path: PocketLedgerWatchWidget/Config/Info.plist
       properties:
         CFBundleDisplayName: Pocket Ledger Complication
         CFBundleName: Pocket Ledger Complication
@@ -165,18 +165,18 @@ targets:
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:
-      path: FinanceDemoWatchWidget/Config/FinanceDemoWatchWidget.entitlements
+      path: PocketLedgerWatchWidget/Config/PocketLedgerWatchWidget.entitlements
       properties:
         com.apple.security.application-groups:
           - group.com.josephlteif.financedemo
 
-  FinanceDemoTests:
+  PocketLedgerTests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: FinanceDemoTests
+      - path: PocketLedgerTests
     dependencies:
-      - target: FinanceDemo
+      - target: PocketLedger
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.josephlteif.financedemo.tests

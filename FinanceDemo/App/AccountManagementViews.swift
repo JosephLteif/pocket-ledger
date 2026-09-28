@@ -304,57 +304,45 @@ struct AccountsView: View {
                     return store.moveAccount(accountID: draggedID, beforeAccountID: account.id)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button {
+                    PocketCircularSwipeAction(
+                        title: "Edit",
+                        systemImage: "pencil",
+                        tint: .yellow,
+                        iconColor: .black,
+                        titleColor: .black
+                    ) {
                         presentAccount(account)
-                    } label: {
-                        PocketSwipeActionLabel(
-                            title: "Edit",
-                            systemImage: "pencil",
-                            tint: .yellow,
-                            iconColor: .black,
-                            titleColor: .black
-                        )
                     }
-                    .tint(.yellow)
-                    .accessibilityLabel("Edit")
-                    Button {
+                    PocketCircularSwipeAction(
+                        title: "Archive",
+                        systemImage: "archivebox",
+                        tint: PocketLedgerTheme.warning,
+                        titleColor: .white
+                    ) {
                         _ = store.setAccountArchived(accountID: account.id, isArchived: true)
-                    } label: {
-                        PocketSwipeActionLabel(
-                            title: "Archive",
-                            systemImage: "archivebox",
-                            tint: PocketLedgerTheme.warning
-                        )
                     }
-                    .tint(PocketLedgerTheme.warning)
-                    .accessibilityLabel("Archive")
-                    Button(role: .destructive) {
+                    PocketCircularSwipeAction(
+                        title: "Delete account",
+                        systemImage: "trash",
+                        tint: .red,
+                        titleColor: .white,
+                        role: .destructive
+                    ) {
                         accountToDelete = account
-                    } label: {
-                        PocketSwipeActionLabel(
-                            title: "Delete account",
-                            systemImage: "trash",
-                            tint: .red
-                        )
                     }
-                    .tint(.red)
-                    .accessibilityLabel("Delete account")
                 }
                 .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                    Button {
+                    PocketCircularSwipeAction(
+                        title: account.includeInTotals ? "Exclude" : "Include",
+                        systemImage: account.includeInTotals ? "eye.slash" : "eye",
+                        tint: account.includeInTotals ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.positive,
+                        titleColor: .white
+                    ) {
                         _ = store.setAccountIncludedInTotals(
                             accountID: account.id,
                             included: !account.includeInTotals
                         )
-                    } label: {
-                        PocketSwipeActionLabel(
-                            title: account.includeInTotals ? "Exclude" : "Include",
-                            systemImage: account.includeInTotals ? "eye.slash" : "eye",
-                            tint: account.includeInTotals ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.positive
-                        )
                     }
-                    .tint(account.includeInTotals ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.positive)
-                    .accessibilityLabel(account.includeInTotals ? "Exclude" : "Include")
                 }
                 .listRowInsets(
                     EdgeInsets(
@@ -433,32 +421,26 @@ struct AccountsView: View {
                     .frame(minHeight: 68)
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
                         if !store.isManagedLegacyLoanAccount(account.id) {
-                            Button {
+                            PocketCircularSwipeAction(
+                                title: "Restore",
+                                systemImage: "arrow.uturn.backward",
+                                tint: PocketLedgerTheme.accent,
+                                titleColor: .white
+                            ) {
                                 _ = store.setAccountArchived(accountID: account.id, isArchived: false)
-                            } label: {
-                                PocketSwipeActionLabel(
-                                    title: "Restore",
-                                    systemImage: "arrow.uturn.backward",
-                                    tint: PocketLedgerTheme.accent
-                                )
                             }
-                            .tint(PocketLedgerTheme.accent)
-                            .accessibilityLabel("Restore")
                         }
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
+                        PocketCircularSwipeAction(
+                            title: "Delete account",
+                            systemImage: "trash",
+                            tint: .red,
+                            titleColor: .white,
+                            role: .destructive
+                        ) {
                             accountToDelete = account
                         }
-                        label: {
-                            PocketSwipeActionLabel(
-                                title: "Delete account",
-                                systemImage: "trash",
-                                tint: .red
-                            )
-                        }
-                        .tint(.red)
-                        .accessibilityLabel("Delete account")
                     }
                     .listRowInsets(
                         EdgeInsets(

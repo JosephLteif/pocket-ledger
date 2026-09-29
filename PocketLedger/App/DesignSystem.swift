@@ -522,66 +522,51 @@ struct PocketGlassContainer<Content: View>: View {
     }
 }
 
-struct PocketSwipeActionLabel: View {
+struct PocketSwipeActionButton: View {
     let title: String
     let systemImage: String
     let tint: Color
-    var iconColor: Color = .white
-    var titleColor: Color = .white
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(iconColor)
-                .frame(width: 48, height: 48)
-                .background(tint, in: Circle())
-
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(titleColor)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
-        .frame(width: 72)
-        .frame(maxHeight: .infinity)
-        .contentShape(Rectangle())
-    }
-}
-
-struct PocketCircularSwipeAction: View {
-    let title: String
-    let systemImage: String
-    let tint: Color
-    var iconColor: Color = .white
-    var titleColor: Color = .white
     var role: ButtonRole? = nil
     let action: () -> Void
 
     var body: some View {
         Button(role: role, action: action) {
-            PocketSwipeActionLabel(
-                title: title,
-                systemImage: systemImage,
-                tint: tint,
-                iconColor: iconColor,
-                titleColor: titleColor
-            )
+            Label(title, systemImage: systemImage)
         }
-        .buttonStyle(.plain)
         .tint(tint)
         .accessibilityLabel(title)
     }
 }
 
+func ledgerGroupedRowBackground(isFirst: Bool, isLast: Bool) -> some View {
+    UnevenRoundedRectangle(
+        cornerRadii: RectangleCornerRadii(
+            topLeading: isFirst ? 18 : 0,
+            bottomLeading: isLast ? 18 : 0,
+            bottomTrailing: isLast ? 18 : 0,
+            topTrailing: isFirst ? 18 : 0
+        ),
+        style: .continuous
+    )
+    .fill(PocketLedgerTheme.surface)
+    .padding(.horizontal, 16)
+}
+
 extension View {
-    @ViewBuilder
-    func pocketSwipeActionsContainer() -> some View {
-        if #available(iOS 27, *) {
-            self.swipeActionsContainer()
-        } else {
-            self
-        }
+    func pocketGroupedListRow(
+        index: Int,
+        count: Int,
+        horizontalInset: CGFloat = PocketLedgerTheme.screenHorizontalPadding * 2
+    ) -> some View {
+        self
+            .listRowInsets(
+                EdgeInsets(top: 0, leading: horizontalInset, bottom: 0, trailing: horizontalInset)
+            )
+            .listRowBackground(
+                ledgerGroupedRowBackground(isFirst: index == 0, isLast: index == count - 1)
+            )
+            .listRowSeparatorTint(PocketLedgerTheme.divider)
+            .listRowSeparator(index == count - 1 ? .hidden : .visible, edges: .bottom)
     }
 
     func pocketScreen() -> some View {

@@ -67,7 +67,7 @@ struct ExchangeRatesView: View {
                         }
                         .buttonStyle(.plain)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            PocketCircularSwipeAction(
+                            PocketSwipeActionButton(
                                 title: "Delete",
                                 systemImage: "trash",
                                 tint: .red,

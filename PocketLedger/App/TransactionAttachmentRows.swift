@@ -29,7 +29,7 @@ struct TransactionAttachmentRows: View {
             }
             .frame(minHeight: 68)
             .swipeActions {
-                PocketCircularSwipeAction(
+                PocketSwipeActionButton(
                     title: "Delete",
                     systemImage: "trash",
                     tint: .red,

@@ -617,19 +617,7 @@ struct TransactionsView: View {
         count: Int
     ) -> some View {
         transactionRow(for: transaction)
-            .listRowInsets(
-                EdgeInsets(
-                    top: 0,
-                    leading: PocketLedgerTheme.screenHorizontalPadding * 2,
-                    bottom: 0,
-                    trailing: PocketLedgerTheme.screenHorizontalPadding * 2
-                )
-            )
-            .listRowBackground(
-                ledgerGroupedRowBackground(isFirst: index == 0, isLast: index == count - 1)
-            )
-            .listRowSeparatorTint(PocketLedgerTheme.divider)
-            .listRowSeparator(index == count - 1 ? .hidden : .visible, edges: .bottom)
+            .pocketGroupedListRow(index: index, count: count)
     }
 
     private func transactionRow(for transaction: LedgerTransaction) -> some View {
@@ -1112,13 +1100,8 @@ struct TransactionRow: View {
     let transaction: LedgerTransaction
     @ObservedObject var store: LedgerStore
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
-    @Environment(\.layoutDirection) private var layoutDirection
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isShowingDeleteConfirmation = false
     @State private var isShowingLoanDetails = false
-    @State private var swipeOffset: CGFloat = 0
-    @State private var swipeStartOffset: CGFloat = 0
-    @State private var isTrackingHorizontalSwipe = false
     let onEdit: () -> Void
     let onDuplicate: () -> Void
     let onDelete: () -> Void
@@ -1127,8 +1110,6 @@ struct TransactionRow: View {
     let subtitleOverride: String?
     let amountOverride: String?
     let amountColorOverride: Color?
-    let usesScrollSwipeActions: Bool
-    let swipeActionHorizontalInset: CGFloat
     let allowsActions: Bool
     let isSelectionMode: Bool
     let isSelected: Bool
@@ -1151,8 +1132,6 @@ struct TransactionRow: View {
         subtitleOverride: String? = nil,
         amountOverride: String? = nil,
         amountColorOverride: Color? = nil,
-        usesScrollSwipeActions: Bool = false,
-        swipeActionHorizontalInset: CGFloat = 0,
         reportingCurrency: LedgerCurrency? = nil,
         accountContext: Account? = nil
     ) {
@@ -1166,8 +1145,6 @@ struct TransactionRow: View {
         self.subtitleOverride = subtitleOverride
         self.amountOverride = amountOverride
         self.amountColorOverride = amountColorOverride
-        self.usesScrollSwipeActions = usesScrollSwipeActions
-        self.swipeActionHorizontalInset = swipeActionHorizontalInset
         self.reportingCurrency = reportingCurrency
         self.accountContext = accountContext
         self.allowsActions = allowsActions
@@ -1177,101 +1154,55 @@ struct TransactionRow: View {
     }
 
     var body: some View {
-        Group {
-            if usesCustomScrollSwipeFallback {
-                swipeInteractionRow
-                    .padding(.horizontal, -swipeActionHorizontalInset)
-            } else {
-                swipeInteractionRow
-                    .padding(.horizontal, -swipeActionHorizontalInset)
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        if canEditTransaction {
-                            Button(role: .destructive) {
-                                isShowingDeleteConfirmation = true
-                            } label: {
-                                PocketSwipeActionLabel(
-                                    title: "Delete",
-                                    systemImage: "trash",
-                                    tint: .red
-                                )
-                            }
-                            .tint(.red)
-                            .accessibilityLabel("Delete")
-
-                            Button(action: onEdit) {
-                                PocketSwipeActionLabel(
-                                    title: "Edit",
-                                    systemImage: "pencil",
-                                    tint: .yellow
-                                )
-                            }
-                            .tint(.yellow)
-                            .accessibilityLabel("Edit")
-                        }
+        rowButton
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if canEditTransaction {
+                    PocketSwipeActionButton(
+                        title: "Delete",
+                        systemImage: "trash",
+                        tint: .red,
+                        role: .destructive
+                    ) {
+                        isShowingDeleteConfirmation = true
                     }
-                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                        if canEditTransaction {
-                            Button(action: onDuplicate) {
-                                PocketSwipeActionLabel(
-                                    title: "Duplicate",
-                                    systemImage: "plus.square.on.square",
-                                    tint: PocketLedgerTheme.accent
-                                )
-                            }
-                            .tint(PocketLedgerTheme.accent)
-                            .accessibilityLabel("Duplicate")
 
-                            Button(action: onSaveTemplate) {
-                                PocketSwipeActionLabel(
-                                    title: "Template",
-                                    systemImage: "rectangle.stack.badge.plus",
-                                    tint: PocketLedgerTheme.positive
-                                )
-                            }
-                            .tint(PocketLedgerTheme.positive)
-                            .accessibilityLabel("Template")
-                        }
-                    }
+                    PocketSwipeActionButton(
+                        title: "Edit",
+                        systemImage: "pencil",
+                        tint: .yellow,
+                        action: onEdit
+                    )
+                }
             }
-        }
-        .confirmationDialog(
-            "Delete transaction?",
-            isPresented: $isShowingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive, action: onDelete)
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(transaction.note)
-        }
-    }
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                if canEditTransaction {
+                    PocketSwipeActionButton(
+                        title: "Duplicate",
+                        systemImage: "plus.square.on.square",
+                        tint: PocketLedgerTheme.accent,
+                        action: onDuplicate
+                    )
 
-    @ViewBuilder
-    private var swipeInteractionRow: some View {
-        if usesCustomScrollSwipeFallback {
-            rowWithActions
-                .padding(.horizontal, swipeActionHorizontalInset)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.clear)
-                .contentShape(Rectangle())
-                .simultaneousGesture(customSwipeGesture)
-        } else {
-            rowButton
-                .padding(.horizontal, swipeActionHorizontalInset)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.clear)
-                .contentShape(Rectangle())
-        }
-    }
-
-    private var rowWithActions: some View {
-        ZStack {
-            scrollSwipeActions
-            rowButton
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .clipped()
-        .contentShape(Rectangle())
+                    PocketSwipeActionButton(
+                        title: "Template",
+                        systemImage: "rectangle.stack.badge.plus",
+                        tint: PocketLedgerTheme.positive,
+                        action: onSaveTemplate
+                    )
+                }
+            }
+            .confirmationDialog(
+                "Delete transaction?",
+                isPresented: $isShowingDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive, action: onDelete)
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(transaction.note)
+            }
     }
 
     private var rowButton: some View {
@@ -1279,7 +1210,6 @@ struct TransactionRow: View {
             rowContent
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .offset(x: usesCustomScrollSwipeFallback ? swipeOffset : 0)
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
@@ -1309,91 +1239,7 @@ struct TransactionRow: View {
         }
     }
 
-    private var usesCustomScrollSwipeFallback: Bool {
-        guard usesScrollSwipeActions && canEditTransaction else { return false }
-        if #available(iOS 27, *) { return false }
-        return true
-    }
-
-    private var scrollSwipeActions: some View {
-        HStack(spacing: 0) {
-            if isLeadingSwipeActive {
-                scrollSwipeAction("Duplicate", systemImage: "plus.square.on.square", tint: PocketLedgerTheme.accent, action: onDuplicate)
-                scrollSwipeAction("Template", systemImage: "rectangle.stack.badge.plus", tint: PocketLedgerTheme.positive, action: onSaveTemplate)
-            }
-
-            Spacer(minLength: 0)
-
-            if isTrailingSwipeActive {
-                scrollSwipeAction(
-                    "Edit",
-                    systemImage: "pencil",
-                    tint: .yellow,
-                    action: onEdit
-                )
-                scrollSwipeAction("Delete", systemImage: "trash", tint: .red) {
-                    isShowingDeleteConfirmation = true
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityHidden(swipeOffset == 0)
-    }
-
-    private var isLeadingSwipeActive: Bool {
-        layoutDirection == .leftToRight ? swipeOffset > 0 : swipeOffset < 0
-    }
-
-    private var isTrailingSwipeActive: Bool {
-        layoutDirection == .leftToRight ? swipeOffset < 0 : swipeOffset > 0
-    }
-
-    private func scrollSwipeAction(
-        _ title: String,
-        systemImage: String,
-        tint: Color,
-        iconColor: Color = .white,
-        action: @escaping () -> Void
-    ) -> some View {
-        PocketCircularSwipeAction(
-            title: title,
-            systemImage: systemImage,
-            tint: tint,
-            iconColor: iconColor
-        ) {
-            closeSwipeActions()
-            action()
-        }
-        .frame(maxHeight: .infinity)
-        .background(tint)
-    }
-
-    private var customSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 12)
-            .onChanged { value in
-                guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                if !isTrackingHorizontalSwipe {
-                    isTrackingHorizontalSwipe = true
-                    swipeStartOffset = swipeOffset
-                }
-                swipeOffset = min(144, max(-144, swipeStartOffset + value.translation.width))
-            }
-            .onEnded { value in
-                guard isTrackingHorizontalSwipe else { return }
-                isTrackingHorizontalSwipe = false
-                let finalOffset = min(144, max(-144, swipeStartOffset + value.translation.width))
-                withAnimation(PocketLedgerMotion.quick(reduceMotion: reduceMotion)) {
-                    swipeOffset = abs(finalOffset) >= 72 ? (finalOffset < 0 ? -144 : 144) : 0
-                }
-                swipeStartOffset = swipeOffset
-            }
-    }
-
     private func activateRow() {
-        if usesCustomScrollSwipeFallback && swipeOffset != 0 {
-            closeSwipeActions()
-            return
-        }
         if isSelectionMode && canSelectTransaction {
             onToggleSelection()
         } else if !isSelectionMode, transaction.loanID != nil {
@@ -1401,14 +1247,6 @@ struct TransactionRow: View {
         } else if !isSelectionMode, transaction.loanID == nil {
             (onOpen ?? onEdit)()
         }
-    }
-
-    private func closeSwipeActions() {
-        withAnimation(PocketLedgerMotion.quick(reduceMotion: reduceMotion)) {
-            swipeOffset = 0
-        }
-        swipeStartOffset = 0
-        isTrackingHorizontalSwipe = false
     }
 
     private var rowContent: some View {

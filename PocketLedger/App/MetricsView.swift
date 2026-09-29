@@ -907,21 +907,75 @@ private struct CategoryMetricsDetailView: View {
     }
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            PocketGlassContainer(spacing: 14) {
-                VStack(alignment: .leading, spacing: 0) {
-                    detailHeader
-                    lineChart(snapshot)
-                    detailCategoryRow(snapshot)
-                    subcategoryRows(snapshot)
-                    transactionRows(snapshot)
+        List {
+            Section {
+                PocketGlassContainer(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        detailHeader
+                        lineChart(snapshot)
+                        detailCategoryRow(snapshot)
+                        subcategoryRows(snapshot)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 12)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 24)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
+            .listSectionSeparator(.hidden)
+
+            Section {
+                if snapshot.selectedMonthTransactions.isEmpty {
+                    Text("No transactions in this month.")
+                        .font(.subheadline)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        .padding(.vertical, 24)
+                        .listRowInsets(
+                            EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
+                        )
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                } else {
+                    ForEach(Array(snapshot.selectedMonthTransactions.enumerated()), id: \.element.id) { entry in
+                        let transaction = entry.element
+                        TransactionRow(
+                            transaction: transaction,
+                            store: store,
+                            onEdit: { editingTransaction = transaction },
+                            onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
+                            onDelete: { transactionDeletion.delete(transaction, in: store) },
+                            onSaveTemplate: { transactionToTemplate = transaction },
+                            allowsActions: true,
+                            onOpen: {
+                                transactionToOpenID = transaction.id
+                                isShowingTransactionDetail = true
+                            },
+                            subtitleOverride: [
+                                accountNames(for: transaction),
+                                transaction.date.formatted(.dateTime.month(.abbreviated).day().year())
+                            ].filter { !$0.isEmpty }.joined(separator: " · "),
+                            amountOverride: "− \(Money(currency: currency, minorUnits: transactionAmount(transaction)).formatted)",
+                            amountColorOverride: PocketLedgerTheme.warning
+                        )
+                        .pocketGroupedListRow(
+                            index: entry.offset,
+                            count: snapshot.selectedMonthTransactions.count
+                        )
+                    }
+                }
+            } header: {
+                Text("Transactions")
+                    .font(.title3.weight(.bold))
+                    .padding(.top, 20)
+                    .padding(.bottom, 8)
+                    .textCase(nil)
+            }
+            .listSectionSeparator(.hidden)
         }
-        .pocketSwipeActionsContainer()
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .pocketScreen()
         .transactionUndoSupport(state: $transactionDeletion, store: store)
         .navigationTitle(categoryTitle)
@@ -946,7 +1000,6 @@ private struct CategoryMetricsDetailView: View {
         .onChange(of: anchorDate) { _, _ in refreshSnapshot() }
         .onChange(of: store.ledgerRevision) { _, _ in refreshSnapshot() }
     }
-
     private var detailHeader: some View {
         VStack(spacing: 10) {
             HStack {
@@ -1120,49 +1173,6 @@ private struct CategoryMetricsDetailView: View {
                 .overlay {
                     RoundedRectangle(cornerRadius: 18)
                         .stroke(PocketLedgerTheme.divider, lineWidth: 1)
-                }
-            }
-        }
-    }
-
-    private func transactionRows(_ snapshot: CategoryMetricsDetailSnapshot) -> some View {
-        LazyVStack(alignment: .leading, spacing: 0) {
-            Text("Transactions")
-                .font(.title3.weight(.bold))
-                .padding(.top, 20)
-                .padding(.bottom, 8)
-
-            if snapshot.selectedMonthTransactions.isEmpty {
-                Text("No transactions in this month.")
-                    .font(.subheadline)
-                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-                    .padding(.vertical, 24)
-            } else {
-                ForEach(snapshot.selectedMonthTransactions) { transaction in
-                    TransactionRow(
-                        transaction: transaction,
-                        store: store,
-                        onEdit: { editingTransaction = transaction },
-                        onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-                        onDelete: { transactionDeletion.delete(transaction, in: store) },
-                        onSaveTemplate: { transactionToTemplate = transaction },
-                        allowsActions: true,
-                        onOpen: {
-                            transactionToOpenID = transaction.id
-                            isShowingTransactionDetail = true
-                        },
-                        subtitleOverride: [
-                            accountNames(for: transaction),
-                            transaction.date.formatted(.dateTime.month(.abbreviated).day().year())
-                        ].filter { !$0.isEmpty }.joined(separator: " · "),
-                        amountOverride: "− \(Money(currency: currency, minorUnits: transactionAmount(transaction)).formatted)",
-                        amountColorOverride: PocketLedgerTheme.warning,
-                        usesScrollSwipeActions: true
-                    )
-
-                    if transaction.id != snapshot.selectedMonthTransactions.last?.id {
-                        Divider().overlay(PocketLedgerTheme.divider)
-                    }
                 }
             }
         }

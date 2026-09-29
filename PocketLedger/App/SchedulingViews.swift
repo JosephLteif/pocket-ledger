@@ -424,7 +424,7 @@ struct ScheduledTransactionsView: View {
         }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if schedule.isEnabled {
-                PocketCircularSwipeAction(
+                PocketSwipeActionButton(
                     title: "Record now",
                     systemImage: "checkmark.circle",
                     tint: PocketLedgerTheme.positive
@@ -432,7 +432,7 @@ struct ScheduledTransactionsView: View {
                     recordNow(id: schedule.id)
                 }
 
-                PocketCircularSwipeAction(
+                PocketSwipeActionButton(
                     title: "Skip next",
                     systemImage: "forward.end",
                     tint: PocketLedgerTheme.textSecondary
@@ -440,7 +440,7 @@ struct ScheduledTransactionsView: View {
                     _ = store.skipNextScheduledTransaction(id: schedule.id)
                 }
             } else if !isCompletedOneTime(schedule) {
-                PocketCircularSwipeAction(
+                PocketSwipeActionButton(
                     title: "Enable",
                     systemImage: "play.circle",
                     tint: PocketLedgerTheme.positive
@@ -450,7 +450,7 @@ struct ScheduledTransactionsView: View {
             }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            PocketCircularSwipeAction(
+            PocketSwipeActionButton(
                 title: "Edit",
                 systemImage: "pencil",
                 tint: .yellow
@@ -458,7 +458,7 @@ struct ScheduledTransactionsView: View {
                 editorRoute = .edit(schedule)
             }
 
-            PocketCircularSwipeAction(
+            PocketSwipeActionButton(
                 title: "Delete",
                 systemImage: "trash",
                 tint: .red,

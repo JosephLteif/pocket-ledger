@@ -305,7 +305,7 @@ struct AccountsView: View {
                     return store.moveAccount(accountID: draggedID, beforeAccountID: account.id)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    PocketCircularSwipeAction(
+                    PocketSwipeActionButton(
                         title: "Edit",
                         systemImage: "pencil",
                         tint: .yellow
@@ -313,7 +313,7 @@ struct AccountsView: View {
                         presentAccount(account)
                     }
 
-                    PocketCircularSwipeAction(
+                    PocketSwipeActionButton(
                         title: "Archive",
                         systemImage: "archivebox",
                         tint: PocketLedgerTheme.warning
@@ -321,7 +321,7 @@ struct AccountsView: View {
                         _ = store.setAccountArchived(accountID: account.id, isArchived: true)
                     }
 
-                    PocketCircularSwipeAction(
+                    PocketSwipeActionButton(
                         title: "Delete account",
                         systemImage: "trash",
                         tint: .red,
@@ -331,7 +331,7 @@ struct AccountsView: View {
                     }
                 }
                 .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                    PocketCircularSwipeAction(
+                    PocketSwipeActionButton(
                         title: account.includeInTotals ? "Exclude" : "Include",
                         systemImage: account.includeInTotals ? "eye.slash" : "eye",
                         tint: account.includeInTotals ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.positive
@@ -424,7 +424,7 @@ struct AccountsView: View {
                     .frame(minHeight: 84)
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
                         if !store.isManagedLegacyLoanAccount(account.id) {
-                            PocketCircularSwipeAction(
+                            PocketSwipeActionButton(
                                 title: "Restore",
                                 systemImage: "arrow.uturn.backward",
                                 tint: PocketLedgerTheme.accent
@@ -434,7 +434,7 @@ struct AccountsView: View {
                         }
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        PocketCircularSwipeAction(
+                        PocketSwipeActionButton(
                             title: "Delete account",
                             systemImage: "trash",
                             tint: .red,
@@ -531,20 +531,6 @@ struct AccountsView: View {
         }
         return true
     }
-}
-
-func ledgerGroupedRowBackground(isFirst: Bool, isLast: Bool) -> some View {
-    UnevenRoundedRectangle(
-        cornerRadii: RectangleCornerRadii(
-            topLeading: isFirst ? 18 : 0,
-            bottomLeading: isLast ? 18 : 0,
-            bottomTrailing: isLast ? 18 : 0,
-            topTrailing: isFirst ? 18 : 0
-        ),
-        style: .continuous
-    )
-    .fill(PocketLedgerTheme.surface)
-    .padding(.horizontal, 16)
 }
 
 @MainActor

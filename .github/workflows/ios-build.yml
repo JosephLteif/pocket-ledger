@@ -289,14 +289,12 @@ jobs:
           WATCH_SOURCE_PATH="$PACKAGE_ROOT/PocketLedgerWatch.app"
           test -d "$APP_PATH" || { echo "Missing iOS app: $APP_PATH"; exit 1; }
           test -d "$WATCH_SOURCE_PATH" || { echo "Missing watch app: $WATCH_SOURCE_PATH"; exit 1; }
-          mkdir -p "$APP_PATH/Watch"
-          ditto "$WATCH_SOURCE_PATH" "$APP_PATH/Watch/PocketLedgerWatch.app"
-
           test -d "$APP_PATH/PlugIns" || { echo "Missing PlugIns directory: $APP_PATH/PlugIns"; exit 1; }
-          WATCH_APP_PATH="$APP_PATH/Watch/PocketLedgerWatch.app"
+          WATCH_APP_PATH="$APP_PATH/PlugIns/PocketLedgerWatch.app"
+          ditto "$WATCH_SOURCE_PATH" "$WATCH_APP_PATH"
           test -d "$WATCH_APP_PATH" || { echo "Missing embedded watch app: $WATCH_APP_PATH"; exit 1; }
-          test ! -e "$APP_PATH/PlugIns/PocketLedgerWatch.app" || {
-            echo "Watch app was embedded as an iOS plug-in instead of a Watch bundle."
+          test ! -e "$APP_PATH/Watch/PocketLedgerWatch.app" || {
+            echo "Single-target watch app was embedded in the legacy Watch directory."
             exit 1
           }
           test -d "$WATCH_APP_PATH/PlugIns/PocketLedgerWatchWidget.appex" || {
@@ -341,10 +339,14 @@ jobs:
             echo "Packaged IPA does not contain an embedded widget extension."
             exit 1
           }
-          unzip -Z1 "$IPA_PATH" | grep -Eq '^Payload/PocketLedger\.app/Watch/PocketLedgerWatch\.app(/|$)' || {
-            echo "Packaged IPA does not contain the embedded watch app."
+          unzip -Z1 "$IPA_PATH" | grep -Eq '^Payload/PocketLedger\.app/PlugIns/PocketLedgerWatch\.app/Info\.plist$' || {
+            echo "Packaged IPA does not contain the single-target watch app in PlugIns."
             exit 1
           }
+          if unzip -Z1 "$IPA_PATH" | grep -Eq '^Payload/PocketLedger\.app/Watch/PocketLedgerWatch\.app(/|$)'; then
+            echo "Packaged IPA contains the watch app at the legacy Watch path."
+            exit 1
+          fi
           unzip -l "$IPA_PATH"
 
       - name: Write build information

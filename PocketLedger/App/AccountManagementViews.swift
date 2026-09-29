@@ -305,50 +305,60 @@ struct AccountsView: View {
                     return store.moveAccount(accountID: draggedID, beforeAccountID: account.id)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    PocketCircularSwipeAction(
-                        title: "Edit",
-                        systemImage: "pencil",
-                        tint: .yellow
-                    ) {
+                    Button {
                         presentAccount(account)
+                    } label: {
+                        PocketSwipeActionLabel(title: "Edit", systemImage: "pencil", tint: .yellow)
                     }
-                    PocketCircularSwipeAction(
-                        title: "Archive",
-                        systemImage: "archivebox",
-                        tint: PocketLedgerTheme.warning,
-                        titleColor: .white
-                    ) {
+                    .tint(.yellow)
+                    .accessibilityLabel("Edit")
+
+                    Button {
                         _ = store.setAccountArchived(accountID: account.id, isArchived: true)
+                    } label: {
+                        PocketSwipeActionLabel(
+                            title: "Archive",
+                            systemImage: "archivebox",
+                            tint: PocketLedgerTheme.warning
+                        )
                     }
-                    PocketCircularSwipeAction(
-                        title: "Delete account",
-                        systemImage: "trash",
-                        tint: .red,
-                        titleColor: .white,
-                        role: .destructive
-                    ) {
+                    .tint(PocketLedgerTheme.warning)
+                    .accessibilityLabel("Archive")
+
+                    Button(role: .destructive) {
                         accountToDelete = account
+                    } label: {
+                        PocketSwipeActionLabel(
+                            title: "Delete account",
+                            systemImage: "trash",
+                            tint: .red
+                        )
                     }
+                    .tint(.red)
+                    .accessibilityLabel("Delete account")
                 }
                 .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                    PocketCircularSwipeAction(
-                        title: account.includeInTotals ? "Exclude" : "Include",
-                        systemImage: account.includeInTotals ? "eye.slash" : "eye",
-                        tint: account.includeInTotals ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.positive,
-                        titleColor: .white
-                    ) {
+                    Button {
                         _ = store.setAccountIncludedInTotals(
                             accountID: account.id,
                             included: !account.includeInTotals
                         )
+                    } label: {
+                        PocketSwipeActionLabel(
+                            title: account.includeInTotals ? "Exclude" : "Include",
+                            systemImage: account.includeInTotals ? "eye.slash" : "eye",
+                            tint: account.includeInTotals ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.positive
+                        )
                     }
+                    .tint(account.includeInTotals ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.positive)
+                    .accessibilityLabel(account.includeInTotals ? "Exclude" : "Include")
                 }
                 .listRowInsets(
                     EdgeInsets(
                         top: 0,
                         leading: PocketLedgerTheme.screenHorizontalPadding,
                         bottom: 0,
-                        trailing: PocketLedgerTheme.screenHorizontalPadding
+                        trailing: PocketLedgerTheme.screenHorizontalPadding + 8
                     )
                 )
                 .listRowBackground(
@@ -399,11 +409,11 @@ struct AccountsView: View {
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(account.name)
-                                    .font(.body.weight(.semibold))
+                                    .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(PocketLedgerTheme.textPrimary)
                                     .lineLimit(2)
                                 Text("\(account.type.displayName) · \(account.currency.rawValue)")
-                                    .font(.subheadline)
+                                    .font(.caption)
                                     .foregroundStyle(PocketLedgerTheme.textTertiary)
                                     .lineLimit(1)
                             }
@@ -425,33 +435,38 @@ struct AccountsView: View {
                     .frame(minHeight: 84)
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
                         if !store.isManagedLegacyLoanAccount(account.id) {
-                            PocketCircularSwipeAction(
-                                title: "Restore",
-                                systemImage: "arrow.uturn.backward",
-                                tint: PocketLedgerTheme.accent,
-                                titleColor: .white
-                            ) {
+                            Button {
                                 _ = store.setAccountArchived(accountID: account.id, isArchived: false)
+                            } label: {
+                                PocketSwipeActionLabel(
+                                    title: "Restore",
+                                    systemImage: "arrow.uturn.backward",
+                                    tint: PocketLedgerTheme.accent
+                                )
                             }
+                            .tint(PocketLedgerTheme.accent)
+                            .accessibilityLabel("Restore")
                         }
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        PocketCircularSwipeAction(
-                            title: "Delete account",
-                            systemImage: "trash",
-                            tint: .red,
-                            titleColor: .white,
-                            role: .destructive
-                        ) {
+                        Button(role: .destructive) {
                             accountToDelete = account
+                        } label: {
+                            PocketSwipeActionLabel(
+                                title: "Delete account",
+                                systemImage: "trash",
+                                tint: .red
+                            )
                         }
+                        .tint(.red)
+                        .accessibilityLabel("Delete account")
                     }
                     .listRowInsets(
                         EdgeInsets(
                             top: 0,
                             leading: PocketLedgerTheme.screenHorizontalPadding,
                             bottom: 0,
-                            trailing: PocketLedgerTheme.screenHorizontalPadding
+                            trailing: PocketLedgerTheme.screenHorizontalPadding + 8
                         )
                     )
                     .listRowBackground(
@@ -485,6 +500,7 @@ struct AccountsView: View {
                         .font(.caption.weight(.bold))
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                         .rotationEffect(.degrees(isArchivedAccountsExpanded ? 90 : 0))
+                        .padding(.trailing, 8)
                 }
                 .contentShape(Rectangle())
             }
@@ -567,10 +583,10 @@ private struct AccountRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(account.name)
-                    .font(.body.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
                 Text(account.type.displayName)
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(PocketLedgerTheme.textTertiary)
                     .lineLimit(1)
                 if !account.includeInTotals {

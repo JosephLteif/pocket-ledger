@@ -1094,33 +1094,50 @@ struct TransactionRow: View {
                     .padding(.horizontal, -swipeActionHorizontalInset)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         if canEditTransaction {
-                            PocketCircularSwipeAction(
-                                title: "Delete",
-                                systemImage: "trash",
-                                tint: .red,
-                                role: .destructive
-                            ) {
+                            Button(role: .destructive) {
                                 isShowingDeleteConfirmation = true
+                            } label: {
+                                PocketSwipeActionLabel(
+                                    title: "Delete",
+                                    systemImage: "trash",
+                                    tint: .red
+                                )
                             }
-                            PocketCircularSwipeAction(
-                                title: "Edit",
-                                systemImage: "pencil",
-                                tint: .yellow
-                            ) { onEdit() }
+                            .tint(.red)
+                            .accessibilityLabel("Delete")
+
+                            Button(action: onEdit) {
+                                PocketSwipeActionLabel(
+                                    title: "Edit",
+                                    systemImage: "pencil",
+                                    tint: .yellow
+                                )
+                            }
+                            .tint(.yellow)
+                            .accessibilityLabel("Edit")
                         }
                     }
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
                         if canEditTransaction {
-                            PocketCircularSwipeAction(
-                                title: "Duplicate",
-                                systemImage: "plus.square.on.square",
-                                tint: PocketLedgerTheme.accent
-                            ) { onDuplicate() }
-                            PocketCircularSwipeAction(
-                                title: "Template",
-                                systemImage: "rectangle.stack.badge.plus",
-                                tint: PocketLedgerTheme.positive
-                            ) { onSaveTemplate() }
+                            Button(action: onDuplicate) {
+                                PocketSwipeActionLabel(
+                                    title: "Duplicate",
+                                    systemImage: "plus.square.on.square",
+                                    tint: PocketLedgerTheme.accent
+                                )
+                            }
+                            .tint(PocketLedgerTheme.accent)
+                            .accessibilityLabel("Duplicate")
+
+                            Button(action: onSaveTemplate) {
+                                PocketSwipeActionLabel(
+                                    title: "Template",
+                                    systemImage: "rectangle.stack.badge.plus",
+                                    tint: PocketLedgerTheme.positive
+                                )
+                            }
+                            .tint(PocketLedgerTheme.positive)
+                            .accessibilityLabel("Template")
                         }
                     }
             }

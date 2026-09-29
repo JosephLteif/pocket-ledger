@@ -514,11 +514,7 @@ struct TransactionEditor: View {
                         .disabled(!canSave)
                 }
             }
-            .alert("Transaction not saved", isPresented: errorPresented) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(verbatim: errorMessage ?? "")
-            }
+            .errorMessageAlert(title: "Transaction not saved", message: $errorMessage)
             .confirmationDialog(
                 "Discard changes?",
                 isPresented: $isShowingDiscardConfirmation,
@@ -609,45 +605,56 @@ struct TransactionEditor: View {
     @ViewBuilder
     private var timingSection: some View {
         Section("Timing") {
-            Picker("When", selection: $timing) {
-                ForEach(TransactionTiming.allCases) { option in
-                    Text(option.displayName).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-            .disabled(isEditingScheduledTransaction)
+            timingPicker
 
             if timing == .scheduled {
                 DatePicker("First run", selection: $date, displayedComponents: [.date, .hourAndMinute])
-
-                Picker("Repeats", selection: $scheduleFrequency) {
-                    ForEach(ScheduleFrequency.allCases) { frequency in
-                        Text(frequency.displayName).tag(frequency)
-                    }
-                }
-
-                if scheduleFrequency == .monthly {
-                    Picker("Monthly rule", selection: $monthlyRule) {
-                        ForEach(ScheduleMonthlyRule.allCases) { rule in
-                            Text(rule.displayName).tag(rule)
-                        }
-                    }
-
-                    Text(monthlyScheduleDescription)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Toggle("Enabled", isOn: $scheduleEnabled)
-                    .disabled(completedOneTimeSchedule)
-
-                if completedOneTimeSchedule {
-                    Text("This one-time schedule has already been added to transactions.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
             } else {
                 DatePicker("Date", selection: $date, displayedComponents: .date)
+            }
+
+            scheduleRepeatFields
+        }
+    }
+
+    private var timingPicker: some View {
+        Picker("When", selection: $timing) {
+            ForEach(TransactionTiming.allCases) { option in
+                Text(option.displayName).tag(option)
+            }
+        }
+        .pickerStyle(.segmented)
+        .disabled(isEditingScheduledTransaction)
+    }
+
+    @ViewBuilder
+    private var scheduleRepeatFields: some View {
+        if timing == .scheduled {
+            Picker("Repeats", selection: $scheduleFrequency) {
+                ForEach(ScheduleFrequency.allCases) { frequency in
+                    Text(frequency.displayName).tag(frequency)
+                }
+            }
+
+            if scheduleFrequency == .monthly {
+                Picker("Monthly rule", selection: $monthlyRule) {
+                    ForEach(ScheduleMonthlyRule.allCases) { rule in
+                        Text(rule.displayName).tag(rule)
+                    }
+                }
+
+                Text(monthlyScheduleDescription)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Toggle("Enabled", isOn: $scheduleEnabled)
+                .disabled(completedOneTimeSchedule)
+
+            if completedOneTimeSchedule {
+                Text("This one-time schedule has already been added to transactions.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -749,42 +756,8 @@ struct TransactionEditor: View {
             Text("Schedule")
                 .font(.subheadline.weight(.semibold))
 
-            Picker("When", selection: $timing) {
-                ForEach(TransactionTiming.allCases) { option in
-                    Text(option.displayName).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-            .disabled(isEditingScheduledTransaction)
-
-            if timing == .scheduled {
-                Picker("Repeats", selection: $scheduleFrequency) {
-                    ForEach(ScheduleFrequency.allCases) { frequency in
-                        Text(frequency.displayName).tag(frequency)
-                    }
-                }
-
-                if scheduleFrequency == .monthly {
-                    Picker("Monthly rule", selection: $monthlyRule) {
-                        ForEach(ScheduleMonthlyRule.allCases) { rule in
-                            Text(rule.displayName).tag(rule)
-                        }
-                    }
-
-                    Text(monthlyScheduleDescription)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Toggle("Enabled", isOn: $scheduleEnabled)
-                    .disabled(completedOneTimeSchedule)
-
-                if completedOneTimeSchedule {
-                    Text("This one-time schedule has already been added to transactions.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            timingPicker
+            scheduleRepeatFields
         }
     }
 
@@ -1645,13 +1618,6 @@ struct TransactionEditor: View {
         } else {
             dismiss()
         }
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )
     }
 
     private var shortfallPreview: String? {

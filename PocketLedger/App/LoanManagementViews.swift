@@ -415,11 +415,7 @@ private struct LegacyLoanConversionView: View {
                     .disabled(!canConvert)
             }
         }
-        .alert("Loan account not converted", isPresented: errorPresented) {
-            Button("OK") { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
-        }
+        .errorMessageAlert(title: "Loan account not converted", message: $errorMessage)
     }
 
     private var currentBalance: Money { store.balance(for: account) }
@@ -440,10 +436,6 @@ private struct LegacyLoanConversionView: View {
               amounts.allSatisfy({ $0.minorUnits > 0 }) else { return false }
         return amounts.reduce(Int64.zero) { $0 + $1.minorUnits } == currentBalance.minorUnits
             && drafts.allSatisfy { !$0.counterparty.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
     }
 
     private func convert() {
@@ -587,11 +579,7 @@ struct LoanEditor: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
             }
-            .alert("Loan not saved", isPresented: errorPresented) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+            .errorMessageAlert(title: "Loan not saved", message: $errorMessage)
         }
     }
 
@@ -633,10 +621,6 @@ struct LoanEditor: View {
 
     private var selectedAccountBinding: Binding<UUID?> {
         Binding(get: { selectedAccountID }, set: { selectedAccountID = $0 })
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
     }
 
     private func save() {
@@ -765,11 +749,7 @@ struct LoanDetailView: View {
                 LoanPaymentEditor(store: store, loan: loan, payment: payment, transaction: transaction)
             }
         }
-        .alert("Loan action failed", isPresented: errorPresented) {
-            Button("OK") { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
-        }
+        .errorMessageAlert(title: "Loan action failed", message: $errorMessage)
         .confirmationDialog(
             "Remove this payment?",
             isPresented: deletingPaymentPresented,
@@ -866,9 +846,18 @@ struct LoanDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .pocketGroupedSurface(cornerRadius: 18)
 
-                    Text("Started \(loan.startedAt.formatted(date: .abbreviated, time: .omitted)) · Original total \(loan.startingAmount.formatted)")
-                        .font(.caption)
-                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Started \(loan.startedAt.formatted(date: .abbreviated, time: .omitted))")
+                        HStack(spacing: 4) {
+                            Text("Original total")
+                            ProtectedAmountText(
+                                value: loan.startingAmount.formatted,
+                                isRevealed: areBalancesRevealed
+                            )
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textTertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
@@ -924,10 +913,6 @@ struct LoanDetailView: View {
             return nil
         }
         return (movement.money, account)
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
     }
 
     private var deletingPaymentPresented: Binding<Bool> {
@@ -1012,11 +997,7 @@ private struct LoanPaymentEditor: View {
                         .disabled(!canSave)
                 }
             }
-            .alert("Payment not saved", isPresented: errorPresented) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+            .errorMessageAlert(title: "Payment not saved", message: $errorMessage)
         }
     }
 
@@ -1055,10 +1036,6 @@ private struct LoanPaymentEditor: View {
               date <= .now else { return false }
         let maximum = loan.outstandingAmount.minorUnits + (payment?.amount.minorUnits ?? 0)
         return principalAmount.minorUnits <= maximum
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
     }
 
     private func save() {

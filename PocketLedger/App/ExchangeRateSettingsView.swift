@@ -184,11 +184,7 @@ private struct ExchangeRateEditor: View {
                         .disabled(!canSave)
                 }
             }
-            .alert("Exchange rate not saved", isPresented: errorPresented) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+            .errorMessageAlert(title: "Exchange rate not saved", message: $errorMessage)
         }
     }
 
@@ -235,13 +231,6 @@ private struct ExchangeRateEditor: View {
         if let rate = parsedRate, rate > 0 {
             rateText = NSDecimalNumber(decimal: reciprocal(of: rate)).stringValue
         }
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )
     }
 
     private func save() {

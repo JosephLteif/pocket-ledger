@@ -228,6 +228,20 @@ struct LedgerIndex {
         currency: LedgerCurrency,
         exchangeRate: ExchangeRate?
     ) -> Int64 {
+        Self.movementTotal(
+            movements,
+            currency: currency,
+            exchangeRate: exchangeRate,
+            accountsByID: accountsByID
+        )
+    }
+
+    private static func movementTotal(
+        _ movements: [MoneyMovement],
+        currency: LedgerCurrency,
+        exchangeRate: ExchangeRate?,
+        accountsByID: [UUID: Account]
+    ) -> Int64 {
         movements.reduce(Int64.zero) { total, movement in
             guard accountsByID[movement.accountID]?.includeInTotals == true,
                   let converted = financeConvertedMinorUnits(
@@ -340,24 +354,6 @@ struct LedgerIndex {
             return true
         }
 
-        func movementTotal(
-            _ movements: [MoneyMovement],
-            currency: LedgerCurrency,
-            exchangeRate: ExchangeRate?
-        ) -> Int64 {
-            movements.reduce(Int64.zero) { total, movement in
-                guard accountsByID[movement.accountID]?.includeInTotals == true,
-                      let converted = financeConvertedMinorUnits(
-                          movement.money,
-                          to: currency,
-                          using: exchangeRate
-                      ) else {
-                    return total
-                }
-                return total + converted
-            }
-        }
-
         var totals: [MonthCategoryCurrencyKey: Int64] = [:]
         for transaction in transactions where transaction.kind == .expense {
             guard categoryIncludedInTotals(transaction.categoryID),
@@ -367,8 +363,18 @@ struct LedgerIndex {
 
             for currency in LedgerCurrency.allCases {
                 let amount = max(
-                    movementTotal(transaction.outflows, currency: currency, exchangeRate: transaction.exchangeRate)
-                        - movementTotal(transaction.inflows, currency: currency, exchangeRate: transaction.exchangeRate),
+                    Self.movementTotal(
+                        transaction.outflows,
+                        currency: currency,
+                        exchangeRate: transaction.exchangeRate,
+                        accountsByID: accountsByID
+                    )
+                        - Self.movementTotal(
+                            transaction.inflows,
+                            currency: currency,
+                            exchangeRate: transaction.exchangeRate,
+                            accountsByID: accountsByID
+                        ),
                     0
                 )
                 guard amount > 0 else { continue }

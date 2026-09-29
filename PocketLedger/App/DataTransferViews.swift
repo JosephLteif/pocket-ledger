@@ -145,11 +145,7 @@ struct DataTransferView: View {
         } message: {
             Text("This removes the local restore copy, including receipt files stored inside it. Your current ledger and exported backups are unchanged.")
         }
-        .alert("Data transfer failed", isPresented: errorPresented) {
-            Button("OK") { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
-        }
+        .errorMessageAlert(title: "Data transfer failed", message: $errorMessage)
     }
 
     private var introCard: some View {
@@ -333,13 +329,6 @@ struct DataTransferView: View {
         .padding(14)
         .pocketGroupedSurface(cornerRadius: 14)
         .accessibilityElement(children: .combine)
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )
     }
 
     private func importFile(_ result: Result<[URL], Error>) {
@@ -612,19 +601,8 @@ private struct BackupRestoreView: View {
             } message: {
                 Text("The current accounts, categories, and transactions will be replaced by the backup.")
             }
-            .alert("Restore failed", isPresented: errorPresented) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+            .errorMessageAlert(title: "Restore failed", message: $errorMessage)
         }
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )
     }
 
     private func merge() {

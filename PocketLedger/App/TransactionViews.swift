@@ -274,6 +274,7 @@ struct TransactionsView: View {
     @State private var isPresentingBillScanner = false
     @State private var isShowingFilters = false
     @State private var isSelectingTransactions = false
+    @State private var isPresentingBulkCategoryPicker = false
     @State private var selectedTransactionIDs: Set<UUID> = []
     @State private var isShowingBulkDeleteConfirmation = false
     @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
@@ -411,6 +412,7 @@ struct TransactionsView: View {
                     .listRowSeparator(.hidden)
             }
         }
+        .searchable(text: $searchText, prompt: "Search transactions")
         .listStyle(.plain)
         .listSectionSpacing(20)
         .scrollContentBackground(.hidden)
@@ -505,6 +507,17 @@ struct TransactionsView: View {
         }
         .sheet(item: $transactionToTemplate) { transaction in
             TemplateNameEditor(store: store, transaction: transaction)
+        }
+        .sheet(isPresented: $isPresentingBulkCategoryPicker) {
+            CategorySelectionSheet(
+                categories: store.activeCategories,
+                selectedCategoryID: Binding<UUID?>(
+                    get: { nil },
+                    set: { applyBulkCategory($0) }
+                ),
+                includeUncategorized: true,
+                showsSelectionIndicator: false
+            )
         }
     }
 
@@ -655,18 +668,14 @@ struct TransactionsView: View {
 
             Spacer()
 
-            Menu {
-                Button("Remove category", systemImage: "tag.slash") {
-                    applyBulkCategory(nil)
-                }
-                ForEach(store.activeCategories) { category in
-                    Button(store.categoryPath(for: category.id), systemImage: category.systemImage) {
-                        applyBulkCategory(category.id)
-                    }
-                }
+            Button {
+                isPresentingBulkCategoryPicker = true
             } label: {
                 Label("Category", systemImage: "tag")
             }
+            .buttonStyle(.plain)
+            .foregroundStyle(selectedTransactionIDs.isEmpty ? PocketLedgerTheme.textTertiary : PocketLedgerTheme.accent)
+            .frame(minHeight: 44)
             .disabled(selectedTransactionIDs.isEmpty)
 
             Menu {
@@ -1010,9 +1019,91 @@ private struct TransactionActionAlert: ViewModifier {
     }
 }
 
+private struct ErrorMessageAlert: ViewModifier {
+    let title: LocalizedStringKey
+    @Binding var message: String?
+
+    func body(content: Content) -> some View {
+        content.alert(
+            title,
+            isPresented: Binding(
+                get: { message != nil },
+                set: { if !$0 { message = nil } }
+            )
+        ) {
+            Button("OK") { message = nil }
+        } message: {
+            Text(verbatim: message ?? "")
+        }
+    }
+}
+
+@MainActor
+struct TransactionDeletionState {
+    var deletedTransactions: [LedgerTransaction] = []
+    var errorMessage: String?
+
+    mutating func delete(_ transaction: LedgerTransaction, in store: LedgerStore) {
+        if store.deleteTransaction(id: transaction.id) {
+            deletedTransactions.append(transaction)
+        } else {
+            errorMessage = store.lastActionStatus ?? "The transaction could not be deleted."
+        }
+    }
+
+    mutating func undo(in store: LedgerStore) {
+        if store.restoreTransactions(deletedTransactions) {
+            deletedTransactions.removeAll()
+        } else {
+            errorMessage = store.lastActionStatus ?? "The transaction could not be restored."
+        }
+    }
+
+    mutating func dismissUndo() {
+        deletedTransactions.removeAll()
+    }
+}
+
+@MainActor
+private struct TransactionUndoSupport: ViewModifier {
+    @Binding var state: TransactionDeletionState
+    let store: LedgerStore
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !state.deletedTransactions.isEmpty {
+                    TransactionUndoBanner(
+                        transactions: state.deletedTransactions,
+                        onUndo: { state.undo(in: store) },
+                        onDismiss: { state.dismissUndo() }
+                    )
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                }
+            }
+            .transactionActionAlert(message: $state.errorMessage)
+    }
+}
+
 extension View {
     func transactionActionAlert(message: Binding<String?>) -> some View {
         modifier(TransactionActionAlert(message: message))
+    }
+
+    func errorMessageAlert(
+        title: LocalizedStringKey,
+        message: Binding<String?>
+    ) -> some View {
+        modifier(ErrorMessageAlert(title: title, message: message))
+    }
+
+    @MainActor
+    func transactionUndoSupport(
+        state: Binding<TransactionDeletionState>,
+        store: LedgerStore
+    ) -> some View {
+        modifier(TransactionUndoSupport(state: state, store: store))
     }
 }
 
@@ -1022,6 +1113,7 @@ struct TransactionRow: View {
     @ObservedObject var store: LedgerStore
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @Environment(\.layoutDirection) private var layoutDirection
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isShowingDeleteConfirmation = false
     @State private var isShowingLoanDetails = false
     @State private var swipeOffset: CGFloat = 0
@@ -1290,7 +1382,7 @@ struct TransactionRow: View {
                 guard isTrackingHorizontalSwipe else { return }
                 isTrackingHorizontalSwipe = false
                 let finalOffset = min(144, max(-144, swipeStartOffset + value.translation.width))
-                withAnimation(.snappy) {
+                withAnimation(PocketLedgerMotion.quick(reduceMotion: reduceMotion)) {
                     swipeOffset = abs(finalOffset) >= 72 ? (finalOffset < 0 ? -144 : 144) : 0
                 }
                 swipeStartOffset = swipeOffset
@@ -1312,7 +1404,7 @@ struct TransactionRow: View {
     }
 
     private func closeSwipeActions() {
-        withAnimation(.snappy) {
+        withAnimation(PocketLedgerMotion.quick(reduceMotion: reduceMotion)) {
             swipeOffset = 0
         }
         swipeStartOffset = 0

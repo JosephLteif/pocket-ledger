@@ -22,6 +22,7 @@ private enum ScheduledEditorRoute: Identifiable {
 @MainActor
 struct ScheduledTransactionsView: View {
     @ObservedObject var store: LedgerStore
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     @State private var editorRoute: ScheduledEditorRoute?
     @State private var scheduleToDelete: ScheduledTransaction?
@@ -289,7 +290,10 @@ struct ScheduledTransactionsView: View {
                     Text(schedule.note.isEmpty ? schedule.kind.displayName : schedule.note)
                         .font(.headline)
                         .lineLimit(2)
-                    Text(store.transactionSummary(schedule.transactionTemplate))
+                    ProtectedAmountText(
+                        value: store.transactionSummary(schedule.transactionTemplate),
+                        isRevealed: areBalancesRevealed
+                    )
                         .font(.subheadline.weight(.semibold).monospacedDigit())
                         .foregroundStyle(PocketLedgerTheme.textPrimary)
                 }

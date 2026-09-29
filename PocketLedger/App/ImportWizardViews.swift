@@ -36,6 +36,30 @@ enum ImportWizardCategoryBulkKind: String, Identifiable {
     var id: String { rawValue }
 }
 
+private func affectedTransactionCount(for accounts: [Account], in data: FinanceData?) -> Int {
+    let ids = Set(accounts.map(\.id))
+    return data?.transactions.filter { transaction in
+        transaction.outflows.contains { ids.contains($0.accountID) }
+            || transaction.inflows.contains { ids.contains($0.accountID) }
+    }.count ?? 0
+}
+
+private func affectedMovementCount(for accounts: [Account], in data: FinanceData?) -> Int {
+    let ids = Set(accounts.map(\.id))
+    return data?.transactions.reduce(into: 0) { count, transaction in
+        count += transaction.outflows.filter { ids.contains($0.accountID) }.count
+        count += transaction.inflows.filter { ids.contains($0.accountID) }.count
+    } ?? 0
+}
+
+private func affectedTransactionCount(for categories: [LedgerCategory], in data: FinanceData?) -> Int {
+    let ids = Set(categories.map(\.id))
+    return data?.transactions.filter { transaction in
+        guard let categoryID = transaction.categoryID else { return false }
+        return ids.contains(categoryID)
+    }.count ?? 0
+}
+
 struct ImportPreparationInputs: Equatable {
     let draftID: UUID
     let tableID: String
@@ -265,8 +289,14 @@ struct ImportWizardView: View {
                 kind: kind,
                 selectedAccounts: selectedImportedAccounts,
                 existingAccounts: store.data.accounts,
-                affectedTransactionCount: affectedTransactionCount(for: selectedImportedAccounts),
-                affectedMovementCount: affectedMovementCount(for: selectedImportedAccounts),
+                affectedTransactionCount: affectedTransactionCount(
+                    for: selectedImportedAccounts,
+                    in: draft.importedData
+                ),
+                affectedMovementCount: affectedMovementCount(
+                    for: selectedImportedAccounts,
+                    in: draft.importedData
+                ),
                 onApply: { mutation in
                     do {
                         _ = try draft.apply(mutation, existingAccounts: store.data.accounts)
@@ -283,7 +313,10 @@ struct ImportWizardView: View {
                 selectedCategories: selectedImportedCategories,
                 existingCategories: store.data.categories,
                 importedCategories: draft.importedData?.categories ?? [],
-                affectedTransactionCount: affectedTransactionCount(for: selectedImportedCategories),
+                affectedTransactionCount: affectedTransactionCount(
+                    for: selectedImportedCategories,
+                    in: draft.importedData
+                ),
                 onApply: { mutation in
                     do {
                         _ = try draft.apply(mutation, existingCategories: store.data.categories)
@@ -578,29 +611,6 @@ struct ImportWizardView: View {
         )
     }
 
-    private func affectedTransactionCount(for accounts: [Account]) -> Int {
-        let ids = Set(accounts.map(\.id))
-        return draft.importedData?.transactions.filter { transaction in
-            transaction.outflows.contains { ids.contains($0.accountID) }
-                || transaction.inflows.contains { ids.contains($0.accountID) }
-        }.count ?? 0
-    }
-
-    private func affectedMovementCount(for accounts: [Account]) -> Int {
-        let ids = Set(accounts.map(\.id))
-        return draft.importedData?.transactions.reduce(into: 0) { count, transaction in
-            count += transaction.outflows.filter { ids.contains($0.accountID) }.count
-            count += transaction.inflows.filter { ids.contains($0.accountID) }.count
-        } ?? 0
-    }
-
-    private func affectedTransactionCount(for categories: [LedgerCategory]) -> Int {
-        let ids = Set(categories.map(\.id))
-        return draft.importedData?.transactions.filter { transaction in
-            guard let categoryID = transaction.categoryID else { return false }
-            return ids.contains(categoryID)
-        }.count ?? 0
-    }
 }
 
 private struct ImportWizardProgressView: View {
@@ -1167,29 +1177,6 @@ private struct ImportWizardOrganizeStep: View {
         }
     }
 
-    private func affectedTransactionCount(for accounts: [Account]) -> Int {
-        let ids = Set(accounts.map(\.id))
-        return draft.importedData?.transactions.filter { transaction in
-            transaction.outflows.contains { ids.contains($0.accountID) }
-                || transaction.inflows.contains { ids.contains($0.accountID) }
-        }.count ?? 0
-    }
-
-    private func affectedMovementCount(for accounts: [Account]) -> Int {
-        let ids = Set(accounts.map(\.id))
-        return draft.importedData?.transactions.reduce(into: 0) { count, transaction in
-            count += transaction.outflows.filter { ids.contains($0.accountID) }.count
-            count += transaction.inflows.filter { ids.contains($0.accountID) }.count
-        } ?? 0
-    }
-
-    private func affectedTransactionCount(for categories: [LedgerCategory]) -> Int {
-        let ids = Set(categories.map(\.id))
-        return draft.importedData?.transactions.filter { transaction in
-            guard let categoryID = transaction.categoryID else { return false }
-            return ids.contains(categoryID)
-        }.count ?? 0
-    }
 }
 
 private struct ImportWizardExistingMatchRow: View {

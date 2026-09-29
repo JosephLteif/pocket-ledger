@@ -111,8 +111,7 @@ struct GlobalSearchView: View {
     @State private var transactionDocumentsRevision: Int?
     @State private var editingTransaction: LedgerTransaction?
     @State private var transactionToTemplate: LedgerTransaction?
-    @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
-    @State private var transactionDeletionError: String?
+    @State private var transactionDeletion = TransactionDeletionState()
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     private var searchExamples: [String] {
@@ -222,13 +221,7 @@ struct GlobalSearchView: View {
                                         store: store,
                                         onEdit: { editingTransaction = transaction },
                                         onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-                                        onDelete: {
-                                            if store.deleteTransaction(id: transaction.id) {
-                                                deletedTransactionsForUndo.append(transaction)
-                                            } else {
-                                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
-                                            }
-                                        },
+                                        onDelete: { transactionDeletion.delete(transaction, in: store) },
                                         onSaveTemplate: { transactionToTemplate = transaction },
                                         allowsActions: true,
                                         subtitleOverride: transactionSubtitle(transaction),
@@ -265,24 +258,7 @@ struct GlobalSearchView: View {
         }
         .pocketSwipeActionsContainer()
         .pocketScreen()
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !deletedTransactionsForUndo.isEmpty {
-                TransactionUndoBanner(
-                    transactions: deletedTransactionsForUndo,
-                    onUndo: {
-                        if store.restoreTransactions(deletedTransactionsForUndo) {
-                            deletedTransactionsForUndo.removeAll()
-                        } else {
-                            transactionDeletionError = store.lastActionStatus ?? "The transaction could not be restored."
-                        }
-                    },
-                    onDismiss: { deletedTransactionsForUndo.removeAll() }
-                )
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-            }
-        }
-        .transactionActionAlert(message: $transactionDeletionError)
+        .transactionUndoSupport(state: $transactionDeletion, store: store)
         .navigationTitle("Search")
         .navigationBarTitleDisplayMode(.large)
         .task(id: searchTaskID) {
@@ -381,6 +357,16 @@ private struct SearchAccountRow: View {
     let areBalancesRevealed: Bool
 
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            accountRow(stacksBalance: false)
+                .fixedSize(horizontal: true, vertical: false)
+            accountRow(stacksBalance: true)
+        }
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+    }
+
+    private func accountRow(stacksBalance: Bool) -> some View {
         HStack(spacing: 12) {
             Image(systemName: account.type.systemImage)
                 .font(.system(size: 15, weight: .semibold))
@@ -391,21 +377,28 @@ private struct SearchAccountRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(account.name)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
+                    .lineLimit(stacksBalance ? nil : 1)
                 Text("\(account.type.displayName) · \(account.currency.rawValue)\(account.isArchived ? " · Archived" : "")")
                     .font(.caption)
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
-                    .lineLimit(1)
+                    .lineLimit(stacksBalance ? 2 : 1)
+                if stacksBalance {
+                    balanceText
+                }
             }
 
-            Spacer(minLength: 8)
-            ProtectedAmountText(value: balance.formatted, isRevealed: areBalancesRevealed)
-                .font(.caption.weight(.semibold).monospacedDigit())
-                .foregroundStyle(PocketLedgerTheme.textPrimary)
-                .lineLimit(1)
+            if !stacksBalance {
+                Spacer(minLength: 8)
+                balanceText
+            }
         }
-        .padding(.vertical, 11)
-        .contentShape(Rectangle())
+    }
+
+    private var balanceText: some View {
+        ProtectedAmountText(value: balance.formatted, isRevealed: areBalancesRevealed)
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundStyle(PocketLedgerTheme.textPrimary)
+            .lineLimit(1)
     }
 }
 private struct SearchCategoryRow: View {

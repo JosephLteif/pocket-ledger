@@ -302,23 +302,12 @@ private struct CategoryEditor: View {
                     Button("Save", action: save)
                 }
             }
-            .alert("Category not saved", isPresented: errorPresented) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+            .errorMessageAlert(title: "Category not saved", message: $errorMessage)
             .confirmationDialog("Discard category changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
                 Button("Discard changes", role: .destructive) { dismiss() }
                 Button("Keep editing", role: .cancel) {}
             }
         }
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )
     }
 
     private var availableSystemImages: [String] {

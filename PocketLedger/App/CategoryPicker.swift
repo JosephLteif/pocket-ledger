@@ -4,6 +4,7 @@ struct CategorySelectionSheet: View {
     let categories: [LedgerCategory]
     @Binding var selectedCategoryID: UUID?
     let includeUncategorized: Bool
+    var showsSelectionIndicator = true
 
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
@@ -94,7 +95,7 @@ struct CategorySelectionSheet: View {
             Text(title)
                 .foregroundStyle(PocketLedgerTheme.textPrimary)
             Spacer()
-            if selectedCategoryID == id {
+            if showsSelectionIndicator, selectedCategoryID == id {
                 Image(systemName: "checkmark")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(PocketLedgerTheme.accent)

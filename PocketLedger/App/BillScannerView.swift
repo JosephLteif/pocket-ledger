@@ -666,11 +666,7 @@ struct BillScannerView: View {
             .sheet(isPresented: $isShowingAccountEditor) {
                 AccountEditor(store: store, initialCurrency: currency)
             }
-            .alert("Bill scan failed", isPresented: errorPresented) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+            .errorMessageAlert(title: "Bill scan failed", message: $errorMessage)
             .fullScreenCover(isPresented: $isShowingFullScreenImage) {
                 if let previewImage {
                     BillImageFullScreenView(image: previewImage)
@@ -986,13 +982,6 @@ struct BillScannerView: View {
 
         let prefix = names.prefix(3).joined(separator: ", ")
         return names.count > 3 ? "Bill: \(prefix), …" : "Bill: \(prefix)"
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )
     }
 
     private func loadPhoto(_ item: PhotosPickerItem) {

@@ -199,11 +199,7 @@ struct SecuritySettingsView: View {
             } message: {
                 Text("The app will remain unlocked until you set a new passcode.")
             }
-            .alert("Security setting not changed", isPresented: errorPresented) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+            .errorMessageAlert(title: "Security setting not changed", message: $errorMessage)
             .onChange(of: isScheduledLiveActivityEnabled) { _, _ in
                 Task {
                     await NotificationService.refreshScheduledTransactionNotifications(
@@ -283,13 +279,6 @@ struct SecuritySettingsView: View {
         )
     }
 
-    private var errorPresented: Binding<Bool> {
-        Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )
-    }
-
     private func removePasscode() {
         do {
             try security.removePasscode()
@@ -345,11 +334,7 @@ private struct PasscodeSetupView: View {
                         .disabled(!canSave)
                 }
             }
-            .alert("Passcode not saved", isPresented: errorPresented) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+            .errorMessageAlert(title: "Passcode not saved", message: $errorMessage)
         }
     }
 
@@ -368,13 +353,6 @@ private struct PasscodeSetupView: View {
         AppPasscodeRules.isValid(newPasscode)
             && newPasscode == confirmation
             && (mode == .set || AppPasscodeRules.isValid(currentPasscode))
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )
     }
 
     private func save() {

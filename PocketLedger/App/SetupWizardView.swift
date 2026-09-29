@@ -75,19 +75,8 @@ struct SetupWizardView: View {
                     DataTransferView(store: store, isImportOnly: true)
                 }
             }
-            .alert("Setup could not be completed", isPresented: errorPresented) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+            .errorMessageAlert(title: "Setup could not be completed", message: $errorMessage)
         }
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )
     }
 
     private func createLedger() {

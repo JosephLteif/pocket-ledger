@@ -5,6 +5,7 @@ struct BudgetsView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @State private var editingBudget: LedgerBudget?
     @State private var isPresentingEditor = false
     @State private var budgetToDelete: LedgerBudget?
@@ -67,7 +68,7 @@ struct BudgetsView: View {
                 refreshBudgetSummaries()
             }
         }
-        .confirmationDialog("Delete budget?", isPresented: Binding(
+        .confirmationDialog(deleteBudgetConfirmationTitle, isPresented: Binding(
             get: { budgetToDelete != nil },
             set: { if !$0 { budgetToDelete = nil } }
         ), titleVisibility: .visible) {
@@ -97,20 +98,29 @@ struct BudgetsView: View {
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
                 Spacer()
-                Text("\(spent.formatted) / \(allowance.formatted)")
+                ProtectedAmountText(
+                    value: "\(spent.formatted) / \(allowance.formatted)",
+                    isRevealed: areBalancesRevealed
+                )
                     .font(.subheadline.weight(.semibold).monospacedDigit())
                     .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.textPrimary)
             }
             ProgressView(value: ratio)
                 .tint(projectedOver ? PocketLedgerTheme.warning : PocketLedgerTheme.accent)
                 .animation(PocketLedgerMotion.expressive(reduceMotion: reduceMotion), value: ratio)
-            Text(over
-                 ? "Over by \(Money(currency: budget.currency, minorUnits: -remaining).formatted)"
-                 : "Remaining \(Money(currency: budget.currency, minorUnits: remaining).formatted)")
+            ProtectedAmountText(
+                value: over
+                    ? "Over by \(Money(currency: budget.currency, minorUnits: -remaining).formatted)"
+                    : "Remaining \(Money(currency: budget.currency, minorUnits: remaining).formatted)",
+                isRevealed: areBalancesRevealed
+            )
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.positive)
             HStack {
-                Text("Projected \(summary.projected.formatted)")
+                ProtectedAmountText(
+                    value: "Projected \(summary.projected.formatted)",
+                    isRevealed: areBalancesRevealed
+                )
                     .font(.caption)
                     .foregroundStyle(projectedOver ? PocketLedgerTheme.warning : PocketLedgerTheme.textSecondary)
                 Spacer()
@@ -153,6 +163,11 @@ struct BudgetsView: View {
     private func presentNewBudget() {
         editingBudget = nil
         isPresentingEditor = true
+    }
+
+    private var deleteBudgetConfirmationTitle: String {
+        guard let budgetToDelete else { return "Delete budget?" }
+        return "Delete budget for \(store.categoryPath(for: budgetToDelete.categoryID))?"
     }
 
     private func refreshBudgetSummaries() {

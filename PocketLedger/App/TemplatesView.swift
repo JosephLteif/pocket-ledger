@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 struct TemplatesView: View {
     @ObservedObject var store: LedgerStore
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @State private var templateToUse: LedgerTemplate?
     @State private var templateToEdit: LedgerTemplate?
     @State private var templateToDelete: LedgerTemplate?
@@ -87,7 +88,10 @@ struct TemplatesView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(template.name)
                         .font(.headline)
-                    Text(store.transactionSummary(template.transactionTemplate))
+                    ProtectedAmountText(
+                        value: store.transactionSummary(template.transactionTemplate),
+                        isRevealed: areBalancesRevealed
+                    )
                         .font(.subheadline.weight(.semibold).monospacedDigit())
                     Text(template.kind.displayName + (template.kind == .expense ? " · " + store.categoryPath(for: template.categoryID) : ""))
                         .font(.caption)
@@ -126,6 +130,7 @@ struct TemplatesView: View {
 struct TemplateNameEditor: View {
     @ObservedObject var store: LedgerStore
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     let transaction: LedgerTransaction
     @State private var name: String
 
@@ -140,7 +145,10 @@ struct TemplateNameEditor: View {
             Form {
                 Section("Template") {
                     TextField("Template name", text: $name)
-                    Text(store.transactionSummary(transaction))
+                    ProtectedAmountText(
+                        value: store.transactionSummary(transaction),
+                        isRevealed: areBalancesRevealed
+                    )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

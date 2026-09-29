@@ -115,10 +115,7 @@ final class WatchLedgerStore: NSObject, ObservableObject, WCSessionDelegate {
             commands: pendingExpenses,
             failures: failedExpenseMessages
         ) else { return }
-        pendingExpenses = recovered.commands
-        failedExpenseMessages = recovered.failures
-        updateStatusAfterRecoveryAction()
-        saveCache()
+        applyRecovery(recovered)
         sendPendingExpenses()
     }
 
@@ -128,10 +125,7 @@ final class WatchLedgerStore: NSObject, ObservableObject, WCSessionDelegate {
             commands: pendingExpenses,
             failures: failedExpenseMessages
         ) else { return }
-        pendingExpenses = recovered.commands
-        failedExpenseMessages = recovered.failures
-        updateStatusAfterRecoveryAction()
-        saveCache()
+        applyRecovery(recovered)
         sendPendingExpenses()
     }
 
@@ -141,6 +135,10 @@ final class WatchLedgerStore: NSObject, ObservableObject, WCSessionDelegate {
             commands: pendingExpenses,
             failures: failedExpenseMessages
         ) else { return }
+        applyRecovery(recovered)
+    }
+
+    private func applyRecovery(_ recovered: WatchExpenseQueueState) {
         pendingExpenses = recovered.commands
         failedExpenseMessages = recovered.failures
         updateStatusAfterRecoveryAction()

@@ -30,29 +30,24 @@ private struct AccountDetailSnapshot {
             transaction.outflows.contains { $0.accountID == account.id }
                 || transaction.inflows.contains { $0.accountID == account.id }
         }
+        func convertedTotal(_ movements: [MoneyMovement], in transaction: LedgerTransaction) -> Int64 {
+            movements
+                .filter { $0.accountID == account.id }
+                .compactMap {
+                    financeConvertedMinorUnits(
+                        $0.money,
+                        to: account.currency,
+                        using: transaction.exchangeRate
+                    )
+                }
+                .reduce(Int64.zero, +)
+        }
+
         var outgoing: Int64 = 0
         var incoming: Int64 = 0
         for transaction in transactions {
-            outgoing += transaction.outflows
-                .filter { $0.accountID == account.id }
-                .compactMap {
-                    financeConvertedMinorUnits(
-                        $0.money,
-                        to: account.currency,
-                        using: transaction.exchangeRate
-                    )
-                }
-                .reduce(Int64.zero, +)
-            incoming += transaction.inflows
-                .filter { $0.accountID == account.id }
-                .compactMap {
-                    financeConvertedMinorUnits(
-                        $0.money,
-                        to: account.currency,
-                        using: transaction.exchangeRate
-                    )
-                }
-                .reduce(Int64.zero, +)
+            outgoing += convertedTotal(transaction.outflows, in: transaction)
+            incoming += convertedTotal(transaction.inflows, in: transaction)
         }
 
         return AccountDetailSnapshot(
@@ -91,8 +86,7 @@ struct AccountDetailView: View {
     @State private var isPresentingBalanceEditor = false
     @State private var editingTransaction: LedgerTransaction?
     @State private var transactionToTemplate: LedgerTransaction?
-    @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
-    @State private var transactionDeletionError: String?
+    @State private var transactionDeletion = TransactionDeletionState()
     @State private var transactionPage = 0
     @State private var snapshot = AccountDetailSnapshot.empty
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
@@ -105,24 +99,7 @@ struct AccountDetailView: View {
 
     var body: some View {
         content
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !deletedTransactionsForUndo.isEmpty {
-                    TransactionUndoBanner(
-                        transactions: deletedTransactionsForUndo,
-                        onUndo: {
-                            if store.restoreTransactions(deletedTransactionsForUndo) {
-                                deletedTransactionsForUndo.removeAll()
-                            } else {
-                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be restored."
-                            }
-                        },
-                        onDismiss: { deletedTransactionsForUndo.removeAll() }
-                    )
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                }
-            }
-            .transactionActionAlert(message: $transactionDeletionError)
+            .transactionUndoSupport(state: $transactionDeletion, store: store)
             .navigationTitle(account?.name ?? "Account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -221,13 +198,7 @@ struct AccountDetailView: View {
                                         store: store,
                                         onEdit: { editingTransaction = transaction },
                                         onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-                                        onDelete: {
-                                            if store.deleteTransaction(id: transaction.id) {
-                                                deletedTransactionsForUndo.append(transaction)
-                                            } else {
-                                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
-                                            }
-                                        },
+                                        onDelete: { transactionDeletion.delete(transaction, in: store) },
                                         onSaveTemplate: { transactionToTemplate = transaction },
                                         allowsActions: true,
                                         usesScrollSwipeActions: true,
@@ -504,19 +475,8 @@ private struct AccountBalanceEditor: View {
                     Button("Save", action: save)
                 }
             }
-            .alert("Balance not saved", isPresented: errorPresented) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+            .errorMessageAlert(title: "Balance not saved", message: $errorMessage)
         }
-    }
-
-    private var errorPresented: Binding<Bool> {
-        Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )
     }
 
     private func save() {

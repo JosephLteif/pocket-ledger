@@ -167,8 +167,7 @@ struct DashboardView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var presentedSheet: DashboardSheet?
     @State private var transactionToTemplate: LedgerTransaction?
-    @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
-    @State private var transactionDeletionError: String?
+    @State private var transactionDeletion = TransactionDeletionState()
     @State private var snapshot = DashboardSnapshot.empty
     @State private var dashboardPreferences = DashboardPreferences.load()
     @State private var isBalanceScopeExpanded = false
@@ -201,24 +200,7 @@ struct DashboardView: View {
             }
             .pocketSwipeActionsContainer()
             .pocketScreen()
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !deletedTransactionsForUndo.isEmpty {
-                    TransactionUndoBanner(
-                        transactions: deletedTransactionsForUndo,
-                        onUndo: {
-                            if store.restoreTransactions(deletedTransactionsForUndo) {
-                                deletedTransactionsForUndo.removeAll()
-                            } else {
-                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be restored."
-                            }
-                        },
-                        onDismiss: { deletedTransactionsForUndo.removeAll() }
-                    )
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                }
-            }
-            .transactionActionAlert(message: $transactionDeletionError)
+            .transactionUndoSupport(state: $transactionDeletion, store: store)
             .accessibilityIdentifier("dashboard-\(PocketLedgerTheme.colorTheme.rawValue)")
             .preferredColorScheme(
                 PocketLedgerAppearanceMode(rawValue: selectedAppearanceMode)?.preferredColorScheme
@@ -748,7 +730,10 @@ struct DashboardView: View {
     }
 
     private func upcomingScheduleRow(_ schedule: ScheduledTransaction) -> some View {
-        HStack(spacing: 12) {
+        let amountSummary = store.transactionSummary(schedule.transactionTemplate)
+        let accessibleAmountSummary = areBalancesRevealed ? amountSummary : "Hidden amount"
+
+        return HStack(spacing: 12) {
             Image(systemName: schedule.kind == .income ? "arrow.down.left" : "calendar.badge.clock")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(schedule.kind == .income ? PocketLedgerTheme.income : PocketLedgerTheme.accent)
@@ -759,7 +744,7 @@ struct DashboardView: View {
                 Text(schedule.note.isEmpty ? schedule.kind.displayName : schedule.note)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
-                Text(store.transactionSummary(schedule.transactionTemplate))
+                ProtectedAmountText(value: amountSummary, isRevealed: areBalancesRevealed)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
                     .lineLimit(1)
@@ -779,7 +764,7 @@ struct DashboardView: View {
         .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(schedule.note.isEmpty ? schedule.kind.displayName : schedule.note), \(store.transactionSummary(schedule.transactionTemplate)), \(schedule.nextRunDate.formatted(date: .abbreviated, time: .shortened))"
+            "\(schedule.note.isEmpty ? schedule.kind.displayName : schedule.note), \(accessibleAmountSummary), \(schedule.nextRunDate.formatted(date: .abbreviated, time: .shortened))"
         )
     }
 
@@ -906,7 +891,7 @@ struct DashboardView: View {
 
             Spacer()
 
-            Text(Money(currency: currency, minorUnits: total).formatted)
+            protectedBalanceText(Money(currency: currency, minorUnits: total).formatted)
                 .font(.subheadline.weight(.semibold).monospacedDigit())
                 .foregroundStyle(PocketLedgerTheme.warning)
         }
@@ -952,13 +937,7 @@ struct DashboardView: View {
                             store: store,
                             onEdit: { presentedSheet = .transaction(transaction) },
                             onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-                            onDelete: {
-                                if store.deleteTransaction(id: transaction.id) {
-                                    deletedTransactionsForUndo.append(transaction)
-                                } else {
-                                    transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
-                                }
-                            },
+                            onDelete: { transactionDeletion.delete(transaction, in: store) },
                             onSaveTemplate: { transactionToTemplate = transaction },
                             allowsActions: true,
                             usesScrollSwipeActions: true,
@@ -1014,19 +993,19 @@ struct DashboardView: View {
                                     .font(.subheadline.weight(.semibold))
                                     .lineLimit(1)
                                 Spacer()
-                                Text("\(spent.formatted) / \(allowance.formatted)")
+                                protectedBalanceText("\(spent.formatted) / \(allowance.formatted)")
                                     .font(.caption.weight(.semibold).monospacedDigit())
                                     .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.textSecondary)
                             }
                             ProgressView(value: ratio)
                                 .tint(projectedOver ? PocketLedgerTheme.warning : PocketLedgerTheme.accent)
                             HStack(spacing: 10) {
-                                Text(over
+                                protectedBalanceText(over
                                      ? "Over by \(Money(currency: budget.currency, minorUnits: -remaining).formatted)"
                                      : "Remaining \(Money(currency: budget.currency, minorUnits: remaining).formatted)")
                                     .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.positive)
                                 Spacer()
-                                Text("Projected \(summary.projected.formatted)")
+                                protectedBalanceText("Projected \(summary.projected.formatted)")
                                     .foregroundStyle(projectedOver ? PocketLedgerTheme.warning : PocketLedgerTheme.textTertiary)
                             }
                             .font(.caption.weight(.semibold).monospacedDigit())

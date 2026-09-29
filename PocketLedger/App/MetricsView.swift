@@ -133,6 +133,8 @@ struct MetricsView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     @State private var period: MetricsPeriod = .month
     @State private var selectedCurrency: LedgerCurrency = .usd
@@ -398,7 +400,10 @@ struct MetricsView: View {
                 Text("Income")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
-                Text(Money(currency: selectedCurrency, minorUnits: snapshot.income).formatted)
+                ProtectedAmountText(
+                    value: Money(currency: selectedCurrency, minorUnits: snapshot.income).formatted,
+                    isRevealed: areBalancesRevealed
+                )
                     .font(.title3.weight(.semibold).monospacedDigit())
                     .foregroundStyle(PocketLedgerTheme.income)
                     .contentTransition(.numericText(value: Double(snapshot.income)))
@@ -411,7 +416,10 @@ struct MetricsView: View {
                 Text("Expenses")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
-                Text(Money(currency: selectedCurrency, minorUnits: snapshot.expenses).formatted)
+                ProtectedAmountText(
+                    value: Money(currency: selectedCurrency, minorUnits: snapshot.expenses).formatted,
+                    isRevealed: areBalancesRevealed
+                )
                     .font(.title3.weight(.semibold).monospacedDigit())
                     .foregroundStyle(PocketLedgerTheme.warning)
                     .contentTransition(.numericText(value: Double(snapshot.expenses)))
@@ -475,7 +483,7 @@ struct MetricsView: View {
                     if share(for: metric.amount, total: snapshot.expenses) >= 0.08 {
                         Text("\(percentage(for: metric.amount, total: snapshot.expenses))%")
                             .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(chartLabelColor(for: metric.colorIndex))
                     }
                 }
             }
@@ -500,7 +508,7 @@ struct MetricsView: View {
                     if share(for: metric.amount, total: total) >= 0.08 {
                         Text("\(percentage(for: metric.amount, total: total))%")
                             .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(chartLabelColor(for: metric.colorIndex))
                     }
                 }
             }
@@ -513,7 +521,10 @@ struct MetricsView: View {
 
     private func spendingTotal(_ total: Int64) -> some View {
         VStack(spacing: 3) {
-            Text(Money(currency: selectedCurrency, minorUnits: total).formatted)
+            ProtectedAmountText(
+                value: Money(currency: selectedCurrency, minorUnits: total).formatted,
+                isRevealed: areBalancesRevealed
+            )
                 .font(.headline.weight(.bold).monospacedDigit())
                 .minimumScaleFactor(0.8)
                 .lineLimit(1)
@@ -613,8 +624,10 @@ struct MetricsView: View {
         HStack(spacing: 10) {
             Text("\(percentage)%")
                 .font(.caption.weight(.bold).monospacedDigit())
-                .foregroundStyle(.white)
-                .frame(width: 48, height: 30)
+                .foregroundStyle(chartLabelColor(for: colorIndex))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .frame(minWidth: 44, minHeight: 30)
                 .background(chartColor(for: colorIndex), in: RoundedRectangle(cornerRadius: 7))
 
             Image(systemName: icon)
@@ -628,7 +641,10 @@ struct MetricsView: View {
 
             Spacer(minLength: 8)
 
-            Text(Money(currency: selectedCurrency, minorUnits: amount).formatted)
+            ProtectedAmountText(
+                value: Money(currency: selectedCurrency, minorUnits: amount).formatted,
+                isRevealed: areBalancesRevealed
+            )
                 .font(.subheadline.weight(.semibold).monospacedDigit())
         }
         .contentShape(Rectangle())
@@ -675,6 +691,15 @@ struct MetricsView: View {
             PocketLedgerTheme.income.opacity(0.62)
         ]
         return colors[index % colors.count]
+    }
+
+    private func chartLabelColor(for index: Int) -> Color {
+        // Keep in sync with chartColor's four opaque and three translucent swatches.
+        let colorIndex = ((index % 7) + 7) % 7
+        if colorScheme == .dark {
+            return colorIndex == 4 ? .white : .black
+        }
+        return colorIndex == 1 || colorIndex == 2 ? .white : .black
     }
 
     private func share(for amount: Int64, total: Int64) -> Double {
@@ -848,6 +873,7 @@ struct MetricsView: View {
 private struct CategoryMetricsDetailView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     let categoryID: UUID?
     let categoryTitle: String
@@ -858,8 +884,7 @@ private struct CategoryMetricsDetailView: View {
     @State private var snapshot = CategoryMetricsDetailSnapshot.empty
     @State private var editingTransaction: LedgerTransaction?
     @State private var transactionToTemplate: LedgerTransaction?
-    @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
-    @State private var transactionDeletionError: String?
+    @State private var transactionDeletion = TransactionDeletionState()
     @State private var transactionToOpenID: UUID?
     @State private var isShowingTransactionDetail = false
 
@@ -898,24 +923,7 @@ private struct CategoryMetricsDetailView: View {
         }
         .pocketSwipeActionsContainer()
         .pocketScreen()
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !deletedTransactionsForUndo.isEmpty {
-                TransactionUndoBanner(
-                    transactions: deletedTransactionsForUndo,
-                    onUndo: {
-                        if store.restoreTransactions(deletedTransactionsForUndo) {
-                            deletedTransactionsForUndo.removeAll()
-                        } else {
-                            transactionDeletionError = store.lastActionStatus ?? "The transaction could not be restored."
-                        }
-                    },
-                    onDismiss: { deletedTransactionsForUndo.removeAll() }
-                )
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-            }
-        }
-        .transactionActionAlert(message: $transactionDeletionError)
+        .transactionUndoSupport(state: $transactionDeletion, store: store)
         .navigationTitle(categoryTitle)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $isShowingTransactionDetail) {
@@ -1002,7 +1010,10 @@ private struct CategoryMetricsDetailView: View {
             .symbolSize(point.date == currentMonth ? 80 : 42)
             .annotation(position: .top, spacing: 6) {
                 if point.amount > 0 {
-                    Text(Money(currency: currency, minorUnits: point.amount).formatted)
+                    ProtectedAmountText(
+                        value: Money(currency: currency, minorUnits: point.amount).formatted,
+                        isRevealed: areBalancesRevealed
+                    )
                         .font(.caption2.weight(.medium).monospacedDigit())
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
@@ -1039,7 +1050,10 @@ private struct CategoryMetricsDetailView: View {
 
             Spacer()
 
-            Text(Money(currency: currency, minorUnits: snapshot.selectedMonthTotal).formatted)
+            ProtectedAmountText(
+                value: Money(currency: currency, minorUnits: snapshot.selectedMonthTotal).formatted,
+                isRevealed: areBalancesRevealed
+            )
                 .font(.subheadline.weight(.semibold).monospacedDigit())
         }
         .padding(.vertical, 15)
@@ -1085,7 +1099,10 @@ private struct CategoryMetricsDetailView: View {
 
                                 Spacer(minLength: 8)
 
-                                Text(Money(currency: currency, minorUnits: metric.amount).formatted)
+                                ProtectedAmountText(
+                                    value: Money(currency: currency, minorUnits: metric.amount).formatted,
+                                    isRevealed: areBalancesRevealed
+                                )
                                     .font(.subheadline.weight(.semibold).monospacedDigit())
                             }
                             .contentShape(Rectangle())
@@ -1127,13 +1144,7 @@ private struct CategoryMetricsDetailView: View {
                         store: store,
                         onEdit: { editingTransaction = transaction },
                         onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-                        onDelete: {
-                            if store.deleteTransaction(id: transaction.id) {
-                                deletedTransactionsForUndo.append(transaction)
-                            } else {
-                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
-                            }
-                        },
+                        onDelete: { transactionDeletion.delete(transaction, in: store) },
                         onSaveTemplate: { transactionToTemplate = transaction },
                         allowsActions: true,
                         onOpen: {
@@ -1192,6 +1203,7 @@ private struct CategoryMetricsDetailView: View {
 private struct MetricsTransactionDetailView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     let transactionID: UUID
 
     @State private var editingTransaction: LedgerTransaction?
@@ -1303,7 +1315,7 @@ private struct MetricsTransactionDetailView: View {
 
                             Spacer(minLength: 8)
 
-                            Text(movement.money.formatted)
+                            ProtectedAmountText(value: movement.money.formatted, isRevealed: areBalancesRevealed)
                                 .font(.subheadline.weight(.semibold).monospacedDigit())
                         }
                         .padding(.horizontal, 14)
@@ -1329,13 +1341,13 @@ private struct MetricsTransactionDetailView: View {
             detailRow("Type", transaction.kind.displayName)
 
             if let amountDue = transaction.amountDue {
-                detailRow("Bill total", amountDue.formatted)
+                detailRow("Bill total", amountDue.formatted, protectsAmount: true)
             }
             if let exchangeRate = transaction.exchangeRate {
                 detailRow("Exchange rate", exchangeRate.summary)
             }
             if let shortfall = transaction.changeAdjustment?.shortfall {
-                detailRow("Change shortfall", shortfall.formatted)
+                detailRow("Change shortfall", shortfall.formatted, protectsAmount: true)
             }
         }
         .pocketGroupedSurface(cornerRadius: 18)
@@ -1345,15 +1357,21 @@ private struct MetricsTransactionDetailView: View {
         }
     }
 
-    private func detailRow(_ title: String, _ value: String) -> some View {
+    private func detailRow(_ title: String, _ value: String, protectsAmount: Bool = false) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(title)
                 .font(.subheadline)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
             Spacer(minLength: 12)
-            Text(value)
-                .font(.subheadline.weight(.medium))
-                .multilineTextAlignment(.trailing)
+            if protectsAmount {
+                ProtectedAmountText(value: value, isRevealed: areBalancesRevealed)
+                    .font(.subheadline.weight(.medium))
+                    .multilineTextAlignment(.trailing)
+            } else {
+                Text(value)
+                    .font(.subheadline.weight(.medium))
+                    .multilineTextAlignment(.trailing)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)

@@ -226,10 +226,7 @@ final class LedgerStore: ObservableObject {
             && transaction.date >= monthStart
             && ledgerIndex.categoryIncludedInTotals(transaction)
             && transaction.outflows.contains(where: { includesInTotals(accountID: $0.accountID) }) {
-            let categoryIDs = Set(
-                (transaction.categoryAllocations?.map(\.categoryID) ?? [transaction.categoryID])
-                    .compactMap { $0 }
-            )
+            let categoryIDs = Set(transaction.effectiveCategoryIDs.compactMap { $0 })
             for categoryID in categoryIDs {
                 counts[categoryID, default: 0] += 1
             }
@@ -328,6 +325,12 @@ final class LedgerStore: ObservableObject {
             guard updated.transactions[index].loanID == nil else { continue }
             updated.transactions[index].categoryID = categoryID
             updated.transactions[index].categoryAllocations = nil
+            if updated.transactions[index].kind == .expense {
+                for movementIndex in updated.transactions[index].outflows.indices {
+                    updated.transactions[index].outflows[movementIndex].categoryID = categoryID
+                    updated.transactions[index].outflows[movementIndex].hasCategoryAssignment = true
+                }
+            }
             changed = true
         }
         guard changed else {
@@ -414,7 +417,14 @@ final class LedgerStore: ObservableObject {
             categoryID: transaction.categoryID,
             categoryAllocations: transaction.categoryAllocations,
             amountDue: transaction.amountDue,
-            outflows: transaction.outflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
+            outflows: transaction.outflows.map {
+                MoneyMovement(
+                    accountID: $0.accountID,
+                    money: $0.money,
+                    categoryID: $0.categoryID,
+                    hasCategoryAssignment: $0.hasCategoryAssignment
+                )
+            },
             inflows: transaction.inflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
             exchangeRate: transaction.exchangeRate,
             changeAdjustment: transaction.changeAdjustment,

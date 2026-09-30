@@ -147,8 +147,7 @@ struct TransactionListSnapshot {
             guard matchesPeriod else { return false }
 
             if let categoryID {
-                let categoryIDs = transaction.categoryAllocations?.map(\.categoryID)
-                    ?? [transaction.categoryID]
+                let categoryIDs = transaction.effectiveCategoryIDs
                 guard categoryIDs.contains(where: { transactionCategoryID in
                     guard let transactionCategoryID else { return false }
                     if includesCategoryDescendants {
@@ -1345,8 +1344,8 @@ struct TransactionRow: View {
 
     private var iconName: String {
         if transaction.loanID != nil { return "banknote" }
-        if transaction.categoryID != nil || transaction.categoryAllocations?.contains(where: { $0.categoryID != nil }) == true {
-            return store.ledgerIndex.categorySystemImage(for: transaction.categoryID)
+        if let categoryID = transaction.effectiveCategoryIDs.compactMap({ $0 }).first {
+            return store.ledgerIndex.categorySystemImage(for: categoryID)
         }
 
         switch transaction.kind {

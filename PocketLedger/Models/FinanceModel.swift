@@ -640,11 +640,47 @@ struct MoneyMovement: Identifiable, Codable, Equatable {
     let id: UUID
     var accountID: UUID
     var money: Money
+    var categoryID: UUID?
+    var hasCategoryAssignment: Bool
 
-    init(id: UUID = UUID(), accountID: UUID, money: Money) {
+    init(
+        id: UUID = UUID(),
+        accountID: UUID,
+        money: Money,
+        categoryID: UUID? = nil,
+        hasCategoryAssignment: Bool = false
+    ) {
         self.id = id
         self.accountID = accountID
         self.money = money
+        self.categoryID = categoryID
+        self.hasCategoryAssignment = hasCategoryAssignment
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case accountID
+        case money
+        case categoryID
+        case hasCategoryAssignment
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        accountID = try container.decode(UUID.self, forKey: .accountID)
+        money = try container.decode(Money.self, forKey: .money)
+        categoryID = try container.decodeIfPresent(UUID.self, forKey: .categoryID)
+        hasCategoryAssignment = try container.decodeIfPresent(Bool.self, forKey: .hasCategoryAssignment) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(accountID, forKey: .accountID)
+        try container.encode(money, forKey: .money)
+        try container.encodeIfPresent(categoryID, forKey: .categoryID)
+        try container.encode(hasCategoryAssignment, forKey: .hasCategoryAssignment)
     }
 }
 
@@ -777,6 +813,17 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
     var loanPaymentID: UUID?
     var loanActivity: LoanLedgerActivity?
     var loanPrincipalAmount: Money?
+
+    var effectiveCategoryIDs: [UUID?] {
+        let categoryIDs: [UUID?]
+        if kind == .expense, outflows.contains(where: \.hasCategoryAssignment) {
+            categoryIDs = outflows.filter(\.hasCategoryAssignment).map(\.categoryID)
+        } else {
+            categoryIDs = categoryAllocations?.map(\.categoryID) ?? [categoryID]
+        }
+        var seen: Set<UUID?> = []
+        return categoryIDs.filter { seen.insert($0).inserted }
+    }
 
     init(
         id: UUID = UUID(),
@@ -1108,8 +1155,8 @@ struct ScheduledTransaction: Identifiable, Codable, Equatable {
             kind: kind,
             categoryID: categoryID,
             amountDue: amountDue,
-            outflows: outflows,
-            inflows: inflows,
+            outflows: outflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
+            inflows: inflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
             exchangeRate: exchangeRate,
             changeAdjustment: changeAdjustment
         )
@@ -1285,23 +1332,41 @@ func financeCategoryAllocationAmounts(
     let netAmount = max(includedAmount(transaction.outflows) - includedAmount(transaction.inflows), 0)
     guard netAmount > 0 else { return [] }
 
-    let savedAllocations = transaction.categoryAllocations?.filter { $0.amount.minorUnits > 0 }
-    guard let savedAllocations, !savedAllocations.isEmpty else {
+    let converted: [(categoryID: UUID?, amount: Int64)]
+    if transaction.outflows.contains(where: \.hasCategoryAssignment) {
+        var paymentAmounts: [(categoryID: UUID?, amount: Int64)] = []
+        for movement in transaction.outflows where movement.hasCategoryAssignment {
+            guard accountsByID[movement.accountID]?.includeInTotals == true,
+                  let amount = financeConvertedMinorUnits(
+                      movement.money,
+                      to: currency,
+                      using: transaction.exchangeRate
+                  ), amount > 0 else {
+                continue
+            }
+            if let index = paymentAmounts.firstIndex(where: { $0.categoryID == movement.categoryID }) {
+                paymentAmounts[index].amount += amount
+            } else {
+                paymentAmounts.append((movement.categoryID, amount))
+            }
+        }
+        converted = paymentAmounts
+    } else if let savedAllocations = transaction.categoryAllocations?.filter({ $0.amount.minorUnits > 0 }) {
+        converted = savedAllocations.compactMap { allocation -> (categoryID: UUID?, amount: Int64)? in
+            guard let amount = financeConvertedMinorUnits(
+                allocation.amount,
+                to: currency,
+                using: transaction.exchangeRate
+            ), amount > 0 else {
+                return nil
+            }
+            return (allocation.categoryID, amount)
+        }
+    } else {
         return [TransactionCategoryAllocation(
             categoryID: transaction.categoryID,
             amount: Money(currency: currency, minorUnits: netAmount)
         )]
-    }
-
-    let converted = savedAllocations.compactMap { allocation -> (categoryID: UUID?, amount: Int64)? in
-        guard let amount = financeConvertedMinorUnits(
-            allocation.amount,
-            to: currency,
-            using: transaction.exchangeRate
-        ), amount > 0 else {
-            return nil
-        }
-        return (allocation.categoryID, amount)
     }
     guard !converted.isEmpty else {
         return [TransactionCategoryAllocation(
@@ -1463,8 +1528,8 @@ struct LedgerTemplate: Identifiable, Codable, Equatable {
             kind: transaction.kind,
             categoryID: transaction.categoryID,
             amountDue: transaction.amountDue,
-            outflows: transaction.outflows,
-            inflows: transaction.inflows,
+            outflows: transaction.outflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
+            inflows: transaction.inflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
             exchangeRate: transaction.exchangeRate,
             changeAdjustment: transaction.changeAdjustment
         )

@@ -90,6 +90,13 @@ enum FinanceTransactionValidator {
         switch transaction.kind {
         case .expense:
             guard !transaction.outflows.isEmpty else { return .noMovements }
+            let assignedPaymentCount = transaction.outflows.filter(\.hasCategoryAssignment).count
+            guard (assignedPaymentCount == 0 || assignedPaymentCount == transaction.outflows.count),
+                  transaction.inflows.allSatisfy({ !$0.hasCategoryAssignment }),
+                  assignedPaymentCount == 0 || transaction.categoryAllocations == nil,
+                  assignedPaymentCount == 0 || transaction.categoryID == transaction.outflows.first?.categoryID else {
+                return .invalidCategoryAllocations
+            }
             if let categoryID = transaction.categoryID {
                 guard let category = data.categories.first(where: { $0.id == categoryID }) else {
                     return .missingCategory
@@ -98,7 +105,17 @@ enum FinanceTransactionValidator {
                     return .archivedCategory
                 }
             }
-            if let allocations = transaction.categoryAllocations {
+            if assignedPaymentCount > 0 {
+                for movement in transaction.outflows where movement.hasCategoryAssignment {
+                    guard let categoryID = movement.categoryID else { continue }
+                    guard let category = data.categories.first(where: { $0.id == categoryID }) else {
+                        return .missingCategory
+                    }
+                    if category.isArchived && !allowArchivedReferences {
+                        return .archivedCategory
+                    }
+                }
+            } else if let allocations = transaction.categoryAllocations {
                 guard allocations.count > 1,
                       let currency = allocations.first?.amount.currency,
                       allocations.allSatisfy({ $0.amount.currency == currency && $0.amount.minorUnits > 0 }),
@@ -135,10 +152,16 @@ enum FinanceTransactionValidator {
                 }
             }
         case .income:
-            guard transaction.categoryAllocations == nil else { return .invalidCategoryAllocations }
+            guard transaction.categoryAllocations == nil,
+                  (transaction.outflows + transaction.inflows).allSatisfy({ !$0.hasCategoryAssignment }) else {
+                return .invalidCategoryAllocations
+            }
             guard !transaction.inflows.isEmpty else { return .noMovements }
         case .transfer:
-            guard transaction.categoryAllocations == nil else { return .invalidCategoryAllocations }
+            guard transaction.categoryAllocations == nil,
+                  (transaction.outflows + transaction.inflows).allSatisfy({ !$0.hasCategoryAssignment }) else {
+                return .invalidCategoryAllocations
+            }
             guard transaction.loanID != nil
                     || (!transaction.outflows.isEmpty && !transaction.inflows.isEmpty) else {
                 return .noMovements

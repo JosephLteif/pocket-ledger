@@ -500,7 +500,7 @@ enum FinanceImportReview {
             prepared.transactions.compactMap(\.categoryID)
         )
         referencedCategoryIDs.formUnion(
-            prepared.transactions.flatMap { $0.categoryAllocations?.compactMap(\.categoryID) ?? [] }
+            prepared.transactions.flatMap { $0.effectiveCategoryIDs.compactMap { $0 } }
         )
         while let category = prepared.categories.first(where: {
             guard referencedCategoryIDs.contains($0.id), let parentID = $0.parentID else { return false }
@@ -518,11 +518,18 @@ enum FinanceImportReview {
         in data: FinanceData
     ) -> String {
         let day = Calendar.current.startOfDay(for: transaction.date).timeIntervalSince1970
-        let category = transaction.categoryAllocations.map { allocations in
-            allocations.map { allocation in
+        let category: String
+        if let allocations = transaction.categoryAllocations {
+            category = allocations.map { allocation in
                 "\(allocation.amount.currency.rawValue):\(allocation.amount.minorUnits)@\(categoryPath(for: allocation.categoryID, in: data))"
             }.joined(separator: ";")
-        } ?? categoryPath(for: transaction.categoryID, in: data)
+        } else if transaction.outflows.contains(where: \.hasCategoryAssignment) {
+            category = transaction.outflows.map { movement in
+                "\(movement.money.currency.rawValue):\(movement.money.minorUnits)@\(categoryPath(for: movement.categoryID, in: data))"
+            }.joined(separator: ";")
+        } else {
+            category = categoryPath(for: transaction.categoryID, in: data)
+        }
         let outflows = movementFingerprints(transaction.outflows, in: data).joined(separator: ";")
         let inflows = movementFingerprints(transaction.inflows, in: data).joined(separator: ";")
         let amountDue = transaction.amountDue.map { "\($0.currency.rawValue):\($0.minorUnits)" } ?? "-"
@@ -2525,12 +2532,18 @@ enum LedgerCSVExporter {
 
             for (movement, destination) in movements {
                 let accountName = accountsByID[movement.accountID]?.name ?? ""
-                let category = transaction.categoryAllocations.map { allocations in
-                    allocations.map { allocation in
+                let category: String
+                if movement.hasCategoryAssignment {
+                    let path = categoryPath(for: movement.categoryID, categories: financeData.categories)
+                    category = path.isEmpty ? "Uncategorized" : path
+                } else if let allocations = transaction.categoryAllocations {
+                    category = allocations.map { allocation in
                         let path = categoryPath(for: allocation.categoryID, categories: financeData.categories)
                         return "\(allocation.amount.stableFormatted) · \(path.isEmpty ? "Uncategorized" : path)"
                     }.joined(separator: "; ")
-                } ?? categoryPath(for: transaction.categoryID, categories: financeData.categories)
+                } else {
+                    category = categoryPath(for: transaction.categoryID, categories: financeData.categories)
+                }
                 let values = [
                     transaction.date.formatted(.iso8601.year().month().day()),
                     transaction.kind.displayName,

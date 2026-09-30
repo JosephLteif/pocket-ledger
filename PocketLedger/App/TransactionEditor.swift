@@ -4,16 +4,28 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private struct MovementDraft: Identifiable, Equatable {
-    let id = UUID()
+    let id: UUID
     var accountID: UUID
     var currency: LedgerCurrency
     var amount: String
-}
-
-private struct CategoryAllocationDraft: Identifiable, Equatable {
-    var id = UUID()
     var categoryID: UUID?
-    var amount: String
+    var hasCategoryAssignment: Bool
+
+    init(
+        id: UUID = UUID(),
+        accountID: UUID,
+        currency: LedgerCurrency,
+        amount: String,
+        categoryID: UUID? = nil,
+        hasCategoryAssignment: Bool = false
+    ) {
+        self.id = id
+        self.accountID = accountID
+        self.currency = currency
+        self.amount = amount
+        self.categoryID = categoryID
+        self.hasCategoryAssignment = hasCategoryAssignment
+    }
 }
 
 enum FinanceTransactionDefaults {
@@ -71,7 +83,6 @@ private struct TransactionEditorSnapshot: Equatable {
     let monthlyRule: ScheduleMonthlyRule
     let scheduleEnabled: Bool
     let categoryID: UUID?
-    let categoryAllocations: [CategoryAllocationDraft]
     let dueCurrency: LedgerCurrency
     let amountDue: String
     let outflows: [MovementDraft]
@@ -197,8 +208,7 @@ struct TransactionEditor: View {
     @State private var monthlyRule: ScheduleMonthlyRule = .dayOfMonth
     @State private var scheduleEnabled = true
     @State private var categoryID: UUID?
-    @State private var categoryAllocationsDraft: [CategoryAllocationDraft]
-    @State private var selectedCategorySplitIndex: Int?
+    @State private var selectedPaymentCategoryIndex: Int?
     @State private var isSelectingCategory = false
     @State private var dueCurrency: LedgerCurrency = .usd
     @State private var amountDue = ""
@@ -317,6 +327,12 @@ struct TransactionEditor: View {
             rememberedCategoryID: rememberedCategoryID,
             activeCategories: store.activeCategories
         )
+        let assignsPaymentCategories = !createTemplate
+            && editingTemplate == nil
+            && transaction == nil
+            && scheduledTransaction == nil
+            && resolvedInitialKind == .expense
+            && initialTiming == .now
         _note = State(initialValue: sourceTransaction?.note ?? scheduledTransaction?.note ?? initialNote ?? "")
         _templateName = State(initialValue: editingTemplate?.name ?? "")
         _date = State(initialValue: transaction?.date ?? scheduledTransaction?.nextRunDate ?? .now)
@@ -330,15 +346,20 @@ struct TransactionEditor: View {
         _outflows = State(
             initialValue: (sourceTransaction?.outflows ?? scheduledTransaction?.outflows)?.map {
                 MovementDraft(
+                    id: $0.id,
                     accountID: $0.accountID,
                     currency: $0.money.currency,
-                    amount: Self.inputText(for: $0.money)
+                    amount: Self.inputText(for: $0.money),
+                    categoryID: $0.hasCategoryAssignment ? $0.categoryID : initialCategoryID,
+                    hasCategoryAssignment: $0.hasCategoryAssignment || assignsPaymentCategories
                 )
             } ?? [
                 MovementDraft(
                     accountID: firstAccountID,
                     currency: initialAmount?.currency ?? firstAccount?.currency ?? preferredCurrency ?? .usd,
-                    amount: initialAmount.map { Self.inputText(for: $0) } ?? ""
+                    amount: initialAmount.map { Self.inputText(for: $0) } ?? "",
+                    categoryID: initialCategoryID,
+                    hasCategoryAssignment: assignsPaymentCategories
                 )
             ]
         )
@@ -395,15 +416,7 @@ struct TransactionEditor: View {
         _categoryID = State(
             initialValue: initialCategoryID
         )
-        _categoryAllocationsDraft = State(
-            initialValue: transaction?.categoryAllocations?.map {
-                CategoryAllocationDraft(
-                    categoryID: $0.categoryID,
-                    amount: Self.inputText(for: $0.amount)
-                )
-            } ?? []
-        )
-        _selectedCategorySplitIndex = State(initialValue: nil)
+        _selectedPaymentCategoryIndex = State(initialValue: nil)
         editingScheduleID = scheduledTransaction?.id
         editingScheduleLastRunDate = scheduledTransaction?.lastRunDate
         editingScheduleNextRunDate = scheduledTransaction?.nextRunDate
@@ -682,13 +695,15 @@ struct TransactionEditor: View {
             header: Text(outflows.count > 1 ? "Payment breakdown" : "Payment"),
             footer: Text(outflows.isEmpty
                          ? "Choose the account this purchase was paid from."
-                         : outflows.count > 1
-                            ? "These amounts combine into one purchase total. Each part can use a different account or currency."
-                            : "Add another part only if you paid from more than one account."),
+                         : supportsPaymentCategories
+                            ? "Choose a category for each payment. New payments start with the main payment's category."
+                            : outflows.count > 1
+                                ? "These amounts combine into one purchase total. Each part can use a different account or currency."
+                                : "Add another part only if you paid from more than one account."),
             content: {
             if outflows.isEmpty {
                 Button("Choose payment account") {
-                    outflows.append(newMovementDraft)
+                    outflows.append(newSplitPaymentDraft)
                 }
             } else {
                 ForEach(Array(outflows.enumerated()), id: \.element.id) { entry in
@@ -703,6 +718,11 @@ struct TransactionEditor: View {
                                     accessibilityLabel: "Remove payment \(index + 1)"
                                 ) {
                                     outflows.remove(at: index)
+                                    if index == 0,
+                                       let mainPayment = outflows.first,
+                                       mainPayment.hasCategoryAssignment {
+                                        categoryID = mainPayment.categoryID
+                                    }
                                 }
                             }
                         }
@@ -714,6 +734,9 @@ struct TransactionEditor: View {
                             allowsArchivedAccount: allowsArchivedMovementAccounts,
                             focusAmountOnAppear: index == 0 && outflows[index].amount.isEmpty
                         )
+                        if supportsPaymentCategories {
+                            paymentCategorySelector(at: index)
+                        }
                     }
                     .padding(.vertical, 4)
                 }
@@ -901,94 +924,29 @@ struct TransactionEditor: View {
     @ViewBuilder
     private var detailsSection: some View {
         Section("Details") {
-            if kind == .expense {
-                if supportsCategorySplits, !categoryAllocationsDraft.isEmpty {
-                    ForEach(categoryAllocationsDraft.indices, id: \.self) { index in
-                        HStack(spacing: 10) {
-                            Button {
-                                selectedCategorySplitIndex = index
-                                isSelectingCategory = true
-                            } label: {
-                                Label(
-                                    categoryAllocationsDraft[index].categoryID.map {
-                                        store.categoryPath(for: $0)
-                                    } ?? "Uncategorized",
-                                    systemImage: "tag"
-                                )
-                                .lineLimit(2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .buttonStyle(.plain)
-
-                            TextField(
-                                categorySplitCurrency.map { "Amount (\($0.rawValue))" } ?? "Amount",
-                                text: $categoryAllocationsDraft[index].amount
-                            )
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(maxWidth: 130)
-
-                            Button(role: .destructive) {
-                                categoryAllocationsDraft.remove(at: index)
-                                if categoryAllocationsDraft.count < 2 {
-                                    categoryID = categoryAllocationsDraft.first?.categoryID
-                                    categoryAllocationsDraft = []
-                                } else if index == 0 {
-                                    categoryID = categoryAllocationsDraft[0].categoryID
-                                }
-                            } label: {
-                                Image(systemName: "minus.circle.fill")
-                            }
-                            .accessibilityLabel("Remove category allocation")
-                        }
-                    }
-
-                    if let total = categorySplitTotal {
-                        LabeledContent("Net split total") {
-                            Text(total.formatted).monospacedDigit()
-                        }
+            if kind == .expense, !supportsPaymentCategories {
+                if selectableCategories.isEmpty {
+                    Text("No categories yet — this expense will be Uncategorized.")
                         .font(.footnote)
-                    }
-
-                    Button {
-                        categoryAllocationsDraft.append(
-                            CategoryAllocationDraft(categoryID: nil, amount: "")
-                        )
-                    } label: {
-                        Label("Add category", systemImage: "plus")
-                    }
-                    .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
                 } else {
-                    if selectableCategories.isEmpty {
-                        Text("No categories yet — this expense will be Uncategorized.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Button {
-                            selectedCategorySplitIndex = nil
-                            isSelectingCategory = true
-                        } label: {
-                            LabeledContent("Category") {
-                                HStack(spacing: 6) {
-                                    Text(selectedCategoryPath)
-                                        .lineLimit(1)
-                                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-                                    Image(systemName: "chevron.up.chevron.down")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(PocketLedgerTheme.textTertiary)
-                                }
+                    Button {
+                        selectedPaymentCategoryIndex = nil
+                        isSelectingCategory = true
+                    } label: {
+                        LabeledContent("Category") {
+                            HStack(spacing: 6) {
+                                Text(selectedCategoryPath)
+                                    .lineLimit(1)
+                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(PocketLedgerTheme.textTertiary)
                             }
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityHint("Search categories or browse the category hierarchy")
                     }
-
-                    if supportsCategorySplits {
-                        Button(action: beginCategorySplit) {
-                            Label("Split across categories", systemImage: "square.split.2x1")
-                        }
-                        .font(.footnote.weight(.semibold))
-                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Search categories or browse the category hierarchy")
                 }
             }
 
@@ -1267,89 +1225,24 @@ struct TransactionEditor: View {
         categoryID.map { store.categoryPath(for: $0) } ?? "Uncategorized"
     }
 
-    private var supportsCategorySplits: Bool {
+    private var supportsPaymentCategories: Bool {
         !isTemplateEditor && kind == .expense && timing == .now
-    }
-
-    private var categorySplitCurrency: LedgerCurrency? {
-        parsedOutflows?.first?.money.currency ?? outflows.first?.currency
-    }
-
-    private var categorySplitTotal: Money? {
-        guard let currency = categorySplitCurrency,
-              let parsedOutflows,
-              let parsedInflows else {
-            return nil
-        }
-        let rate = selectedCurrencies.count > 1 ? appliedExchangeRate : nil
-        func total(_ movements: [MoneyMovement]) -> Int64? {
-            var amount: Int64 = 0
-            for movement in movements {
-                guard let converted = financeConvertedMinorUnits(
-                    movement.money,
-                    to: currency,
-                    using: rate
-                ) else {
-                    return nil
-                }
-                amount += converted
-            }
-            return amount
-        }
-        guard let outflowTotal = total(parsedOutflows),
-              let inflowTotal = total(parsedInflows) else {
-            return nil
-        }
-        return Money(currency: currency, minorUnits: max(outflowTotal - inflowTotal, 0))
-    }
-
-    private var categorySplitValidationMessage: String? {
-        guard supportsCategorySplits, categoryAllocationsDraft.count > 1 else { return nil }
-        guard let total = categorySplitTotal, total.minorUnits > 0 else {
-            return "Enter account movements that produce a positive net amount before splitting categories."
-        }
-        guard Set(categoryAllocationsDraft.map(\.categoryID)).count == categoryAllocationsDraft.count else {
-            return "Choose a different category for each split, including Uncategorized."
-        }
-        let amounts = categoryAllocationsDraft.compactMap {
-            Money.parse($0.amount, currency: total.currency)
-        }
-        guard amounts.count == categoryAllocationsDraft.count,
-              amounts.allSatisfy({ $0.minorUnits > 0 }) else {
-            return "Enter a positive amount for every category split."
-        }
-        guard amounts.reduce(Int64.zero, { $0 + $1.minorUnits }) == total.minorUnits else {
-            return "Category splits must add up to the net account movements total, \(total.formatted)."
-        }
-        return nil
-    }
-
-    private var parsedCategoryAllocations: [TransactionCategoryAllocation]? {
-        guard supportsCategorySplits,
-              categoryAllocationsDraft.count > 1,
-              let currency = categorySplitCurrency else {
-            return nil
-        }
-        return categoryAllocationsDraft.compactMap { draft in
-            Money.parse(draft.amount, currency: currency).map {
-                TransactionCategoryAllocation(categoryID: draft.categoryID, amount: $0)
-            }
-        }
     }
 
     private var categorySelectionBinding: Binding<UUID?> {
         Binding(
             get: {
-                if let index = selectedCategorySplitIndex,
-                   categoryAllocationsDraft.indices.contains(index) {
-                    return categoryAllocationsDraft[index].categoryID
+                if let index = selectedPaymentCategoryIndex,
+                   outflows.indices.contains(index) {
+                    return displayedPaymentCategoryID(at: index)
                 }
                 return categoryID
             },
             set: { selectedCategoryID in
-                if let index = selectedCategorySplitIndex,
-                   categoryAllocationsDraft.indices.contains(index) {
-                    categoryAllocationsDraft[index].categoryID = selectedCategoryID
+                if let index = selectedPaymentCategoryIndex,
+                   outflows.indices.contains(index) {
+                    outflows[index].categoryID = selectedCategoryID
+                    outflows[index].hasCategoryAssignment = true
                     if index == 0 { categoryID = selectedCategoryID }
                 } else {
                     categoryID = selectedCategoryID
@@ -1358,18 +1251,32 @@ struct TransactionEditor: View {
         )
     }
 
-    private func beginCategorySplit() {
-        guard let total = categorySplitTotal, total.minorUnits > 0 else {
-            errorMessage = "Enter the account movements before splitting this expense."
-            return
+    private func paymentCategorySelector(at index: Int) -> some View {
+        Button {
+            selectedPaymentCategoryIndex = index
+            isSelectingCategory = true
+        } label: {
+            LabeledContent("Category") {
+                HStack(spacing: 6) {
+                    Text(displayedPaymentCategoryID(at: index).map { store.categoryPath(for: $0) } ?? "Uncategorized")
+                        .lineLimit(1)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+                }
+            }
         }
-        categoryAllocationsDraft = [
-            CategoryAllocationDraft(
-                categoryID: categoryID,
-                amount: Self.inputText(for: total)
-            ),
-            CategoryAllocationDraft(categoryID: nil, amount: "")
-        ]
+        .buttonStyle(.plain)
+        .accessibilityLabel("Category for payment \(index + 1)")
+        .accessibilityHint("Search categories or browse the category hierarchy")
+    }
+
+    private func displayedPaymentCategoryID(at index: Int) -> UUID? {
+        guard outflows.indices.contains(index), outflows[index].hasCategoryAssignment else {
+            return categoryID
+        }
+        return outflows[index].categoryID
     }
 
     private func beginReplacingAttachment(_ attachment: LedgerAttachment) {
@@ -1379,7 +1286,7 @@ struct TransactionEditor: View {
 
     private var selectableCategories: [LedgerCategory] {
         var categories = store.activeCategories
-        let selectedIDs = [categoryID] + categoryAllocationsDraft.map(\.categoryID)
+        let selectedIDs = [categoryID] + outflows.map(\.categoryID)
         for id in selectedIDs.compactMap({ $0 }) {
             if let category = store.ledgerIndex.categoriesByID[id],
                !categories.contains(where: { $0.id == category.id }) {
@@ -1439,7 +1346,9 @@ struct TransactionEditor: View {
         return MovementDraft(
             accountID: account?.id ?? UUID(),
             currency: account?.currency ?? .usd,
-            amount: ""
+            amount: "",
+            categoryID: outflows.isEmpty ? categoryID : displayedPaymentCategoryID(at: 0),
+            hasCategoryAssignment: supportsPaymentCategories
         )
     }
 
@@ -1716,7 +1625,7 @@ struct TransactionEditor: View {
 
     private var parsedOutflows: [MoneyMovement]? {
         guard kind != .income else { return [] }
-        return parseMovements(outflows)
+        return parseMovements(outflows, assignsPaymentCategories: supportsPaymentCategories)
     }
 
     private var parsedInflows: [MoneyMovement]? {
@@ -1765,10 +1674,6 @@ struct TransactionEditor: View {
             guard appliedExchangeRate != nil else { return "Enter a valid exchange rate for these currencies." }
         }
 
-        if let categorySplitValidationMessage {
-            return categorySplitValidationMessage
-        }
-
         return nil
     }
 
@@ -1787,7 +1692,6 @@ struct TransactionEditor: View {
             monthlyRule: monthlyRule,
             scheduleEnabled: scheduleEnabled,
             categoryID: categoryID,
-            categoryAllocations: categoryAllocationsDraft,
             dueCurrency: dueCurrency,
             amountDue: amountDue,
             outflows: outflows,
@@ -1833,14 +1737,25 @@ struct TransactionEditor: View {
         return "Actual and expected change match."
     }
 
-    private func parseMovements(_ drafts: [MovementDraft]) -> [MoneyMovement]? {
+    private func parseMovements(
+        _ drafts: [MovementDraft],
+        assignsPaymentCategories: Bool = false
+    ) -> [MoneyMovement]? {
+        let hasPaymentCategories = assignsPaymentCategories
+            && drafts.contains(where: \.hasCategoryAssignment)
         let movements = drafts.compactMap { draft -> MoneyMovement? in
             guard let account = store.account(with: draft.accountID),
                   let money = Money.parse(draft.amount, currency: draft.currency),
                   money.minorUnits > 0 else {
                 return nil
             }
-            return MoneyMovement(accountID: account.id, money: money)
+            return MoneyMovement(
+                id: draft.id,
+                accountID: account.id,
+                money: money,
+                categoryID: hasPaymentCategories ? draft.categoryID : nil,
+                hasCategoryAssignment: hasPaymentCategories
+            )
         }
         return movements.count == drafts.count ? movements : nil
     }
@@ -1923,13 +1838,17 @@ struct TransactionEditor: View {
         }
 
         let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        let savedCategoryAllocations = parsedCategoryAllocations
-        let savedCategoryID: UUID?
-        if kind == .expense, let savedCategoryAllocations {
-            savedCategoryID = savedCategoryAllocations.first?.categoryID
-        } else {
-            savedCategoryID = kind == .expense ? categoryID : nil
-        }
+        let hasPaymentCategories = supportsPaymentCategories
+            && parsedOutflows.contains(where: \.hasCategoryAssignment)
+        let savedCategoryAllocations = kind == .expense && !hasPaymentCategories
+            ? editingTransactionID.flatMap { id in
+                store.data.transactions.first(where: { $0.id == id })?.categoryAllocations
+            }
+            : nil
+        let savedCategoryID = kind == .expense
+            ? (hasPaymentCategories ? parsedOutflows.first?.categoryID : categoryID)
+            : nil
+        categoryID = savedCategoryID
         let transaction = LedgerTransaction(
             id: editingTransactionID ?? UUID(),
             date: date,

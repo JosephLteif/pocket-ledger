@@ -150,11 +150,7 @@ struct LedgerIndex {
     }
 
     func categoryIncludedInTotals(_ transaction: LedgerTransaction) -> Bool {
-        let allocations = transaction.categoryAllocations
-        guard let allocations, !allocations.isEmpty else {
-            return categoryIncludedInTotals(transaction.categoryID)
-        }
-        return allocations.contains { categoryIncludedInTotals($0.categoryID) }
+        transaction.effectiveCategoryIDs.contains { categoryIncludedInTotals($0) }
     }
 
     func categoryMatches(_ categoryID: UUID?, selectedCategoryID: UUID?) -> Bool {
@@ -165,20 +161,17 @@ struct LedgerIndex {
 
     func categoryMatches(_ transaction: LedgerTransaction, selectedCategoryID: UUID?) -> Bool {
         guard let selectedCategoryID else { return true }
-        let categoryIDs = transaction.categoryAllocations?.map(\.categoryID)
-            ?? [transaction.categoryID]
-        return categoryIDs.contains { categoryMatches($0, selectedCategoryID: selectedCategoryID) }
+        return transaction.effectiveCategoryIDs.contains {
+            categoryMatches($0, selectedCategoryID: selectedCategoryID)
+        }
     }
 
     func hasUncategorizedAllocation(_ transaction: LedgerTransaction) -> Bool {
-        transaction.categoryAllocations?.contains(where: { $0.categoryID == nil })
-            ?? (transaction.categoryID == nil)
+        transaction.effectiveCategoryIDs.contains(nil)
     }
 
     func categorySummary(for transaction: LedgerTransaction) -> String {
-        let categoryIDs = transaction.categoryAllocations?.map(\.categoryID)
-            ?? [transaction.categoryID]
-        let paths = Array(Set(categoryIDs.map { categoryPath(for: $0) })).sorted()
+        let paths = Array(Set(transaction.effectiveCategoryIDs.map { categoryPath(for: $0) })).sorted()
         return paths.joined(separator: " · ")
     }
 

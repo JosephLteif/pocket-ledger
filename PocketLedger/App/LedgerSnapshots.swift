@@ -362,10 +362,7 @@ struct DashboardSnapshot {
                   }) else {
                 continue
             }
-            for categoryID in Set(
-                (transaction.categoryAllocations?.map(\.categoryID) ?? [transaction.categoryID])
-                    .compactMap { $0 }
-            ) {
+            for categoryID in Set(transaction.effectiveCategoryIDs.compactMap { $0 }) {
                 categoryCounts[categoryID, default: 0] += 1
             }
         }

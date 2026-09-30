@@ -602,7 +602,9 @@ struct ImportDraft {
                     return MoneyMovement(
                         id: movement.id,
                         accountID: target.id,
-                        money: movement.money.recast(to: target.currency)
+                        money: movement.money.recast(to: target.currency),
+                        categoryID: movement.categoryID,
+                        hasCategoryAssignment: movement.hasCategoryAssignment
                     )
                 }
                 transaction.inflows = transaction.inflows.map { movement in
@@ -611,7 +613,9 @@ struct ImportDraft {
                     return MoneyMovement(
                         id: movement.id,
                         accountID: target.id,
-                        money: movement.money.recast(to: target.currency)
+                        money: movement.money.recast(to: target.currency),
+                        categoryID: movement.categoryID,
+                        hasCategoryAssignment: movement.hasCategoryAssignment
                     )
                 }
                 if changed {
@@ -697,7 +701,7 @@ struct ImportDraft {
                 movementCount: 0
             )
         case .excludeUnused:
-            let usedIDs = Set(data.transactions.compactMap(\.categoryID))
+            let usedIDs = Set(data.transactions.flatMap { $0.effectiveCategoryIDs.compactMap { $0 } })
             guard selected.allSatisfy({ !usedIDs.contains($0.id) }) else {
                 throw ImportBulkMutationError.categoryIsUsed
             }

@@ -105,13 +105,10 @@ struct FinanceTransactionEntity: IndexedEntity, Hashable, Sendable {
         date = transaction.date
         note = transaction.note
         kind = transaction.kind.displayName
-        category = (transaction.categoryAllocations?.map { allocation in
-            allocation.categoryID
-                .map { financeCategoryPath(for: $0, in: data.categories) }
+        category = transaction.effectiveCategoryIDs.map { categoryID in
+            categoryID.map { financeCategoryPath(for: $0, in: data.categories) }
                 ?? "Uncategorized"
-        } ?? [transaction.categoryID
-            .map { financeCategoryPath(for: $0, in: data.categories) }
-            ?? "Uncategorized"])
+        }
             .joined(separator: " · ")
         amount = financeIntentMovementSummary(for: transaction)
 
@@ -378,8 +375,7 @@ private func financeTransaction(
     }
 
     if let categoryID {
-        let transactionCategoryIDs = transaction.categoryAllocations?.compactMap(\.categoryID)
-            ?? [transaction.categoryID].compactMap { $0 }
+        let transactionCategoryIDs = transaction.effectiveCategoryIDs.compactMap { $0 }
         guard transactionCategoryIDs.contains(where: {
             financeCategoryScope(for: categoryID, in: data.categories).contains($0)
         }) else {
@@ -436,9 +432,9 @@ private func financeSpendingSummary(
                   accountID: accountID,
                   in: data
               ),
-              (transaction.categoryAllocations?.contains {
-                  financeCategoryIncludedInTotals($0.categoryID, in: data.categories)
-              } ?? financeCategoryIncludedInTotals(transaction.categoryID, in: data.categories)) else {
+              transaction.effectiveCategoryIDs.contains(where: {
+                  financeCategoryIncludedInTotals($0, in: data.categories)
+              }) else {
             return false
         }
 
@@ -466,8 +462,7 @@ private func financeSpendingSummary(
             totals[movement.money.currency, default: 0] += movement.money.minorUnits
         }
 
-        let transactionCategoryIDs = transaction.categoryAllocations?.map(\.categoryID)
-            ?? [transaction.categoryID]
+        let transactionCategoryIDs = transaction.effectiveCategoryIDs
         let categoryNames = Set(transactionCategoryIDs.compactMap { transactionCategoryID -> String? in
             if let transactionCategoryID {
                 guard categoryScope?.contains(transactionCategoryID) != false else { return nil }

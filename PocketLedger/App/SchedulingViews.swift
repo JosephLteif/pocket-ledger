@@ -1,5 +1,11 @@
 import SwiftUI
 
+private struct RecurringScheduleSuggestion: Identifiable {
+    let schedule: ScheduledTransaction
+    let occurrenceCount: Int
+    var id: UUID { schedule.id }
+}
+
 private enum ScheduledEditorRoute: Identifiable {
     case new
     case edit(ScheduledTransaction)
@@ -64,6 +70,21 @@ struct ScheduledTransactionsView: View {
                     .foregroundStyle(PocketLedgerTheme.textTertiary)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
+            }
+
+            if !recurringSuggestions.isEmpty {
+                Section {
+                    ForEach(recurringSuggestions) { suggestion in
+                        recurringSuggestionCard(suggestion)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                } header: {
+                    Text("Possible recurring expenses")
+                } footer: {
+                    Text("Suggestions are based only on transactions saved on this device.")
+                }
+                .listSectionSeparator(.hidden)
             }
 
             if schedules.isEmpty {
@@ -259,6 +280,131 @@ struct ScheduledTransactionsView: View {
             }
             return lhs.nextRunDate < rhs.nextRunDate
         }
+    }
+
+    private var recurringSuggestions: [RecurringScheduleSuggestion] {
+        let calendar = Calendar.current
+        let cutoff = calendar.date(byAdding: .month, value: -6, to: .now) ?? .distantPast
+        let transactions = store.data.transactions.filter { transaction in
+            transaction.kind == .expense
+                && transaction.inflows.isEmpty
+                && transaction.outflows.count == 1
+                && store.account(with: transaction.outflows[0].accountID)?.isArchived == false
+                && transaction.exchangeRate == nil
+                && !transaction.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && transaction.date >= cutoff
+        }
+        let groups = Dictionary(grouping: transactions) { transaction in
+            let movement = transaction.outflows[0]
+            let note = transaction.note.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return "\(note)|\(transaction.categoryID?.uuidString ?? "")|\(movement.accountID)|\(movement.money.currency.rawValue)|\(movement.money.minorUnits)"
+        }
+
+        return groups.values.compactMap { group -> RecurringScheduleSuggestion? in
+            let sorted = group.sorted { $0.date < $1.date }
+            guard sorted.count >= 3 else { return nil }
+            let gaps = zip(sorted, sorted.dropFirst()).compactMap { first, second in
+                calendar.dateComponents([.day], from: calendar.startOfDay(for: first.date), to: calendar.startOfDay(for: second.date)).day
+            }
+            guard !gaps.isEmpty else { return nil }
+            let frequency: ScheduleFrequency
+            if gaps.allSatisfy({ (6...8).contains($0) }) {
+                frequency = .weekly
+            } else if gaps.allSatisfy({ (25...35).contains($0) }) {
+                frequency = .monthly
+            } else {
+                return nil
+            }
+
+            guard let latest = sorted.last,
+                  let nextDate = frequency.nextDate(
+                    after: latest.date,
+                    calendar: calendar,
+                    monthlyDay: calendar.component(.day, from: latest.date)
+                  ) else { return nil }
+            let movement = latest.outflows[0]
+            let isAlreadyScheduled = schedules.contains { schedule in
+                schedule.kind == .expense
+                    && schedule.frequency != .once
+                    && schedule.categoryID == latest.categoryID
+                    && schedule.note.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        == latest.note.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    && schedule.outflows.count == 1
+                    && schedule.outflows[0].accountID == movement.accountID
+                    && schedule.outflows[0].money == movement.money
+            }
+            guard !isAlreadyScheduled else { return nil }
+
+            return RecurringScheduleSuggestion(
+                schedule: ScheduledTransaction(
+                    nextRunDate: nextDate,
+                    frequency: frequency,
+                    recurrenceDay: calendar.component(.day, from: latest.date),
+                    note: latest.note,
+                    kind: .expense,
+                    categoryID: latest.categoryID,
+                    amountDue: latest.amountDue,
+                    outflows: latest.outflows,
+                    inflows: [],
+                    exchangeRate: latest.exchangeRate,
+                    changeAdjustment: latest.changeAdjustment
+                ),
+                occurrenceCount: sorted.count
+            )
+        }
+        .sorted { $0.occurrenceCount > $1.occurrenceCount }
+        .prefix(3)
+        .map { $0 }
+    }
+
+    private func recurringSuggestionCard(_ suggestion: RecurringScheduleSuggestion) -> some View {
+        let schedule = suggestion.schedule
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(schedule.note)
+                        .font(.headline)
+                        .lineLimit(2)
+                    ProtectedAmountText(
+                        value: store.transactionSummary(schedule.transactionTemplate),
+                        isRevealed: areBalancesRevealed
+                    )
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(PocketLedgerTheme.textPrimary)
+                }
+                Spacer()
+                Text("\(suggestion.occurrenceCount) entries")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            }
+            Text(store.categoryPath(for: schedule.categoryID))
+                .font(.caption)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                .lineLimit(1)
+            Text("\(schedule.frequency.displayName) · Next \(schedule.nextRunDate.formatted(date: .abbreviated, time: .omitted))")
+                .font(.caption)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
+            if let accountID = schedule.outflows.first?.accountID,
+               let account = store.account(with: accountID) {
+                Label(account.name, systemImage: "wallet.pass")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    .lineLimit(1)
+            }
+            Button {
+                guard store.addScheduledTransaction(schedule) else { return }
+                recordStatus = "Recurring schedule created"
+                recordUndoReceipt = nil
+            } label: {
+                Label("Create schedule", systemImage: "calendar.badge.plus")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .tint(PocketLedgerTheme.accent)
+        }
+        .padding(14)
+        .pocketGroupedSurface(cornerRadius: 18)
     }
 
     private var emptyState: some View {

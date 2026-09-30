@@ -46,6 +46,10 @@ struct DataTransferView: View {
     @State private var isShowingResetSuccess = false
     @State private var isShowingRecoveryConfirmation = false
     @State private var isShowingRecoveryDeletionConfirmation = false
+    @State private var isUpdatingBackupReminder = false
+    @State private var backupReminderStatus: String?
+    @AppStorage(NotificationService.lastFullBackupDateKey) private var lastFullBackupTimestamp = 0.0
+    @AppStorage(NotificationService.backupReminderEnabledKey) private var isFullBackupReminderEnabled = false
 
     init(store: LedgerStore, isImportOnly: Bool = false) {
         _store = ObservedObject(wrappedValue: store)
@@ -97,21 +101,21 @@ struct DataTransferView: View {
             document: backupDocument,
             contentType: .json,
             defaultFilename: "Pocket-Ledger-backup",
-            onCompletion: exportCompleted
+            onCompletion: { exportCompleted($0, isFullBackup: false) }
         )
         .fileExporter(
             isPresented: $isExportingBackupBundle,
             document: backupBundleDocument,
             contentType: .data,
             defaultFilename: "Pocket-Ledger-backup.pocketledger",
-            onCompletion: exportCompleted
+            onCompletion: { exportCompleted($0, isFullBackup: true) }
         )
         .fileExporter(
             isPresented: $isExportingCSV,
             document: csvDocument,
             contentType: .commaSeparatedText,
             defaultFilename: "Pocket-Ledger-transactions",
-            onCompletion: exportCompleted
+            onCompletion: { exportCompleted($0, isFullBackup: false) }
         )
         .sheet(item: $pendingBackup) { candidate in
             BackupRestoreView(store: store, candidate: candidate)
@@ -170,6 +174,32 @@ struct DataTransferView: View {
             Text("Full backups keep accounts, categories, transactions, schedules, and local receipt attachments so they can be restored later.")
                 .font(.subheadline)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
+
+            Label(
+                lastFullBackupTimestamp > 0
+                    ? "Last full backup: \(Date(timeIntervalSince1970: lastFullBackupTimestamp).formatted(date: .abbreviated, time: .shortened))"
+                    : "No full backup recorded yet",
+                systemImage: "clock"
+            )
+            .font(.footnote)
+            .foregroundStyle(PocketLedgerTheme.textSecondary)
+
+            Toggle(isOn: backupReminderBinding) {
+                Label("Remind me in 90 days", systemImage: "bell.badge")
+            }
+            .disabled(isUpdatingBackupReminder)
+
+            Text("The reminder resets after each successful full backup. It stays on this device and includes no ledger details.")
+                .font(.footnote)
+                .foregroundStyle(PocketLedgerTheme.textTertiary)
+
+            if let backupReminderStatus {
+                Text(backupReminderStatus)
+                    .font(.footnote)
+                    .foregroundStyle(backupReminderStatus.contains("Allow notifications")
+                        ? PocketLedgerTheme.warning
+                        : PocketLedgerTheme.textSecondary)
+            }
 
             Button {
                 startBackupExport()
@@ -400,12 +430,52 @@ struct DataTransferView: View {
         }
     }
 
-    private func exportCompleted(_ result: Result<URL, Error>) {
+    private var backupReminderBinding: Binding<Bool> {
+        Binding(
+            get: { isFullBackupReminderEnabled },
+            set: { updateFullBackupReminder(isEnabled: $0) }
+        )
+    }
+
+    private func updateFullBackupReminder(isEnabled: Bool) {
+        guard !isUpdatingBackupReminder else { return }
+        isUpdatingBackupReminder = true
+        if !isEnabled {
+            NotificationService.disableFullBackupReminder()
+            isFullBackupReminderEnabled = false
+            backupReminderStatus = "Full backup reminder is off."
+            isUpdatingBackupReminder = false
+            return
+        }
+        let lastBackupAt = lastFullBackupTimestamp > 0
+            ? Date(timeIntervalSince1970: lastFullBackupTimestamp)
+            : nil
+        Task {
+            defer { isUpdatingBackupReminder = false }
+            do {
+                try await NotificationService.enableFullBackupReminder(lastBackupAt: lastBackupAt)
+                isFullBackupReminderEnabled = true
+                backupReminderStatus = "Full backup reminder is enabled."
+            } catch {
+                isFullBackupReminderEnabled = false
+                backupReminderStatus = error.localizedDescription
+            }
+        }
+    }
+
+    private func exportCompleted(_ result: Result<URL, Error>, isFullBackup: Bool) {
         let shouldContinueToReset = isContinuingToResetAfterBackup
         isContinuingToResetAfterBackup = false
 
         switch result {
         case .success:
+            if isFullBackup {
+                let exportedAt = Date()
+                lastFullBackupTimestamp = exportedAt.timeIntervalSince1970
+                Task {
+                    await NotificationService.refreshFullBackupReminderIfEnabled(lastBackupAt: exportedAt)
+                }
+            }
             if shouldContinueToReset {
                 isShowingResetWarning = true
             }

@@ -33,6 +33,8 @@ struct SecuritySettingsView: View {
     @State private var errorMessage: String?
     @State private var dailyReminderStatus: String?
     @State private var isUpdatingDailyReminder = false
+    @State private var budgetAlertStatus: String?
+    @State private var isUpdatingBudgetAlerts = false
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
     @AppStorage(NotificationService.dailyTransactionReminderEnabledKey)
     private var isDailyTransactionReminderEnabled = false
@@ -40,6 +42,8 @@ struct SecuritySettingsView: View {
     private var dailyTransactionReminderMinutes = NotificationService.dailyTransactionReminderDefaultMinutes
     @AppStorage(NotificationService.scheduledLiveActivityEnabledKey)
     private var isScheduledLiveActivityEnabled = false
+    @AppStorage(NotificationService.budgetThresholdAlertsEnabledKey)
+    private var areBudgetThresholdAlertsEnabled = false
 
     var body: some View {
         Form {
@@ -74,6 +78,23 @@ struct SecuritySettingsView: View {
                     Text("Get a daily notification to add today’s transactions. Notification access is requested when you enable this reminder.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+
+                    Toggle(isOn: budgetThresholdAlertsBinding) {
+                        Label("Budget threshold alerts", systemImage: "chart.pie")
+                    }
+                    .disabled(isUpdatingBudgetAlerts)
+
+                    Text("Get a local alert when spending crosses 80% or 100% of a budget. Amounts and category names stay out of the notification.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    if let budgetAlertStatus {
+                        Text(budgetAlertStatus)
+                            .font(.footnote)
+                            .foregroundStyle(budgetAlertStatus.contains("Allow notifications")
+                                ? PocketLedgerTheme.warning
+                                : PocketLedgerTheme.textSecondary)
+                    }
 
                     Toggle(isOn: $isScheduledLiveActivityEnabled) {
                         Label("Scheduled transaction countdown", systemImage: "timer")
@@ -237,6 +258,13 @@ struct SecuritySettingsView: View {
         )
     }
 
+    private var budgetThresholdAlertsBinding: Binding<Bool> {
+        Binding(
+            get: { areBudgetThresholdAlertsEnabled },
+            set: { updateBudgetThresholdAlerts(isEnabled: $0) }
+        )
+    }
+
     private func updateDailyTransactionReminder(isEnabled: Bool) {
         guard !isUpdatingDailyReminder else { return }
         isDailyTransactionReminderEnabled = isEnabled
@@ -257,6 +285,29 @@ struct SecuritySettingsView: View {
             } else {
                 NotificationService.disableDailyTransactionReminder()
                 dailyReminderStatus = "Daily transaction reminder is off."
+            }
+        }
+    }
+
+    private func updateBudgetThresholdAlerts(isEnabled: Bool) {
+        guard !isUpdatingBudgetAlerts else { return }
+        isUpdatingBudgetAlerts = true
+        if !isEnabled {
+            NotificationService.disableBudgetThresholdAlerts()
+            areBudgetThresholdAlertsEnabled = false
+            budgetAlertStatus = "Budget alerts are off."
+            isUpdatingBudgetAlerts = false
+            return
+        }
+        Task {
+            defer { isUpdatingBudgetAlerts = false }
+            do {
+                try await NotificationService.enableBudgetThresholdAlerts()
+                areBudgetThresholdAlertsEnabled = true
+                budgetAlertStatus = "Budget alerts are enabled."
+            } catch {
+                areBudgetThresholdAlertsEnabled = false
+                budgetAlertStatus = error.localizedDescription
             }
         }
     }

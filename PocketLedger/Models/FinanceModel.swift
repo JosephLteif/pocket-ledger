@@ -1156,6 +1156,40 @@ struct FinanceAttentionState: Codable, Equatable {
 struct AccountReconciliation: Codable, Equatable {
     var lastReconciledAt: Date
     var difference: Money
+    var statementDate: Date?
+    var statementBalance: Money?
+    var clearedTransactionIDs: Set<UUID>
+    var didRecordAdjustment: Bool
+
+    init(
+        lastReconciledAt: Date,
+        difference: Money,
+        statementDate: Date? = nil,
+        statementBalance: Money? = nil,
+        clearedTransactionIDs: Set<UUID> = [],
+        didRecordAdjustment: Bool = false
+    ) {
+        self.lastReconciledAt = lastReconciledAt
+        self.difference = difference
+        self.statementDate = statementDate
+        self.statementBalance = statementBalance
+        self.clearedTransactionIDs = clearedTransactionIDs
+        self.didRecordAdjustment = didRecordAdjustment
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case lastReconciledAt, difference, statementDate, statementBalance, clearedTransactionIDs, didRecordAdjustment
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        lastReconciledAt = try container.decode(Date.self, forKey: .lastReconciledAt)
+        difference = try container.decode(Money.self, forKey: .difference)
+        statementDate = try container.decodeIfPresent(Date.self, forKey: .statementDate)
+        statementBalance = try container.decodeIfPresent(Money.self, forKey: .statementBalance)
+        clearedTransactionIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .clearedTransactionIDs) ?? []
+        didRecordAdjustment = try container.decodeIfPresent(Bool.self, forKey: .didRecordAdjustment) ?? false
+    }
 }
 
 func financeConvertedMinorUnits(

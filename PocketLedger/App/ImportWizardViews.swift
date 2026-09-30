@@ -463,6 +463,11 @@ struct ImportWizardView: View {
                     )
                     var importedData = built.data
                     applyRememberedAccountRules(to: &importedData, rules: buildInput.rememberedRules)
+                    ImportRuleStore.applyingCategoryRules(
+                        buildInput.rememberedRules.categoryRules,
+                        to: &importedData,
+                        existingCategories: buildInput.existing.categories
+                    )
                     built = FinanceImportResult(
                         data: importedData,
                         importedRows: built.importedRows,
@@ -607,6 +612,7 @@ struct ImportWizardView: View {
             explicitFields: draft.explicitMappingFields,
             columns: draft.selectedTable.columns,
             accountRules: rules,
+            categoryRules: draft.explicitCategoryRules,
             in: draft.rememberedRules
         )
     }
@@ -1581,7 +1587,7 @@ private struct ImportWizardReviewList: View {
             summarySection(data: data)
             transactionSection(data: data, context: context)
             Section("Remembered decisions") {
-                Toggle("Remember explicit mappings and account edits", isOn: $rememberRules)
+                Toggle("Remember explicit mappings and account/category edits", isOn: $rememberRules)
                 Text("Only changes made in this wizard are saved locally. On-device classifications and transaction data are never stored as rules.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

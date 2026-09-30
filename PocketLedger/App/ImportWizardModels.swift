@@ -140,19 +140,37 @@ struct ImportAccountRule: Codable, Equatable {
     var isArchived: Bool?
 }
 
+struct ImportCategoryRule: Codable, Equatable {
+    let sourcePath: String
+    let targetCategoryID: UUID
+}
+
 struct ImportStoredRules: Codable, Equatable {
     let version: Int
     var columnMappings: [ImportColumnMappingRule]
     var accountRules: [ImportAccountRule]
+    var categoryRules: [ImportCategoryRule]
 
     init(
         version: Int = ImportRuleStore.currentVersion,
         columnMappings: [ImportColumnMappingRule] = [],
-        accountRules: [ImportAccountRule] = []
+        accountRules: [ImportAccountRule] = [],
+        categoryRules: [ImportCategoryRule] = []
     ) {
         self.version = version
         self.columnMappings = columnMappings
         self.accountRules = accountRules
+        self.categoryRules = categoryRules
+    }
+
+    private enum CodingKeys: String, CodingKey { case version, columnMappings, accountRules, categoryRules }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        columnMappings = try container.decodeIfPresent([ImportColumnMappingRule].self, forKey: .columnMappings) ?? []
+        accountRules = try container.decodeIfPresent([ImportAccountRule].self, forKey: .accountRules) ?? []
+        categoryRules = try container.decodeIfPresent([ImportCategoryRule].self, forKey: .categoryRules) ?? []
     }
 }
 
@@ -227,6 +245,30 @@ enum ImportRuleStore {
         return rules.accountRules.first(where: { $0.key == key })
     }
 
+    static func applyingCategoryRules(
+        _ rules: [ImportCategoryRule],
+        to data: inout FinanceData,
+        existingCategories: [LedgerCategory]
+    ) {
+        guard !rules.isEmpty else { return }
+        let index = LedgerIndex(data: data)
+        let categoriesByPath = Dictionary(grouping: data.categories) {
+            normalized(index.categoryPath(for: $0.id))
+        }
+        for rule in rules {
+            guard let matches = categoriesByPath[rule.sourcePath], matches.count == 1,
+                  let source = matches.first,
+                  existingCategories.contains(where: { $0.id == rule.targetCategoryID && !$0.isArchived }) else { continue }
+            for transactionIndex in data.transactions.indices where data.transactions[transactionIndex].categoryID == source.id {
+                data.transactions[transactionIndex].categoryID = rule.targetCategoryID
+            }
+            for categoryIndex in data.categories.indices where data.categories[categoryIndex].parentID == source.id {
+                data.categories[categoryIndex].parentID = rule.targetCategoryID
+            }
+            data.categories.removeAll { $0.id == source.id }
+        }
+    }
+
     static func accountSuggestion(
         for name: String,
         in rules: ImportStoredRules
@@ -241,6 +283,7 @@ enum ImportRuleStore {
         explicitFields: Set<ImportField>? = nil,
         columns: [String],
         accountRules: [ImportAccountRule],
+        categoryRules: [ImportCategoryRule] = [],
         in rules: ImportStoredRules
     ) -> ImportStoredRules {
         let signature = columnSignature(columns)
@@ -263,7 +306,8 @@ enum ImportRuleStore {
 
         var updated = ImportStoredRules(
             columnMappings: rules.columnMappings,
-            accountRules: rules.accountRules
+            accountRules: rules.accountRules,
+            categoryRules: rules.categoryRules
         )
         if explicitFields == nil
             || !storedMapping.mappings.isEmpty
@@ -277,6 +321,11 @@ enum ImportRuleStore {
             updated.accountRules.append(rule)
         }
         updated.accountRules.sort { $0.key < $1.key }
+        for rule in categoryRules {
+            updated.categoryRules.removeAll { $0.sourcePath == rule.sourcePath }
+            updated.categoryRules.append(rule)
+        }
+        updated.categoryRules.sort { $0.sourcePath < $1.sourcePath }
         return updated
     }
 }
@@ -366,6 +415,7 @@ struct ImportDraft {
     var explicitAccountRuleKeys: Set<String> = []
     var explicitTypeCurrencyRuleKeys: Set<String> = []
     var explicitArchiveRuleKeys: Set<String> = []
+    var explicitCategoryRules: [ImportCategoryRule] = []
 
     init(document: ImportedDocument, existing: FinanceData, rememberedRules: ImportStoredRules) {
         self.document = document
@@ -600,6 +650,13 @@ struct ImportDraft {
             guard !selectedCategoryIDs.contains(target.id) else {
                 throw ImportBulkMutationError.targetIsSelected
             }
+            let categoryIndex = LedgerIndex(data: data)
+            explicitCategoryRules.append(contentsOf: selected.map {
+                ImportCategoryRule(
+                    sourcePath: ImportRuleStore.normalized(categoryIndex.categoryPath(for: $0.id)),
+                    targetCategoryID: target.id
+                )
+            })
             var transactionCount = 0
             for index in data.transactions.indices {
                 guard let categoryID = data.transactions[index].categoryID,

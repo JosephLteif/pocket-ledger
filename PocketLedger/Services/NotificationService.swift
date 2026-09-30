@@ -4,11 +4,18 @@ import UserNotifications
 enum NotificationService {
     private static let scheduledPrefix = "pocket-ledger-scheduled-"
     private static let loanPrefix = "pocket-ledger-loan-"
+    private static let budgetPrefix = "pocket-ledger-budget-"
     private static let dailyTransactionReminderIdentifier = "pocket-ledger-daily-transaction-reminder"
+    private static let backupReminderIdentifier = "pocket-ledger-full-backup-reminder"
+    private static let budgetAlertMonthKey = "pocketLedger.budgetAlertMonth"
+    private static let budgetAlertSentKey = "pocketLedger.budgetAlertSent"
     static let globalReminderKey = "pocketLedger.scheduledReminderTiming"
     static let scheduledLiveActivityEnabledKey = "pocketLedger.scheduledLiveActivityEnabled"
     static let dailyTransactionReminderEnabledKey = "pocketLedger.dailyTransactionReminderEnabled"
     static let dailyTransactionReminderMinutesKey = "pocketLedger.dailyTransactionReminderMinutes"
+    static let budgetThresholdAlertsEnabledKey = "pocketLedger.budgetThresholdAlertsEnabled"
+    static let backupReminderEnabledKey = "pocketLedger.fullBackupReminderEnabled"
+    static let lastFullBackupDateKey = "pocketLedger.lastFullBackupDate"
     static let dailyTransactionReminderDefaultMinutes = 20 * 60
 
     @MainActor
@@ -68,6 +75,138 @@ enum NotificationService {
         UNUserNotificationCenter.current().removePendingNotificationRequests(
             withIdentifiers: [dailyTransactionReminderIdentifier]
         )
+    }
+
+    static func enableFullBackupReminder(lastBackupAt: Date?) async throws {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            guard try await center.requestAuthorization(options: [.alert, .sound]) else {
+                throw DailyReminderError.permissionDenied
+            }
+        case .denied:
+            throw DailyReminderError.permissionDenied
+        case .authorized, .provisional, .ephemeral:
+            break
+        @unknown default:
+            throw DailyReminderError.authorizationUnavailable
+        }
+        try await scheduleFullBackupReminder(lastBackupAt: lastBackupAt)
+    }
+
+    static func refreshFullBackupReminderIfEnabled(lastBackupAt: Date?) async {
+        guard UserDefaults.standard.bool(forKey: backupReminderEnabledKey) else { return }
+        try? await scheduleFullBackupReminder(lastBackupAt: lastBackupAt)
+    }
+
+    static func disableFullBackupReminder() {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [backupReminderIdentifier])
+        center.removeDeliveredNotifications(withIdentifiers: [backupReminderIdentifier])
+        UserDefaults.standard.set(false, forKey: backupReminderEnabledKey)
+    }
+
+    private static func scheduleFullBackupReminder(lastBackupAt: Date?) async throws {
+        let calendar = Calendar.current
+        let baseline = lastBackupAt ?? .now
+        var reminderDate = calendar.date(byAdding: .day, value: 90, to: baseline) ?? .now.addingTimeInterval(90 * 24 * 60 * 60)
+        if reminderDate <= .now {
+            reminderDate = calendar.date(byAdding: .day, value: 1, to: .now) ?? .now.addingTimeInterval(24 * 60 * 60)
+        }
+        let content = UNMutableNotificationContent()
+        content.title = "Time to back up Pocket Ledger"
+        content.body = "Export a fresh full backup to keep a recoverable copy of your ledger."
+        content.sound = .default
+        let trigger = UNCalendarNotificationTrigger(
+            dateMatching: calendar.dateComponents([.year, .month, .day, .hour, .minute], from: reminderDate),
+            repeats: false
+        )
+        let request = UNNotificationRequest(
+            identifier: backupReminderIdentifier,
+            content: content,
+            trigger: trigger
+        )
+        try await UNUserNotificationCenter.current().add(request)
+    }
+
+    static func enableBudgetThresholdAlerts() async throws {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            guard try await center.requestAuthorization(options: [.alert, .sound]) else {
+                throw DailyReminderError.permissionDenied
+            }
+        case .denied:
+            throw DailyReminderError.permissionDenied
+        case .authorized, .provisional, .ephemeral:
+            break
+        @unknown default:
+            throw DailyReminderError.authorizationUnavailable
+        }
+        UserDefaults.standard.set(true, forKey: budgetThresholdAlertsEnabledKey)
+    }
+
+    static func disableBudgetThresholdAlerts() {
+        let center = UNUserNotificationCenter.current()
+        center.getPendingNotificationRequests { requests in
+            center.removePendingNotificationRequests(
+                withIdentifiers: requests.map(\.identifier).filter { $0.hasPrefix(budgetPrefix) }
+            )
+        }
+        UserDefaults.standard.set(false, forKey: budgetThresholdAlertsEnabledKey)
+    }
+
+    static func notifyBudgetThresholdCrossings(from oldData: FinanceData, to newData: FinanceData) async {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: budgetThresholdAlertsEnabledKey),
+              oldData.transactions != newData.transactions,
+              let month = Calendar.current.dateInterval(of: .month, for: .now) else { return }
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard [.authorized, .provisional, .ephemeral].contains(settings.authorizationStatus) else { return }
+
+        let monthKey = "\(Calendar.current.component(.year, from: month.start))-\(Calendar.current.component(.month, from: month.start))"
+        var sent = defaults.string(forKey: budgetAlertMonthKey) == monthKey
+            ? Set(defaults.stringArray(forKey: budgetAlertSentKey) ?? [])
+            : []
+        let oldIndex = LedgerIndex(data: oldData)
+        let newIndex = LedgerIndex(data: newData)
+
+        for budget in newData.budgets {
+            guard oldData.budgets.contains(where: { $0.id == budget.id && $0 == budget }) else { continue }
+            let allowance = financeBudgetAllowance(budget, in: newData, interval: month, using: newIndex).minorUnits
+            guard allowance > 0 else { continue }
+            let previousSpent = financeBudgetSpent(budget, in: oldData, interval: month, using: oldIndex).minorUnits
+            let currentSpent = financeBudgetSpent(budget, in: newData, interval: month, using: newIndex).minorUnits
+
+            for threshold in [80, 100] {
+                let marker = "\(budget.id.uuidString)-\(threshold)"
+                guard !sent.contains(marker),
+                      Decimal(previousSpent) * 100 < Decimal(allowance) * Decimal(threshold),
+                      Decimal(currentSpent) * 100 >= Decimal(allowance) * Decimal(threshold) else { continue }
+                let content = UNMutableNotificationContent()
+                content.title = threshold == 100 ? "Budget limit reached" : "Budget getting close"
+                content.body = threshold == 100
+                    ? "One of your budgets has reached its limit."
+                    : "One of your budgets has used 80% of its limit."
+                content.sound = .default
+                let request = UNNotificationRequest(
+                    identifier: "pocket-ledger-budget-\(monthKey)-\(marker)",
+                    content: content,
+                    trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+                )
+                do {
+                    try await center.add(request)
+                    sent.insert(marker)
+                } catch {
+                    continue
+                }
+            }
+        }
+        defaults.set(monthKey, forKey: budgetAlertMonthKey)
+        defaults.set(Array(sent), forKey: budgetAlertSentKey)
     }
 
     static func requestScheduledTransactionNotifications(

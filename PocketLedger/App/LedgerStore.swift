@@ -1450,6 +1450,111 @@ final class LedgerStore: ObservableObject {
     }
 
     @discardableResult
+    func reconcileAccountStatement(
+        accountID: UUID,
+        statementDate: Date,
+        statementBalance: Money,
+        selectedTransactionIDs: Set<UUID>,
+        recordAdjustment: Bool
+    ) -> Bool {
+        guard let account = account(with: accountID), account.currency == statementBalance.currency else {
+            lastActionStatus = "Reconciliation failed: currency mismatch."
+            return false
+        }
+        guard !isManagedLegacyLoanAccount(accountID) else {
+            lastActionStatus = "Reconcile the managed loan balance from Loans."
+            return false
+        }
+
+        let calendar = Calendar.current
+        let normalizedDate = calendar.startOfDay(for: statementDate)
+        guard normalizedDate <= calendar.startOfDay(for: .now) else {
+            lastActionStatus = "The statement date cannot be in the future."
+            return false
+        }
+        let previous = data.reconciliations[accountID]
+        if let previousStatementDate = previous?.statementDate,
+           normalizedDate < calendar.startOfDay(for: previousStatementDate) {
+            lastActionStatus = "Choose a date on or after the previous statement."
+            return false
+        }
+
+        let dayEnd = calendar.dateInterval(of: .day, for: normalizedDate)?.end ?? .distantFuture
+        let eligibleTransactionIDs = Set(data.transactions.compactMap { transaction -> UUID? in
+            guard transaction.date < dayEnd,
+                  (transaction.outflows + transaction.inflows).contains(where: { $0.accountID == accountID }) else { return nil }
+            return transaction.id
+        })
+        let priorClearedIDs = previous?.clearedTransactionIDs ?? []
+        let newlySelectedIDs = eligibleTransactionIDs.subtracting(priorClearedIDs)
+        guard selectedTransactionIDs.isSubset(of: newlySelectedIDs) else {
+            lastActionStatus = "Some selected transactions are no longer available for this statement."
+            return false
+        }
+
+        let clearedIDs = priorClearedIDs.union(selectedTransactionIDs)
+        let balanceFromClearedTransactions = data.transactions
+            .filter { clearedIDs.contains($0.id) }
+            .reduce(account.openingBalance.minorUnits) { total, transaction in
+                let inflows = transaction.inflows
+                    .filter { $0.accountID == accountID }
+                    .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+                let outflows = transaction.outflows
+                    .filter { $0.accountID == accountID }
+                    .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+                return total + inflows - outflows
+            }
+        let difference = statementBalance.minorUnits - balanceFromClearedTransactions
+        var updated = data
+        var recordedIDs = clearedIDs
+
+        if recordAdjustment && difference != 0 {
+            let categoryID = Self.balanceAdjustmentCategoryID
+            if let categoryIndex = updated.categories.firstIndex(where: { $0.id == categoryID }) {
+                updated.categories[categoryIndex].isArchived = false
+            } else {
+                updated.categories.append(
+                    LedgerCategory(
+                        id: categoryID,
+                        name: "Balance adjustments",
+                        systemImage: "arrow.left.arrow.right",
+                        includeInTotals: false
+                    )
+                )
+            }
+            let adjustment = LedgerTransaction(
+                date: normalizedDate,
+                note: "Statement reconciliation adjustment",
+                kind: difference > 0 ? .income : .expense,
+                categoryID: categoryID,
+                outflows: difference < 0
+                    ? [MoneyMovement(accountID: account.id, money: Money(currency: account.currency, minorUnits: Swift.abs(difference)))]
+                    : [],
+                inflows: difference > 0
+                    ? [MoneyMovement(accountID: account.id, money: Money(currency: account.currency, minorUnits: difference))]
+                    : []
+            )
+            updated.transactions.append(adjustment)
+            recordedIDs.insert(adjustment.id)
+        }
+
+        updated.reconciliations[accountID] = AccountReconciliation(
+            lastReconciledAt: .now,
+            difference: Money(currency: account.currency, minorUnits: difference),
+            statementDate: normalizedDate,
+            statementBalance: statementBalance,
+            clearedTransactionIDs: recordedIDs,
+            didRecordAdjustment: recordAdjustment && difference != 0
+        )
+        return persist(
+            updated,
+            successMessage: recordAdjustment && difference != 0
+                ? "Statement reconciled with an adjustment"
+                : "Statement reconciliation saved"
+        )
+    }
+
+    @discardableResult
     func updateAccountBalance(
         accountID: UUID,
         targetBalance: Money,
@@ -1521,7 +1626,8 @@ final class LedgerStore: ObservableObject {
         }
         updated.reconciliations[accountID] = AccountReconciliation(
             lastReconciledAt: .now,
-            difference: Money(currency: account.currency, minorUnits: difference)
+            difference: Money(currency: account.currency, minorUnits: difference),
+            didRecordAdjustment: recordAsTransaction
         )
 
         return persist(
@@ -1670,10 +1776,33 @@ final class LedgerStore: ObservableObject {
 
     @discardableResult
     private func persist(
-        _ updated: FinanceData,
+        _ proposed: FinanceData,
         successMessage: String,
         allowingCorruptedReplacement: Bool = false
     ) -> Bool {
+        var updated = proposed
+        if data.transactions != updated.transactions {
+            let oldTransactions = Dictionary(uniqueKeysWithValues: data.transactions.map { ($0.id, $0) })
+            let newTransactions = Dictionary(uniqueKeysWithValues: updated.transactions.map { ($0.id, $0) })
+            let allTransactionIDs = Set(oldTransactions.keys).union(newTransactions.keys)
+            let changedMovementIDs = Set(allTransactionIDs.filter { id in
+                guard let old = oldTransactions[id], let new = newTransactions[id] else { return true }
+                return old.date != new.date || old.outflows != new.outflows || old.inflows != new.inflows
+            })
+            if !changedMovementIDs.isEmpty {
+                for (accountID, reconciliation) in data.reconciliations where
+                    !reconciliation.clearedTransactionIDs.isDisjoint(with: changedMovementIDs)
+                    && updated.reconciliations[accountID] == reconciliation {
+                    updated.reconciliations.removeValue(forKey: accountID)
+                }
+            }
+        }
+        let newAccountsByID = Dictionary(uniqueKeysWithValues: updated.accounts.map { ($0.id, $0) })
+        for account in data.accounts where
+            account.openingBalance != newAccountsByID[account.id]?.openingBalance
+            && updated.reconciliations[account.id] == data.reconciliations[account.id] {
+            updated.reconciliations.removeValue(forKey: account.id)
+        }
         guard data != updated else {
             lastActionStatus = successMessage
             return true
@@ -1681,6 +1810,8 @@ final class LedgerStore: ObservableObject {
 
         let schedulesChanged = data.scheduledTransactions != updated.scheduledTransactions
         let loansChanged = data.loans != updated.loans
+        let transactionsChanged = data.transactions != updated.transactions
+        let previousData = data
         let shortcutInputsChanged = data.accounts != updated.accounts
             || data.categories != updated.categories
             || data.templates != updated.templates
@@ -1727,6 +1858,12 @@ final class LedgerStore: ObservableObject {
             let loans = updated.loans
             Task {
                 await NotificationService.refreshLoanNotifications(loans: loans)
+            }
+        }
+        if transactionsChanged {
+            let committedData = updated
+            Task {
+                await NotificationService.notifyBudgetThresholdCrossings(from: previousData, to: committedData)
             }
         }
         lastActionStatus = successMessage

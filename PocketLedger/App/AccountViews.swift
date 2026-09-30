@@ -84,6 +84,7 @@ struct AccountDetailView: View {
 
     @State private var isPresentingAccountEditor = false
     @State private var isPresentingBalanceEditor = false
+    @State private var isPresentingReconciliation = false
     @State private var editingTransaction: LedgerTransaction?
     @State private var transactionToTemplate: LedgerTransaction?
     @State private var transactionDeletion = TransactionDeletionState()
@@ -124,6 +125,11 @@ struct AccountDetailView: View {
             .sheet(isPresented: $isPresentingBalanceEditor) {
                 if let account {
                     AccountBalanceEditor(store: store, account: account)
+                }
+            }
+            .sheet(isPresented: $isPresentingReconciliation) {
+                if let account {
+                    AccountReconciliationEditor(store: store, account: account)
                 }
             }
             .sheet(item: $editingTransaction) { transaction in
@@ -366,7 +372,9 @@ struct AccountDetailView: View {
                     if reconciliation.difference.minorUnits == 0 {
                         Text("Reconciled \(reconciliation.lastReconciledAt.formatted(.dateTime.month(.abbreviated).day()))")
                     } else {
-                        Text("Adjusted by")
+                        Text(reconciliation.statementDate != nil && !reconciliation.didRecordAdjustment
+                            ? "Statement difference"
+                            : "Adjusted by")
                         ProtectedAmountText(
                             value: Money(
                                 currency: account.currency,
@@ -388,15 +396,27 @@ struct AccountDetailView: View {
                     .foregroundStyle(PocketLedgerTheme.textTertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                Button {
-                    isPresentingBalanceEditor = true
-                } label: {
-                    Label("Adjust current balance", systemImage: "slider.horizontal.3")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
+                VStack(spacing: 8) {
+                    Button {
+                        isPresentingReconciliation = true
+                    } label: {
+                        Label("Reconcile statement", systemImage: "checkmark.circle")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(PocketLedgerTheme.accent)
+
+                    Button {
+                        isPresentingBalanceEditor = true
+                    } label: {
+                        Label("Adjust current balance", systemImage: "slider.horizontal.3")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                    .tint(PocketLedgerTheme.accent)
                 }
-                .buttonStyle(.glassProminent)
-                .tint(PocketLedgerTheme.accent)
             }
         }
         .padding(20)
@@ -510,6 +530,205 @@ private struct AccountBalanceEditor: View {
             return
         }
 
+        dismiss()
+    }
+}
+
+@MainActor
+private struct AccountReconciliationEditor: View {
+    @ObservedObject var store: LedgerStore
+    let account: Account
+
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
+    @State private var statementDate = Calendar.current.startOfDay(for: .now)
+    @State private var statementBalanceText: String
+    @State private var selectedTransactionIDs: Set<UUID>
+    @State private var isConfirmingDifference = false
+    @State private var errorMessage: String?
+
+    init(store: LedgerStore, account: Account) {
+        _store = ObservedObject(wrappedValue: store)
+        self.account = account
+        let alreadyCleared = store.reconciliation(for: account.id)?.clearedTransactionIDs ?? []
+        let dateEnd = Calendar.current.dateInterval(of: .day, for: .now)?.end ?? .distantFuture
+        let selectedIDs = Set(store.data.transactions.compactMap { transaction in
+            guard transaction.date < dateEnd,
+                  !alreadyCleared.contains(transaction.id),
+                  (transaction.outflows + transaction.inflows).contains(where: { $0.accountID == account.id }) else { return nil }
+            return transaction.id
+        })
+        _selectedTransactionIDs = State(initialValue: selectedIDs)
+        let includedIDs = alreadyCleared.union(selectedIDs)
+        let currentStatementBalance = store.data.transactions
+            .filter { $0.date < dateEnd && includedIDs.contains($0.id) }
+            .reduce(account.openingBalance.minorUnits) { total, transaction in
+                let inflows = transaction.inflows.filter { $0.accountID == account.id }
+                    .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+                let outflows = transaction.outflows.filter { $0.accountID == account.id }
+                    .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+                return total + inflows - outflows
+            }
+        let amount = Decimal(currentStatementBalance) / Decimal(account.currency.minorUnitScale)
+        _statementBalanceText = State(initialValue: NSDecimalNumber(decimal: amount).stringValue)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Statement") {
+                    DatePicker("Statement date", selection: $statementDate, in: minimumDate ... .now, displayedComponents: .date)
+                    CurrencyInputField("Closing balance", text: $statementBalanceText, currency: account.currency)
+                    Text("Select the transactions that appear on this statement. Pocket Ledger keeps this record on this device.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    LabeledContent("Matched balance") {
+                        ProtectedAmountText(value: calculatedBalance.formatted, isRevealed: areBalancesRevealed)
+                    }
+                    LabeledContent("Difference") {
+                        ProtectedAmountText(value: difference.formatted, isRevealed: areBalancesRevealed)
+                    }
+                } header: {
+                    Text("Reconciliation")
+                } footer: {
+                    Text("A positive difference means the statement is higher than the selected ledger transactions.")
+                }
+
+                Section("Transactions") {
+                    if eligibleTransactions.isEmpty {
+                        Text("No unmatched transactions for this date.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(eligibleTransactions) { transaction in
+                            Toggle(isOn: selectionBinding(for: transaction.id)) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(transaction.note.isEmpty ? store.categoryPath(for: transaction.categoryID) : transaction.note)
+                                        .lineLimit(1)
+                                    HStack {
+                                        Text(transaction.date.formatted(date: .abbreviated, time: .omitted))
+                                        Spacer()
+                                        ProtectedAmountText(
+                                            value: movementAmount(for: transaction).formatted,
+                                            isRevealed: areBalancesRevealed
+                                        )
+                                    }
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .pocketListSurface()
+            .navigationTitle("Reconcile statement")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: save)
+                        .disabled(Money.parse(statementBalanceText, currency: account.currency) == nil)
+                }
+            }
+            .confirmationDialog("Statement and selected transactions differ", isPresented: $isConfirmingDifference, titleVisibility: .visible) {
+                Button("Record adjustment") { complete(recordAdjustment: true) }
+                Button("Save without adjustment") { complete(recordAdjustment: false) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("You can record the difference as a dated balance-adjustment transaction or keep it for review.")
+            }
+            .errorMessageAlert(title: "Reconciliation not saved", message: $errorMessage)
+            .onChange(of: statementDate) { _, _ in
+                selectedTransactionIDs = Set(eligibleTransactions.map(\.id))
+            }
+        }
+    }
+
+    private var minimumDate: Date {
+        store.reconciliation(for: account.id)?.statementDate ?? .distantPast
+    }
+
+    private var eligibleTransactions: [LedgerTransaction] {
+        let alreadyCleared = store.reconciliation(for: account.id)?.clearedTransactionIDs ?? []
+        let dateEnd = Calendar.current.dateInterval(of: .day, for: statementDate)?.end ?? .distantFuture
+        return store.data.transactions
+            .filter { transaction in
+                transaction.date < dateEnd
+                    && !alreadyCleared.contains(transaction.id)
+                    && (transaction.outflows + transaction.inflows).contains(where: { $0.accountID == account.id })
+            }
+            .sorted { $0.date > $1.date }
+    }
+
+    private var calculatedBalance: Money {
+        let priorIDs = store.reconciliation(for: account.id)?.clearedTransactionIDs ?? []
+        let includedIDs = priorIDs.union(selectedTransactionIDs)
+        let total = store.data.transactions
+            .filter { includedIDs.contains($0.id) }
+            .reduce(account.openingBalance.minorUnits) { total, transaction in
+                let inflows = transaction.inflows.filter { $0.accountID == account.id }
+                    .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+                let outflows = transaction.outflows.filter { $0.accountID == account.id }
+                    .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+                return total + inflows - outflows
+            }
+        return Money(currency: account.currency, minorUnits: total)
+    }
+
+    private var difference: Money {
+        guard let statementBalance = Money.parse(statementBalanceText, currency: account.currency) else {
+            return Money(currency: account.currency, minorUnits: 0)
+        }
+        return Money(currency: account.currency, minorUnits: statementBalance.minorUnits - calculatedBalance.minorUnits)
+    }
+
+    private func movementAmount(for transaction: LedgerTransaction) -> Money {
+        let inflows = transaction.inflows.filter { $0.accountID == account.id }
+            .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+        let outflows = transaction.outflows.filter { $0.accountID == account.id }
+            .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+        return Money(currency: account.currency, minorUnits: inflows - outflows)
+    }
+
+    private func selectionBinding(for id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { selectedTransactionIDs.contains(id) },
+            set: { isSelected in
+                if isSelected { selectedTransactionIDs.insert(id) }
+                else { selectedTransactionIDs.remove(id) }
+            }
+        )
+    }
+
+    private func save() {
+        guard Money.parse(statementBalanceText, currency: account.currency) != nil else {
+            errorMessage = "Enter a valid balance in \(account.currency.rawValue)."
+            return
+        }
+        if difference.minorUnits != 0 {
+            isConfirmingDifference = true
+        } else {
+            complete(recordAdjustment: false)
+        }
+    }
+
+    private func complete(recordAdjustment: Bool) {
+        guard let statementBalance = Money.parse(statementBalanceText, currency: account.currency) else { return }
+        guard store.reconcileAccountStatement(
+            accountID: account.id,
+            statementDate: statementDate,
+            statementBalance: statementBalance,
+            selectedTransactionIDs: selectedTransactionIDs,
+            recordAdjustment: recordAdjustment
+        ) else {
+            errorMessage = store.lastActionStatus ?? "The statement could not be saved."
+            return
+        }
         dismiss()
     }
 }

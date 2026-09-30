@@ -552,7 +552,7 @@ private struct AccountReconciliationEditor: View {
         self.account = account
         let alreadyCleared = store.reconciliation(for: account.id)?.clearedTransactionIDs ?? []
         let dateEnd = Calendar.current.dateInterval(of: .day, for: .now)?.end ?? .distantFuture
-        let selectedIDs = Set(store.data.transactions.compactMap { transaction in
+        let selectedIDs = Set(store.data.transactions.compactMap { transaction -> UUID? in
             guard transaction.date < dateEnd,
                   !alreadyCleared.contains(transaction.id),
                   (transaction.outflows + transaction.inflows).contains(where: { $0.accountID == account.id }) else { return nil }

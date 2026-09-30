@@ -8,6 +8,7 @@ enum FinanceTransactionValidationError: LocalizedError, Equatable {
     case nonPositiveMovement
     case missingCategory
     case archivedCategory
+    case invalidCategoryAllocations
     case invalidAmountDue
     case invalidChange
     case missingAttachment
@@ -31,6 +32,8 @@ enum FinanceTransactionValidationError: LocalizedError, Equatable {
             return "Choose an existing category or leave the expense uncategorized."
         case .archivedCategory:
             return "Choose an active category for this transaction."
+        case .invalidCategoryAllocations:
+            return "Category split amounts must be positive, use one currency, and equal the transaction's net account movements."
         case .invalidAmountDue:
             return "The bill total must be greater than zero."
         case .invalidChange:
@@ -95,9 +98,47 @@ enum FinanceTransactionValidator {
                     return .archivedCategory
                 }
             }
+            if let allocations = transaction.categoryAllocations {
+                guard allocations.count > 1,
+                      let currency = allocations.first?.amount.currency,
+                      allocations.allSatisfy({ $0.amount.currency == currency && $0.amount.minorUnits > 0 }),
+                      Set(allocations.map(\.categoryID)).count == allocations.count,
+                      allocations.allSatisfy({ allocation in
+                          guard let categoryID = allocation.categoryID else { return true }
+                          guard let category = data.categories.first(where: { $0.id == categoryID }) else {
+                              return false
+                          }
+                          return allowArchivedReferences || !category.isArchived
+                      }) else {
+                    return .invalidCategoryAllocations
+                }
+
+                func movementTotal(_ movements: [MoneyMovement]) -> Int64? {
+                    var total = Int64.zero
+                    for movement in movements {
+                        guard let converted = financeConvertedMinorUnits(
+                            movement.money,
+                            to: currency,
+                            using: transaction.exchangeRate
+                        ) else {
+                            return nil
+                        }
+                        total += converted
+                    }
+                    return total
+                }
+                guard let outflowTotal = movementTotal(transaction.outflows),
+                      let inflowTotal = movementTotal(transaction.inflows),
+                      allocations.reduce(Int64.zero, { $0 + $1.amount.minorUnits })
+                        == max(outflowTotal - inflowTotal, 0) else {
+                    return .invalidCategoryAllocations
+                }
+            }
         case .income:
+            guard transaction.categoryAllocations == nil else { return .invalidCategoryAllocations }
             guard !transaction.inflows.isEmpty else { return .noMovements }
         case .transfer:
+            guard transaction.categoryAllocations == nil else { return .invalidCategoryAllocations }
             guard transaction.loanID != nil
                     || (!transaction.outflows.isEmpty && !transaction.inflows.isEmpty) else {
                 return .noMovements

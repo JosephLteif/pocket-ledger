@@ -117,6 +117,17 @@ struct BudgetsView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.positive)
             HStack {
+                Text("Scheduled through month-end")
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                Spacer()
+                ProtectedAmountText(
+                    value: summary.scheduled.formatted,
+                    isRevealed: areBalancesRevealed
+                )
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            }
+            .font(.caption.monospacedDigit())
+            HStack {
                 ProtectedAmountText(
                     value: "Projected \(summary.projected.formatted)",
                     isRevealed: areBalancesRevealed

@@ -8,7 +8,10 @@ struct ContentView: View {
     @StateObject private var security = AppSecurityService()
     @StateObject private var intentSearchRouter = FinanceIntentSearchRouter.shared
     @StateObject private var visualBillScanRouter = VisualBillScanRouter.shared
+    @StateObject private var scheduledNotificationActionRouter = ScheduledNotificationActionRouter.shared
     @State private var addAction: AddAction?
+    @State private var scheduledActionStatus: String?
+    @State private var scheduledActionUndoReceipt: ScheduleRecordUndoReceipt?
     @State private var searchText = ""
     @State private var isSearchPresented = false
     @State private var tabBeforeSearch = AppTab.overview
@@ -38,7 +41,10 @@ struct ContentView: View {
                 security.refresh()
                 store.reload()
                 openPendingQuickExpense()
-                store.processDueScheduledTransactions()
+                if mayProcessLedgerActions {
+                    processPendingScheduledRecordAction()
+                    store.processDueScheduledTransactions()
+                }
                 let schedules = store.data.scheduledTransactions
                 let loans = store.data.loans
                 Task {
@@ -69,6 +75,12 @@ struct ContentView: View {
         }
         .onChange(of: isUnlocked) { _, _ in
             openPendingVisualBillScan()
+            guard mayProcessLedgerActions else { return }
+            processPendingScheduledRecordAction()
+            store.processDueScheduledTransactions()
+        }
+        .onChange(of: scheduledNotificationActionRouter.pendingRequest?.id) { _, _ in
+            processPendingScheduledRecordAction()
         }
         .task {
             areBalancesRevealed = false
@@ -79,7 +91,10 @@ struct ContentView: View {
             }
             openPendingQuickExpense()
             openPendingVisualBillScan()
-            store.processDueScheduledTransactions()
+            if mayProcessLedgerActions {
+                processPendingScheduledRecordAction()
+                store.processDueScheduledTransactions()
+            }
             await NotificationService.refreshScheduledTransactionNotifications(
                 schedules: store.data.scheduledTransactions
             )
@@ -161,6 +176,39 @@ struct ContentView: View {
         }
         selectedTabBinding.wrappedValue = .transactions
         addAction = .visualBillScan(id: request.id, imageData: request.imageData)
+    }
+
+    private var mayProcessLedgerActions: Bool {
+        !security.isPasscodeEnabled || isUnlocked
+    }
+
+    private func processPendingScheduledRecordAction() {
+        guard mayProcessLedgerActions,
+              let request = scheduledNotificationActionRouter.consumePendingRequest(),
+              let schedule = store.data.scheduledTransactions.first(where: { $0.id == request.scheduleID }),
+              schedule.isEnabled,
+              schedule.nextRunDate == request.expectedNextRunDate,
+              NotificationService.scheduleFingerprint(schedule) == request.expectedScheduleFingerprint else {
+            return
+        }
+        guard let receipt = store.recordScheduledTransactionNow(
+            id: request.scheduleID,
+            expectedNextRunDate: request.expectedNextRunDate
+        ) else {
+            scheduledActionUndoReceipt = nil
+            scheduledActionStatus = store.lastActionStatus ?? "The scheduled transaction could not be recorded."
+            return
+        }
+        scheduledActionUndoReceipt = receipt
+        scheduledActionStatus = "Scheduled transaction recorded"
+    }
+
+    private func undoScheduledNotificationRecord() {
+        guard let receipt = scheduledActionUndoReceipt else { return }
+        let didUndo = store.undoScheduledTransactionRecord(receipt)
+        scheduledActionUndoReceipt = nil
+        scheduledActionStatus = store.lastActionStatus
+            ?? (didUndo ? "Scheduled transaction undone" : "Undo is no longer available")
     }
 
     private var unlockedContent: some View {
@@ -245,6 +293,33 @@ struct ContentView: View {
             .accessibilityIdentifier("tab-more")
         }
         .tabBarMinimizeBehavior(.onScrollDown)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let scheduledActionStatus {
+                HStack(spacing: 12) {
+                    Text(scheduledActionStatus)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(PocketLedgerTheme.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if scheduledActionUndoReceipt != nil {
+                        Button("Undo", action: undoScheduledNotificationRecord)
+                            .font(.footnote.weight(.semibold))
+                    }
+                    Button {
+                        self.scheduledActionStatus = nil
+                        scheduledActionUndoReceipt = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption.weight(.bold))
+                    }
+                    .accessibilityLabel("Dismiss scheduled transaction status")
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+            }
+        }
         .onChange(of: selectedTabRawValue) { _, rawValue in
             guard rawValue == AppTab.search.rawValue else { return }
             isSearchPresented = true

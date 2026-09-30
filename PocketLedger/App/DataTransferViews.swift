@@ -211,9 +211,27 @@ struct DataTransferView: View {
                 .disabled(isProcessingTransfer)
 
             Button {
+                startBackupExport(protected: true)
+            } label: {
+                Label("Export protected full backup", systemImage: "lock.shield")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glass)
+            .disabled(isProcessingTransfer)
+
+            Button {
                 startJSONBackupExport()
             } label: {
                 Label("Export JSON compatibility backup", systemImage: "doc.text")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glass)
+            .disabled(isProcessingTransfer)
+
+            Button {
+                startJSONBackupExport(protected: true)
+            } label: {
+                Label("Export protected JSON backup", systemImage: "lock.doc")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.glass)
@@ -226,7 +244,7 @@ struct DataTransferView: View {
             .buttonStyle(.glass)
             .disabled(isProcessingTransfer)
 
-            Text("The full backup includes local receipt files. JSON remains available for compatibility, while CSV is useful for spreadsheets and other finance apps.")
+            Text("Protected backups use AES-GCM and an iCloud Keychain key shared with your Apple Account. Restore requires iCloud Keychain on the same account. Plain JSON and full backup exports remain available; CSV stays readable.")
                 .font(.footnote)
                 .foregroundStyle(PocketLedgerTheme.textTertiary)
         }
@@ -381,6 +399,30 @@ struct DataTransferView: View {
                 let prepared = await Task.detached(priority: .userInitiated) {
                     do {
                         let bytes = try Data(contentsOf: url)
+                        if let protected = try ProtectedLedgerBackupCodec.decodeIfProtected(bytes) {
+                            switch protected.contentType {
+                            case .bundle:
+                                let bundle = try LedgerBackupCodec.decodeBundle(protected.data)
+                                return PreparedFileImportResult(result: .success(PreparedFileImport(
+                                    backup: BackupImportCandidate(
+                                        fileName: url.lastPathComponent,
+                                        backup: PocketLedgerBackup(data: bundle.data, exportedAt: bundle.exportedAt),
+                                        attachmentFiles: Dictionary(uniqueKeysWithValues: bundle.attachments.map { ($0.id, $0.data) })
+                                    ),
+                                    document: nil
+                                )))
+                            case .json:
+                                let backup = try LedgerBackupCodec.decode(protected.data)
+                                return PreparedFileImportResult(result: .success(PreparedFileImport(
+                                    backup: BackupImportCandidate(
+                                        fileName: url.lastPathComponent,
+                                        backup: backup,
+                                        attachmentFiles: [:]
+                                    ),
+                                    document: nil
+                                )))
+                            }
+                        }
                         if let bundle = try? LedgerBackupCodec.decodeBundle(bytes) {
                             return PreparedFileImportResult(result: .success(PreparedFileImport(
                                 backup: BackupImportCandidate(
@@ -484,7 +526,7 @@ struct DataTransferView: View {
         }
     }
 
-    private func startBackupExport(continueToReset: Bool = false) {
+    private func startBackupExport(protected: Bool = false, continueToReset: Bool = false) {
         guard !isProcessingTransfer else { return }
         let exportInput = BackupExportInput(
             data: store.data,
@@ -493,7 +535,7 @@ struct DataTransferView: View {
             }
         )
         isProcessingTransfer = true
-        transferProgress = "Building full backup…"
+        transferProgress = protected ? "Protecting full backup…" : "Building full backup…"
         transferToken = UUID()
         let token = transferToken
         transferTask = Task { @MainActor in
@@ -509,9 +551,14 @@ struct DataTransferView: View {
                     for (id, url) in exportInput.attachmentURLs {
                         if let file = try? Data(contentsOf: url) { files[id] = file }
                     }
-                    return PreparedTransferData(result: .success(
-                        try LedgerBackupCodec.encodeBundle(exportInput.data, attachmentData: files)
-                    ))
+                    let bundle = try LedgerBackupCodec.encodeBundle(
+                        exportInput.data,
+                        attachmentData: files
+                    )
+                    let output = try protected
+                        ? ProtectedLedgerBackupCodec.encode(bundle, contentType: .bundle)
+                        : bundle
+                    return PreparedTransferData(result: .success(output))
                 } catch {
                     return PreparedTransferData(result: .failure(error))
                 }
@@ -527,11 +574,11 @@ struct DataTransferView: View {
         }
     }
 
-    private func startJSONBackupExport() {
+    private func startJSONBackupExport(protected: Bool = false) {
         guard !isProcessingTransfer else { return }
         let exportInput = BackupExportInput(data: store.data, attachmentURLs: [])
         isProcessingTransfer = true
-        transferProgress = "Preparing JSON backup…"
+        transferProgress = protected ? "Protecting JSON backup…" : "Preparing JSON backup…"
         transferToken = UUID()
         let token = transferToken
         transferTask = Task { @MainActor in
@@ -543,7 +590,11 @@ struct DataTransferView: View {
             }
             let prepared = await Task.detached(priority: .userInitiated) {
                 do {
-                    return PreparedTransferData(result: .success(try LedgerBackupCodec.encode(exportInput.data)))
+                    let json = try LedgerBackupCodec.encode(exportInput.data)
+                    let output = try protected
+                        ? ProtectedLedgerBackupCodec.encode(json, contentType: .json)
+                        : json
+                    return PreparedTransferData(result: .success(output))
                 } catch {
                     return PreparedTransferData(result: .failure(error))
                 }

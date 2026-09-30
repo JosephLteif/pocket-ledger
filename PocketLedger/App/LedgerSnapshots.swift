@@ -54,11 +54,8 @@ struct MetricsSnapshot {
 
         for transaction in index.sortedTransactions {
             guard interval.contains(transaction.date),
-                  index.categoryMatches(
-                      transaction.categoryID,
-                      selectedCategoryID: selectedCategoryID
-                  ),
-                  index.categoryIncludedInTotals(transaction.categoryID),
+                  index.categoryMatches(transaction, selectedCategoryID: selectedCategoryID),
+                  index.categoryIncludedInTotals(transaction),
                   index.transactionHasIncludedAccount(transaction) else {
                 continue
             }
@@ -74,17 +71,32 @@ struct MetricsSnapshot {
                     exchangeRate: transaction.exchangeRate
                 )
             case .expense:
-                let amount = index.netExpenseAmount(transaction, currency: selectedCurrency)
+                let selectedAllocations = index.categoryAllocationAmounts(
+                    for: transaction,
+                    currency: selectedCurrency
+                ).filter { allocation in
+                    index.categoryIncludedInTotals(allocation.categoryID)
+                        && index.categoryMatches(
+                            allocation.categoryID,
+                            selectedCategoryID: selectedCategoryID
+                        )
+                }
+                let amount = selectedAllocations.reduce(Int64.zero) {
+                    $0 + $1.amount.minorUnits
+                }
                 expenses += amount
                 guard amount > 0 else { continue }
-                let groupID = index.topLevelCategoryID(for: transaction.categoryID)
-                let current = categoryTotals[groupID]
-                    ?? (index.categoryName(for: groupID), 0, 0)
-                categoryTotals[groupID] = (
-                    current.title,
-                    current.amount + amount,
-                    current.count + 1
-                )
+                var countedGroups: Set<UUID?> = []
+                for allocation in selectedAllocations where allocation.amount.minorUnits > 0 {
+                    let groupID = index.topLevelCategoryID(for: allocation.categoryID)
+                    let current = categoryTotals[groupID]
+                        ?? (index.categoryName(for: groupID), 0, 0)
+                    categoryTotals[groupID] = (
+                        current.title,
+                        current.amount + allocation.amount.minorUnits,
+                        current.count + (countedGroups.insert(groupID).inserted ? 1 : 0)
+                    )
+                }
 
                 var accountNetAmounts: [UUID: Int64] = [:]
                 for movement in transaction.outflows {
@@ -201,29 +213,33 @@ struct MetricsSnapshot {
         for transaction in index.sortedTransactions {
             guard transaction.kind == .expense,
                   interval.contains(transaction.date),
-                  index.categoryMatches(
-                      transaction.categoryID,
-                      selectedCategoryID: categoryID
-                  ),
-                  index.categoryIncludedInTotals(transaction.categoryID),
-                  index.transactionHasIncludedAccount(transaction),
-                  let subcategoryID = index.directDescendantCategoryID(
-                      for: transaction.categoryID,
-                      under: categoryID
-                  ) else {
+                  index.categoryMatches(transaction, selectedCategoryID: categoryID),
+                  index.categoryIncludedInTotals(transaction),
+                  index.transactionHasIncludedAccount(transaction) else {
                 continue
             }
 
-            let amount = index.netExpenseAmount(transaction, currency: selectedCurrency)
-            guard amount > 0 else { continue }
+            var countedSubcategories: Set<UUID> = []
+            for allocation in index.categoryAllocationAmounts(
+                for: transaction,
+                currency: selectedCurrency
+            ) where allocation.amount.minorUnits > 0 {
+                guard index.categoryIncludedInTotals(allocation.categoryID),
+                      let subcategoryID = index.directDescendantCategoryID(
+                          for: allocation.categoryID,
+                          under: categoryID
+                      ) else {
+                    continue
+                }
 
-            let current = totals[subcategoryID]
-                ?? (index.categoryName(for: subcategoryID), 0, 0)
-            totals[subcategoryID] = (
-                current.title,
-                current.amount + amount,
-                current.count + 1
-            )
+                let current = totals[subcategoryID]
+                    ?? (index.categoryName(for: subcategoryID), 0, 0)
+                totals[subcategoryID] = (
+                    current.title,
+                    current.amount + allocation.amount.minorUnits,
+                    current.count + (countedSubcategories.insert(subcategoryID).inserted ? 1 : 0)
+                )
+            }
         }
 
         return totals
@@ -256,6 +272,7 @@ struct DashboardBudgetSnapshot: Identifiable {
     let spent: Money
     let allowance: Money
     let projected: Money
+    let scheduled: Money
     let remaining: Int64
     let ratio: Double
     let isOver: Bool
@@ -339,14 +356,18 @@ struct DashboardSnapshot {
                 monthTransactionCount += 1
             }
             guard transaction.kind == .expense,
-                  index.categoryIncludedInTotals(transaction.categoryID),
+                  index.categoryIncludedInTotals(transaction),
                   transaction.outflows.contains(where: {
                       index.includesInTotals(accountID: $0.accountID)
-                  }),
-                  let categoryID = transaction.categoryID else {
+                  }) else {
                 continue
             }
-            categoryCounts[categoryID, default: 0] += 1
+            for categoryID in Set(
+                (transaction.categoryAllocations?.map(\.categoryID) ?? [transaction.categoryID])
+                    .compactMap { $0 }
+            ) {
+                categoryCounts[categoryID, default: 0] += 1
+            }
         }
 
         return DashboardSnapshot(
@@ -406,6 +427,40 @@ struct DashboardSnapshot {
             let projected = Int64(
                 (Double(spent.minorUnits) / progressThroughMonth).rounded()
             )
+            var scheduledMinorUnits: Int64 = 0
+            for schedule in data.scheduledTransactions where
+                schedule.isEnabled
+                    && schedule.kind == .expense
+                    && schedule.categoryID == budget.categoryID
+                    && index.categoryIncludedInTotals(schedule.categoryID)
+                    && schedule.nextRunDate >= date
+                    && schedule.nextRunDate < monthInterval.end {
+                var occurrence = schedule.nextRunDate
+                repeat {
+                    let outflows = index.movementTotal(
+                        schedule.outflows,
+                        currency: budget.currency,
+                        exchangeRate: schedule.exchangeRate
+                    )
+                    let inflows = index.movementTotal(
+                        schedule.inflows,
+                        currency: budget.currency,
+                        exchangeRate: schedule.exchangeRate
+                    )
+                    scheduledMinorUnits += max(outflows - inflows, 0)
+                    guard schedule.frequency != .once,
+                          let nextOccurrence = schedule.frequency.nextDate(
+                              after: occurrence,
+                              calendar: calendar,
+                              monthlyDay: schedule.recurrenceDay,
+                              monthlyRule: schedule.monthlyRule
+                          ),
+                          nextOccurrence > occurrence else {
+                        break
+                    }
+                    occurrence = nextOccurrence
+                } while occurrence < monthInterval.end
+            }
             let remaining = allowance.minorUnits - spent.minorUnits
             return DashboardBudgetSnapshot(
                 budget: budget,
@@ -413,6 +468,7 @@ struct DashboardSnapshot {
                 spent: spent,
                 allowance: allowance,
                 projected: Money(currency: budget.currency, minorUnits: projected),
+                scheduled: Money(currency: budget.currency, minorUnits: scheduledMinorUnits),
                 remaining: remaining,
                 ratio: min(
                     Double(spent.minorUnits) / Double(max(allowance.minorUnits, 1)),

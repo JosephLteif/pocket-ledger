@@ -605,7 +605,9 @@ private struct AccountReconciliationEditor: View {
                         ForEach(eligibleTransactions) { transaction in
                             Toggle(isOn: selectionBinding(for: transaction.id)) {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(transaction.note.isEmpty ? store.categoryPath(for: transaction.categoryID) : transaction.note)
+                                    Text(transaction.note.isEmpty
+                                        ? store.ledgerIndex.categorySummary(for: transaction)
+                                        : transaction.note)
                                         .lineLimit(1)
                                     HStack {
                                         Text(transaction.date.formatted(date: .abbreviated, time: .omitted))

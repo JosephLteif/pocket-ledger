@@ -65,7 +65,9 @@ enum WatchSyncPublisher {
                     kind: transaction.kind.displayName,
                     amount: movement.money,
                     accountName: account.name,
-                    categoryPath: categoryPath(for: transaction.categoryID)
+                    categoryPath: transaction.kind == .expense
+                        ? index.categorySummary(for: transaction)
+                        : categoryPath(for: transaction.categoryID)
                 )
             }
 
@@ -79,7 +81,7 @@ enum WatchSyncPublisher {
             )
         }
         let attentionCount = data.transactions.filter {
-            $0.kind == .expense && $0.categoryID == nil
+            $0.kind == .expense && index.hasUncategorizedAllocation($0)
         }.count
             + data.budgets.filter { budget in
                 financeBudgetSpent(budget, in: data, using: index).minorUnits

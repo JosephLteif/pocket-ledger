@@ -51,9 +51,14 @@ struct ExchangeRatesView: View {
                                     Text(rate.displaySummary)
                                         .font(.subheadline.weight(.semibold))
                                         .accessibilityLabel(rate.summary)
-                                    Text("Custom saved rate")
+                                    Text(updateDateSummary(for: rate))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                    if isStale(rate) {
+                                        Label("Older than 30 days", systemImage: "clock.badge.exclamationmark")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(PocketLedgerTheme.warning)
+                                    }
                                 }
 
                                 Spacer()
@@ -99,6 +104,26 @@ struct ExchangeRatesView: View {
             ExchangeRateEditor(store: store, existingRate: sheet.rate)
         }
     }
+
+    private func updateDateSummary(for rate: ExchangeRate) -> String {
+        guard let updatedAt = rate.updatedAt else { return "Date unknown" }
+        let days = Calendar.current.dateComponents(
+            [.day],
+            from: Calendar.current.startOfDay(for: updatedAt),
+            to: Calendar.current.startOfDay(for: .now)
+        ).day ?? 0
+        let age = days < 0 ? "in \(-days) days" : days == 0 ? "today" : "\(days) days ago"
+        return "Updated \(updatedAt.formatted(date: .abbreviated, time: .omitted)) · \(age)"
+    }
+
+    private func isStale(_ rate: ExchangeRate) -> Bool {
+        guard let updatedAt = rate.updatedAt else { return false }
+        return Calendar.current.dateComponents(
+            [.day],
+            from: Calendar.current.startOfDay(for: updatedAt),
+            to: Calendar.current.startOfDay(for: .now)
+        ).day.map { $0 > 30 } ?? false
+    }
 }
 
 @MainActor
@@ -110,6 +135,8 @@ private struct ExchangeRateEditor: View {
     @State private var baseCurrency: LedgerCurrency
     @State private var quoteCurrency: LedgerCurrency
     @State private var rateText: String
+    @State private var tracksUpdateDate: Bool
+    @State private var updatedAt: Date
     @State private var errorMessage: String?
 
     init(store: LedgerStore, existingRate: ExchangeRate?) {
@@ -122,6 +149,8 @@ private struct ExchangeRateEditor: View {
                 NSDecimalNumber(decimal: $0.quoteUnitsPerBaseUnit).stringValue
             } ?? "100000"
         )
+        _tracksUpdateDate = State(initialValue: existingRate == nil || existingRate?.updatedAt != nil)
+        _updatedAt = State(initialValue: existingRate?.updatedAt ?? .now)
     }
 
     var body: some View {
@@ -164,6 +193,16 @@ private struct ExchangeRateEditor: View {
                         .padding(12)
                         .pocketGroupedSurface(cornerRadius: 14)
                     }
+                }
+
+                Section("Update date") {
+                    Toggle("Track update date", isOn: $tracksUpdateDate)
+                    if tracksUpdateDate {
+                        DatePicker("Updated", selection: $updatedAt, displayedComponents: .date)
+                    }
+                    Text("Use the date the reference rate was last checked. Rates older than 30 days are marked as stale.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section {
@@ -243,7 +282,8 @@ private struct ExchangeRateEditor: View {
             ExchangeRate(
                 baseCurrency: baseCurrency,
                 quoteCurrency: quoteCurrency,
-                quoteUnitsPerBaseUnit: parsedRate
+                quoteUnitsPerBaseUnit: parsedRate,
+                updatedAt: tracksUpdateDate ? updatedAt : nil
             )
         )
         guard saved else {

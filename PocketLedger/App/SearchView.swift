@@ -25,7 +25,7 @@ enum FinanceSearch {
         let movements = transaction.outflows + transaction.inflows
         var searchable = [
             transaction.note,
-            index.categoryPath(for: transaction.categoryID),
+            index.categorySummary(for: transaction),
             transaction.kind.displayName,
             transaction.date.formatted(.dateTime.year().month().day())
         ]
@@ -363,7 +363,7 @@ struct GlobalSearchView: View {
             .compactMap { store.account(with: $0.accountID)?.name }
             .joined(separator: ", ")
         return [
-            store.categoryPath(for: transaction.categoryID),
+            store.ledgerIndex.categorySummary(for: transaction),
             accountNames,
             transaction.date.formatted(.dateTime.month(.abbreviated).day().year())
         ]

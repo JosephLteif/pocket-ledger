@@ -3,6 +3,8 @@ import SQLite3
 import SwiftUI
 import UniformTypeIdentifiers
 import ZIPFoundation
+import CryptoKit
+import Security
 
 struct PocketLedgerBackup: Codable {
     static let format = "pocket-ledger-backup"
@@ -86,6 +88,129 @@ enum LedgerBackupCodec {
             throw FinanceImportError.invalidFile("This Pocket Ledger backup bundle version is not supported.")
         }
         return backup
+    }
+}
+
+enum ProtectedBackupContentType: String, Codable, Sendable {
+    case json
+    case bundle
+}
+
+struct ProtectedBackupPayload: Sendable {
+    let contentType: ProtectedBackupContentType
+    let data: Data
+}
+
+enum ProtectedLedgerBackupCodec {
+    private static let format = "pocket-ledger-protected-backup"
+    private static let version = 1
+    private static let keychainService = "com.josephlteif.pocketledger.protected-backup"
+    private static let keychainAccount = "aes-gcm-key-v1"
+
+    private struct Envelope: Codable {
+        let format: String
+        let version: Int
+        let algorithm: String
+        let keyIdentifier: String
+        let contentType: ProtectedBackupContentType
+        let sealedData: Data
+    }
+
+    private struct Header: Decodable {
+        let format: String
+    }
+
+    private enum BackupError: LocalizedError {
+        case keyUnavailable
+        case keychainFailure
+        case invalidEnvelope
+        case authenticationFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .keyUnavailable:
+                return "This protected backup needs the Pocket Ledger key from iCloud Keychain. Sign in to the same Apple Account, enable iCloud Keychain, and try again."
+            case .keychainFailure:
+                return "Pocket Ledger could not access its iCloud Keychain backup key. Turn on iCloud Keychain, unlock the device, and try again."
+            case .invalidEnvelope:
+                return "This protected Pocket Ledger backup is damaged or uses an unsupported format."
+            case .authenticationFailed:
+                return "This protected backup could not be authenticated. Its contents may have changed or the key is unavailable."
+            }
+        }
+    }
+
+    static func encode(_ data: Data, contentType: ProtectedBackupContentType) throws -> Data {
+        let sealedBox = try AES.GCM.seal(data, using: key(createIfMissing: true))
+        guard let sealedData = sealedBox.combined else { throw BackupError.invalidEnvelope }
+        let envelope = Envelope(
+            format: format,
+            version: version,
+            algorithm: "AES-GCM",
+            keyIdentifier: keychainAccount,
+            contentType: contentType,
+            sealedData: sealedData
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(envelope)
+    }
+
+    static func decodeIfProtected(_ data: Data) throws -> ProtectedBackupPayload? {
+        let decoder = JSONDecoder()
+        guard let header = try? decoder.decode(Header.self, from: data),
+              header.format == format else {
+            return nil
+        }
+        guard let envelope = try? decoder.decode(Envelope.self, from: data),
+              envelope.version == version,
+              envelope.algorithm == "AES-GCM",
+              envelope.keyIdentifier == keychainAccount,
+              let sealedBox = try? AES.GCM.SealedBox(combined: envelope.sealedData) else {
+            throw BackupError.invalidEnvelope
+        }
+        do {
+            let decrypted = try AES.GCM.open(sealedBox, using: key(createIfMissing: false))
+            return ProtectedBackupPayload(contentType: envelope.contentType, data: decrypted)
+        } catch let error as BackupError {
+            throw error
+        } catch {
+            throw BackupError.authenticationFailed
+        }
+    }
+
+    private static func key(createIfMissing: Bool) throws -> SymmetricKey {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+            kSecAttrSynchronizable as String: kCFBooleanTrue as Any,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecSuccess, let keyData = result as? Data, keyData.count == 32 {
+            return SymmetricKey(data: keyData)
+        }
+        guard status == errSecItemNotFound, createIfMissing else {
+            throw status == errSecItemNotFound ? BackupError.keyUnavailable : BackupError.keychainFailure
+        }
+
+        let newKey = SymmetricKey(size: .bits256)
+        let keyData = newKey.withUnsafeBytes { Data($0) }
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+            kSecAttrSynchronizable as String: kCFBooleanTrue as Any,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+            kSecValueData as String: keyData
+        ]
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        if addStatus == errSecDuplicateItem { return try key(createIfMissing: false) }
+        guard addStatus == errSecSuccess else { throw BackupError.keychainFailure }
+        return newKey
     }
 }
 
@@ -374,6 +499,9 @@ enum FinanceImportReview {
         var referencedCategoryIDs = Set(
             prepared.transactions.compactMap(\.categoryID)
         )
+        referencedCategoryIDs.formUnion(
+            prepared.transactions.flatMap { $0.categoryAllocations?.compactMap(\.categoryID) ?? [] }
+        )
         while let category = prepared.categories.first(where: {
             guard referencedCategoryIDs.contains($0.id), let parentID = $0.parentID else { return false }
             return !referencedCategoryIDs.contains(parentID)
@@ -390,7 +518,11 @@ enum FinanceImportReview {
         in data: FinanceData
     ) -> String {
         let day = Calendar.current.startOfDay(for: transaction.date).timeIntervalSince1970
-        let category = categoryPath(for: transaction.categoryID, in: data)
+        let category = transaction.categoryAllocations.map { allocations in
+            allocations.map { allocation in
+                "\(allocation.amount.currency.rawValue):\(allocation.amount.minorUnits)@\(categoryPath(for: allocation.categoryID, in: data))"
+            }.joined(separator: ";")
+        } ?? categoryPath(for: transaction.categoryID, in: data)
         let outflows = movementFingerprints(transaction.outflows, in: data).joined(separator: ";")
         let inflows = movementFingerprints(transaction.inflows, in: data).joined(separator: ";")
         let amountDue = transaction.amountDue.map { "\($0.currency.rawValue):\($0.minorUnits)" } ?? "-"
@@ -2393,7 +2525,12 @@ enum LedgerCSVExporter {
 
             for (movement, destination) in movements {
                 let accountName = accountsByID[movement.accountID]?.name ?? ""
-                let category = categoryPath(for: transaction.categoryID, categories: financeData.categories)
+                let category = transaction.categoryAllocations.map { allocations in
+                    allocations.map { allocation in
+                        let path = categoryPath(for: allocation.categoryID, categories: financeData.categories)
+                        return "\(allocation.amount.stableFormatted) · \(path.isEmpty ? "Uncategorized" : path)"
+                    }.joined(separator: "; ")
+                } ?? categoryPath(for: transaction.categoryID, categories: financeData.categories)
                 let values = [
                     transaction.date.formatted(.iso8601.year().month().day()),
                     transaction.kind.displayName,

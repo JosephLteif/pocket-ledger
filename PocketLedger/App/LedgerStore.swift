@@ -105,7 +105,7 @@ final class LedgerStore: ObservableObject {
 
         for transaction in data.transactions {
             if transaction.kind == .expense,
-               transaction.categoryID == nil,
+               ledgerIndex.hasUncategorizedAllocation(transaction),
                transactionHasIncludedAccount(transaction) {
                 uncategorizedCount += 1
             }
@@ -224,10 +224,15 @@ final class LedgerStore: ObservableObject {
         var counts: [UUID: Int] = [:]
         for transaction in ledgerIndex.sortedTransactions where transaction.kind == .expense
             && transaction.date >= monthStart
-            && ledgerIndex.categoryIncludedInTotals(transaction.categoryID)
+            && ledgerIndex.categoryIncludedInTotals(transaction)
             && transaction.outflows.contains(where: { includesInTotals(accountID: $0.accountID) }) {
-            guard let categoryID = transaction.categoryID else { continue }
-            counts[categoryID, default: 0] += 1
+            let categoryIDs = Set(
+                (transaction.categoryAllocations?.map(\.categoryID) ?? [transaction.categoryID])
+                    .compactMap { $0 }
+            )
+            for categoryID in categoryIDs {
+                counts[categoryID, default: 0] += 1
+            }
         }
 
         guard let categoryID = counts.max(by: { $0.value < $1.value })?.key else {
@@ -322,6 +327,7 @@ final class LedgerStore: ObservableObject {
         for index in updated.transactions.indices where ids.contains(updated.transactions[index].id) {
             guard updated.transactions[index].loanID == nil else { continue }
             updated.transactions[index].categoryID = categoryID
+            updated.transactions[index].categoryAllocations = nil
             changed = true
         }
         guard changed else {
@@ -406,6 +412,7 @@ final class LedgerStore: ObservableObject {
             note: transaction.note,
             kind: transaction.kind,
             categoryID: transaction.categoryID,
+            categoryAllocations: transaction.categoryAllocations,
             amountDue: transaction.amountDue,
             outflows: transaction.outflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
             inflows: transaction.inflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
@@ -510,7 +517,11 @@ final class LedgerStore: ObservableObject {
     }
 
     @discardableResult
-    func recordScheduledTransactionNow(id: UUID, now: Date = .now) -> ScheduleRecordUndoReceipt? {
+    func recordScheduledTransactionNow(
+        id: UUID,
+        expectedNextRunDate: Date? = nil,
+        now: Date = .now
+    ) -> ScheduleRecordUndoReceipt? {
         guard let index = data.scheduledTransactions.firstIndex(where: { $0.id == id }) else {
             lastActionStatus = "Scheduled transaction not found"
             return nil
@@ -518,7 +529,8 @@ final class LedgerStore: ObservableObject {
 
         let previousSchedule = data.scheduledTransactions[index]
         var schedule = data.scheduledTransactions[index]
-        guard schedule.isEnabled else {
+        guard schedule.isEnabled,
+              expectedNextRunDate == nil || schedule.nextRunDate == expectedNextRunDate else {
             lastActionStatus = "Enable the scheduled transaction before recording it"
             return nil
         }
@@ -1159,7 +1171,11 @@ final class LedgerStore: ObservableObject {
         if let exact = data.exchangeRates.first(where: {
             $0.baseCurrency == base && $0.quoteCurrency == quote
         }) {
-            return exact
+            return ExchangeRate(
+                baseCurrency: exact.baseCurrency,
+                quoteCurrency: exact.quoteCurrency,
+                quoteUnitsPerBaseUnit: exact.quoteUnitsPerBaseUnit
+            )
         }
 
         guard let reverse = data.exchangeRates.first(where: {

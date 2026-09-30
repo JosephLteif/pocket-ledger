@@ -127,7 +127,7 @@ struct TransactionListSnapshot {
         let filteredTransactions = index.sortedTransactions.filter { transaction in
             let matchesKind: Bool
             if filter == .uncategorized {
-                matchesKind = transaction.kind == .expense && transaction.categoryID == nil
+                matchesKind = transaction.kind == .expense && index.hasUncategorizedAllocation(transaction)
             } else {
                 matchesKind = filter.kind.map { transaction.kind == $0 } ?? true
             }
@@ -147,12 +147,17 @@ struct TransactionListSnapshot {
             guard matchesPeriod else { return false }
 
             if let categoryID {
-                guard let transactionCategoryID = transaction.categoryID else { return false }
-                let ancestors = index.categoryAncestorsByID[transactionCategoryID] ?? [transactionCategoryID]
-                let matchesCategory = includesCategoryDescendants
-                    ? ancestors.contains(categoryID)
-                    : transactionCategoryID == categoryID
-                guard matchesCategory else { return false }
+                let categoryIDs = transaction.categoryAllocations?.map(\.categoryID)
+                    ?? [transaction.categoryID]
+                guard categoryIDs.contains(where: { transactionCategoryID in
+                    guard let transactionCategoryID else { return false }
+                    if includesCategoryDescendants {
+                        let ancestors = index.categoryAncestorsByID[transactionCategoryID]
+                            ?? [transactionCategoryID]
+                        return ancestors.contains(categoryID)
+                    }
+                    return transactionCategoryID == categoryID
+                }) else { return false }
             }
 
             if let accountID {
@@ -1323,7 +1328,7 @@ struct TransactionRow: View {
             detail = "Loan activity"
         } else {
             detail = transaction.kind == .expense
-                ? store.categoryPath(for: transaction.categoryID)
+                ? store.ledgerIndex.categorySummary(for: transaction)
                 : transaction.kind.displayName
         }
         if accountContext != nil {
@@ -1340,7 +1345,7 @@ struct TransactionRow: View {
 
     private var iconName: String {
         if transaction.loanID != nil { return "banknote" }
-        if transaction.categoryID != nil {
+        if transaction.categoryID != nil || transaction.categoryAllocations?.contains(where: { $0.categoryID != nil }) == true {
             return store.ledgerIndex.categorySystemImage(for: transaction.categoryID)
         }
 

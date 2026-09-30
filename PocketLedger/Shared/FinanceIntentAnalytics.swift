@@ -105,9 +105,14 @@ struct FinanceTransactionEntity: IndexedEntity, Hashable, Sendable {
         date = transaction.date
         note = transaction.note
         kind = transaction.kind.displayName
-        category = transaction.categoryID
+        category = (transaction.categoryAllocations?.map { allocation in
+            allocation.categoryID
+                .map { financeCategoryPath(for: $0, in: data.categories) }
+                ?? "Uncategorized"
+        } ?? [transaction.categoryID
             .map { financeCategoryPath(for: $0, in: data.categories) }
-            ?? "Uncategorized"
+            ?? "Uncategorized"])
+            .joined(separator: " · ")
         amount = financeIntentMovementSummary(for: transaction)
 
         let accountIDs = Set((transaction.outflows + transaction.inflows).map(\.accountID))
@@ -373,8 +378,11 @@ private func financeTransaction(
     }
 
     if let categoryID {
-        guard let transactionCategoryID = transaction.categoryID,
-              financeCategoryScope(for: categoryID, in: data.categories).contains(transactionCategoryID) else {
+        let transactionCategoryIDs = transaction.categoryAllocations?.compactMap(\.categoryID)
+            ?? [transaction.categoryID].compactMap { $0 }
+        guard transactionCategoryIDs.contains(where: {
+            financeCategoryScope(for: categoryID, in: data.categories).contains($0)
+        }) else {
             return false
         }
     }
@@ -428,7 +436,9 @@ private func financeSpendingSummary(
                   accountID: accountID,
                   in: data
               ),
-              financeCategoryIncludedInTotals(transaction.categoryID, in: data.categories) else {
+              (transaction.categoryAllocations?.contains {
+                  financeCategoryIncludedInTotals($0.categoryID, in: data.categories)
+              } ?? financeCategoryIncludedInTotals(transaction.categoryID, in: data.categories)) else {
             return false
         }
 
@@ -440,7 +450,9 @@ private func financeSpendingSummary(
 
     var totals: [LedgerCurrency: Int64] = [:]
     var categoryCounts: [String: Int] = [:]
+    var categoryAmounts: [String: [LedgerCurrency: Int64]] = [:]
     var expenseCount = 0
+    let accountsByID = Dictionary(uniqueKeysWithValues: data.accounts.map { ($0.id, $0) })
 
     for transaction in matchingTransactions {
         let outflows = transaction.outflows.filter { movement in
@@ -454,14 +466,39 @@ private func financeSpendingSummary(
             totals[movement.money.currency, default: 0] += movement.money.minorUnits
         }
 
-        let categoryName: String
-        if let transactionCategoryID = transaction.categoryID,
-           categoryScope?.contains(transactionCategoryID) != false {
-            categoryName = financeCategoryPath(for: transactionCategoryID, in: data.categories)
-        } else {
-            categoryName = "Uncategorized"
+        let transactionCategoryIDs = transaction.categoryAllocations?.map(\.categoryID)
+            ?? [transaction.categoryID]
+        let categoryNames = Set(transactionCategoryIDs.compactMap { transactionCategoryID -> String? in
+            if let transactionCategoryID {
+                guard categoryScope?.contains(transactionCategoryID) != false else { return nil }
+                return financeCategoryPath(for: transactionCategoryID, in: data.categories)
+            }
+            return categoryScope == nil ? "Uncategorized" : nil
+        })
+        for categoryName in categoryNames {
+            categoryCounts[categoryName, default: 0] += 1
         }
-        categoryCounts[categoryName, default: 0] += 1
+
+        guard let allocationCurrency = transaction.categoryAllocations?.first?.amount.currency
+                ?? transaction.outflows.first?.money.currency else {
+            continue
+        }
+        for allocation in financeCategoryAllocationAmounts(
+            transaction,
+            currency: allocationCurrency,
+            accountsByID: accountsByID
+        ) where financeCategoryIncludedInTotals(allocation.categoryID, in: data.categories) {
+            if let categoryScope {
+                guard let allocationCategoryID = allocation.categoryID,
+                      categoryScope.contains(allocationCategoryID) else { continue }
+            }
+            let categoryName = allocation.categoryID
+                .map { financeCategoryPath(for: $0, in: data.categories) }
+                ?? "Uncategorized"
+            var amounts = categoryAmounts[categoryName, default: [:]]
+            amounts[allocationCurrency, default: 0] += allocation.amount.minorUnits
+            categoryAmounts[categoryName] = amounts
+        }
     }
 
     let periodText = period.displayName.lowercased()
@@ -488,6 +525,20 @@ private func financeSpendingSummary(
 
     if categoryID == nil, let topCategory = categoryCounts.max(by: { $0.value < $1.value }) {
         summary += " Most common category: \(topCategory.key) (\(topCategory.value) expense\(topCategory.value == 1 ? "" : "s"))."
+    }
+
+    if !categoryAmounts.isEmpty {
+        let categoryText = categoryAmounts
+            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+            .map { name, amounts in
+                let amountText = LedgerCurrency.allCases.compactMap { currency -> String? in
+                    guard let minorUnits = amounts[currency], minorUnits != 0 else { return nil }
+                    return Money(currency: currency, minorUnits: minorUnits).formatted
+                }.joined(separator: " and ")
+                return "\(name): \(amountText)"
+            }
+            .joined(separator: "; ")
+        summary += " Category amounts: \(categoryText)."
     }
 
     return summary

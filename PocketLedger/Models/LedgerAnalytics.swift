@@ -149,10 +149,48 @@ struct LedgerIndex {
         return true
     }
 
+    func categoryIncludedInTotals(_ transaction: LedgerTransaction) -> Bool {
+        let allocations = transaction.categoryAllocations
+        guard let allocations, !allocations.isEmpty else {
+            return categoryIncludedInTotals(transaction.categoryID)
+        }
+        return allocations.contains { categoryIncludedInTotals($0.categoryID) }
+    }
+
     func categoryMatches(_ categoryID: UUID?, selectedCategoryID: UUID?) -> Bool {
         guard let selectedCategoryID else { return true }
         guard let categoryID else { return false }
         return categoryAncestorsByID[categoryID]?.contains(selectedCategoryID) ?? (categoryID == selectedCategoryID)
+    }
+
+    func categoryMatches(_ transaction: LedgerTransaction, selectedCategoryID: UUID?) -> Bool {
+        guard let selectedCategoryID else { return true }
+        let categoryIDs = transaction.categoryAllocations?.map(\.categoryID)
+            ?? [transaction.categoryID]
+        return categoryIDs.contains { categoryMatches($0, selectedCategoryID: selectedCategoryID) }
+    }
+
+    func hasUncategorizedAllocation(_ transaction: LedgerTransaction) -> Bool {
+        transaction.categoryAllocations?.contains(where: { $0.categoryID == nil })
+            ?? (transaction.categoryID == nil)
+    }
+
+    func categorySummary(for transaction: LedgerTransaction) -> String {
+        let categoryIDs = transaction.categoryAllocations?.map(\.categoryID)
+            ?? [transaction.categoryID]
+        let paths = Array(Set(categoryIDs.map { categoryPath(for: $0) })).sorted()
+        return paths.joined(separator: " · ")
+    }
+
+    func categoryAllocationAmounts(
+        for transaction: LedgerTransaction,
+        currency: LedgerCurrency
+    ) -> [TransactionCategoryAllocation] {
+        financeCategoryAllocationAmounts(
+            transaction,
+            currency: currency,
+            accountsByID: accountsByID
+        )
     }
 
     func categoryPath(for categoryID: UUID?) -> String {
@@ -256,16 +294,12 @@ struct LedgerIndex {
     }
 
     func netExpenseAmount(_ transaction: LedgerTransaction, currency: LedgerCurrency) -> Int64 {
-        guard transaction.kind == .expense,
-              categoryIncludedInTotals(transaction.categoryID) else {
+        guard transaction.kind == .expense else {
             return 0
         }
-
-        return max(
-            movementTotal(transaction.outflows, currency: currency, exchangeRate: transaction.exchangeRate)
-                - movementTotal(transaction.inflows, currency: currency, exchangeRate: transaction.exchangeRate),
-            0
-        )
+        return categoryAllocationAmounts(for: transaction, currency: currency)
+            .filter { categoryIncludedInTotals($0.categoryID) }
+            .reduce(Int64.zero) { $0 + $1.amount.minorUnits }
     }
 
     func monthlyExpenseTotals(
@@ -296,9 +330,15 @@ struct LedgerIndex {
                 .filter {
                     $0.kind == .expense
                         && interval.contains($0.date)
-                        && $0.categoryID == budget.categoryID
                 }
-                .reduce(Int64.zero) { $0 + netExpenseAmount($1, currency: budget.currency) }
+                .reduce(Int64.zero) { total, transaction in
+                    total + categoryAllocationAmounts(for: transaction, currency: budget.currency)
+                        .filter {
+                            $0.categoryID == budget.categoryID
+                                && categoryIncludedInTotals($0.categoryID)
+                        }
+                        .reduce(Int64.zero) { $0 + $1.amount.minorUnits }
+                }
             return Money(currency: budget.currency, minorUnits: total)
         }
 
@@ -356,34 +396,25 @@ struct LedgerIndex {
 
         var totals: [MonthCategoryCurrencyKey: Int64] = [:]
         for transaction in transactions where transaction.kind == .expense {
-            guard categoryIncludedInTotals(transaction.categoryID),
-                  let monthStart = calendar.dateInterval(of: .month, for: transaction.date)?.start else {
+            guard let monthStart = calendar.dateInterval(of: .month, for: transaction.date)?.start else {
                 continue
             }
 
             for currency in LedgerCurrency.allCases {
-                let amount = max(
-                    Self.movementTotal(
-                        transaction.outflows,
-                        currency: currency,
-                        exchangeRate: transaction.exchangeRate,
-                        accountsByID: accountsByID
+                let allocations = financeCategoryAllocationAmounts(
+                    transaction,
+                    currency: currency,
+                    accountsByID: accountsByID
+                )
+                for allocation in allocations where allocation.amount.minorUnits > 0 {
+                    guard categoryIncludedInTotals(allocation.categoryID) else { continue }
+                    let key = MonthCategoryCurrencyKey(
+                        monthStart: monthStart,
+                        categoryID: allocation.categoryID,
+                        currency: currency
                     )
-                        - Self.movementTotal(
-                            transaction.inflows,
-                            currency: currency,
-                            exchangeRate: transaction.exchangeRate,
-                            accountsByID: accountsByID
-                        ),
-                    0
-                )
-                guard amount > 0 else { continue }
-                let key = MonthCategoryCurrencyKey(
-                    monthStart: monthStart,
-                    categoryID: transaction.categoryID,
-                    currency: currency
-                )
-                totals[key, default: 0] += amount
+                    totals[key, default: 0] += allocation.amount.minorUnits
+                }
             }
         }
         return totals

@@ -1,8 +1,38 @@
 import Foundation
 import UserNotifications
+import Combine
+import CryptoKit
+
+struct ScheduledNotificationRecordRequest: Equatable, Identifiable, Sendable {
+    let scheduleID: UUID
+    let expectedNextRunDate: Date
+    let expectedScheduleFingerprint: String
+
+    var id: String {
+        "\(scheduleID.uuidString)-\(expectedNextRunDate.timeIntervalSince1970)"
+    }
+}
+
+@MainActor
+final class ScheduledNotificationActionRouter: ObservableObject {
+    static let shared = ScheduledNotificationActionRouter()
+
+    @Published private(set) var pendingRequest: ScheduledNotificationRecordRequest?
+
+    func enqueue(_ request: ScheduledNotificationRecordRequest) {
+        pendingRequest = request
+    }
+
+    func consumePendingRequest() -> ScheduledNotificationRecordRequest? {
+        defer { pendingRequest = nil }
+        return pendingRequest
+    }
+}
 
 enum NotificationService {
     private static let scheduledPrefix = "pocket-ledger-scheduled-"
+    private static let scheduledCategoryIdentifier = "pocket-ledger-scheduled-transaction"
+    fileprivate static let recordScheduledActionIdentifier = "pocket-ledger-record-scheduled-now"
     private static let loanPrefix = "pocket-ledger-loan-"
     private static let budgetPrefix = "pocket-ledger-budget-"
     private static let dailyTransactionReminderIdentifier = "pocket-ledger-daily-transaction-reminder"
@@ -20,13 +50,34 @@ enum NotificationService {
 
     @MainActor
     static func configureForegroundPresentation() {
-        UNUserNotificationCenter.current().delegate = ScheduledNotificationDelegate.shared
+        let center = UNUserNotificationCenter.current()
+        center.delegate = ScheduledNotificationDelegate.shared
+        center.setNotificationCategories([
+            UNNotificationCategory(
+                identifier: scheduledCategoryIdentifier,
+                actions: [
+                    UNNotificationAction(
+                        identifier: recordScheduledActionIdentifier,
+                        title: "Record now",
+                        options: [.foreground]
+                    )
+                ],
+                intentIdentifiers: []
+            )
+        ])
     }
 
     static var globalReminderTiming: ScheduledReminderTiming {
         ScheduledReminderTiming(
             rawValue: UserDefaults.standard.string(forKey: globalReminderKey) ?? ""
         ) ?? .oneDayBefore
+    }
+
+    static func scheduleFingerprint(_ schedule: ScheduledTransaction) -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(schedule) else { return nil }
+        return Data(SHA256.hash(data: data)).base64EncodedString()
     }
 
     static func setGlobalReminderTiming(_ timing: ScheduledReminderTiming) {
@@ -380,7 +431,15 @@ enum NotificationService {
             let dueDate = schedule.nextRunDate.formatted(date: .abbreviated, time: .shortened)
             content.body = "\(title) is scheduled for \(dueDate)."
             content.sound = .default
-            content.userInfo = ["scheduledTransactionID": schedule.id.uuidString]
+            content.categoryIdentifier = scheduledCategoryIdentifier
+            var userInfo: [String: Any] = [
+                "scheduledTransactionID": schedule.id.uuidString,
+                "expectedNextRunDate": schedule.nextRunDate.timeIntervalSince1970
+            ]
+            if let fingerprint = scheduleFingerprint(schedule) {
+                userInfo["expectedScheduleFingerprint"] = fingerprint
+            }
+            content.userInfo = userInfo
 
             let reminderDate = reminderDate(for: schedule, timing: timing)
             // A refresh after delivery must not turn an elapsed reminder into a new alert.
@@ -447,5 +506,30 @@ private final class ScheduledNotificationDelegate:
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
         [.banner, .sound]
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        guard response.actionIdentifier == NotificationService.recordScheduledActionIdentifier,
+              let scheduleID = response.notification.request.content.userInfo[
+                  "scheduledTransactionID"
+              ] as? String,
+              let id = UUID(uuidString: scheduleID),
+              let expectedTimestamp = response.notification.request.content.userInfo[
+                  "expectedNextRunDate"
+              ] as? NSNumber,
+              let expectedFingerprint = response.notification.request.content.userInfo[
+                  "expectedScheduleFingerprint"
+              ] as? String else {
+            return
+        }
+        let request = ScheduledNotificationRecordRequest(
+            scheduleID: id,
+            expectedNextRunDate: Date(timeIntervalSince1970: expectedTimestamp.doubleValue),
+            expectedScheduleFingerprint: expectedFingerprint
+        )
+        await ScheduledNotificationActionRouter.shared.enqueue(request)
     }
 }

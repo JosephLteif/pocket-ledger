@@ -190,6 +190,11 @@ struct Money: Codable, Equatable, Sendable {
     }
 }
 
+struct TransactionCategoryAllocation: Codable, Equatable {
+    var categoryID: UUID?
+    var amount: Money
+}
+
 private extension NumberFormatter {
     static func localizedDecimalFormatter(locale: Locale) -> NumberFormatter {
         let formatter = NumberFormatter()
@@ -647,6 +652,19 @@ struct ExchangeRate: Codable, Equatable, Identifiable {
     var baseCurrency: LedgerCurrency
     var quoteCurrency: LedgerCurrency
     var quoteUnitsPerBaseUnit: Decimal
+    var updatedAt: Date?
+
+    init(
+        baseCurrency: LedgerCurrency,
+        quoteCurrency: LedgerCurrency,
+        quoteUnitsPerBaseUnit: Decimal,
+        updatedAt: Date? = nil
+    ) {
+        self.baseCurrency = baseCurrency
+        self.quoteCurrency = quoteCurrency
+        self.quoteUnitsPerBaseUnit = quoteUnitsPerBaseUnit
+        self.updatedAt = updatedAt
+    }
 
     var id: String {
         "\(baseCurrency.rawValue)-\(quoteCurrency.rawValue)"
@@ -748,6 +766,7 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
     var note: String
     var kind: TransactionKind
     var categoryID: UUID?
+    var categoryAllocations: [TransactionCategoryAllocation]?
     var amountDue: Money?
     var outflows: [MoneyMovement]
     var inflows: [MoneyMovement]
@@ -765,6 +784,7 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         note: String,
         kind: TransactionKind,
         categoryID: UUID?,
+        categoryAllocations: [TransactionCategoryAllocation]? = nil,
         amountDue: Money? = nil,
         outflows: [MoneyMovement],
         inflows: [MoneyMovement],
@@ -781,6 +801,7 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         self.note = note
         self.kind = kind
         self.categoryID = categoryID
+        self.categoryAllocations = categoryAllocations
         self.amountDue = amountDue
         self.outflows = outflows
         self.inflows = inflows
@@ -799,6 +820,7 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         case note
         case kind
         case categoryID
+        case categoryAllocations
         case amountDue
         case outflows
         case inflows
@@ -818,6 +840,10 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         note = try container.decode(String.self, forKey: .note)
         kind = try container.decode(TransactionKind.self, forKey: .kind)
         categoryID = try container.decodeIfPresent(UUID.self, forKey: .categoryID)
+        categoryAllocations = try container.decodeIfPresent(
+            [TransactionCategoryAllocation].self,
+            forKey: .categoryAllocations
+        )
         amountDue = try container.decodeIfPresent(Money.self, forKey: .amountDue)
         outflows = try container.decode([MoneyMovement].self, forKey: .outflows)
         inflows = try container.decode([MoneyMovement].self, forKey: .inflows)
@@ -837,6 +863,7 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         try container.encode(note, forKey: .note)
         try container.encode(kind, forKey: .kind)
         try container.encodeIfPresent(categoryID, forKey: .categoryID)
+        try container.encodeIfPresent(categoryAllocations, forKey: .categoryAllocations)
         try container.encodeIfPresent(amountDue, forKey: .amountDue)
         try container.encode(outflows, forKey: .outflows)
         try container.encode(inflows, forKey: .inflows)
@@ -1224,24 +1251,84 @@ func financeNetExpenseAmount(
     in data: FinanceData
 ) -> Int64 {
     guard transaction.kind == .expense else { return 0 }
-    guard financeCategoryIncludedInTotals(transaction.categoryID, in: data.categories) else { return 0 }
+    let accountsByID = Dictionary(uniqueKeysWithValues: data.accounts.map { ($0.id, $0) })
+    return financeCategoryAllocationAmounts(
+        transaction,
+        currency: currency,
+        accountsByID: accountsByID
+    )
+    .filter { financeCategoryIncludedInTotals($0.categoryID, in: data.categories) }
+    .reduce(Int64.zero) { $0 + $1.amount.minorUnits }
+}
+
+func financeCategoryAllocationAmounts(
+    _ transaction: LedgerTransaction,
+    currency: LedgerCurrency,
+    accountsByID: [UUID: Account]
+) -> [TransactionCategoryAllocation] {
+    guard transaction.kind == .expense else { return [] }
 
     func includedAmount(_ movements: [MoneyMovement]) -> Int64 {
-        movements
-            .filter { movement in
-                data.accounts.first(where: { $0.id == movement.accountID })?.includeInTotals == true
+        movements.reduce(Int64.zero) { total, movement in
+            guard accountsByID[movement.accountID]?.includeInTotals == true,
+                  let amount = financeConvertedMinorUnits(
+                      movement.money,
+                      to: currency,
+                      using: transaction.exchangeRate
+                  ) else {
+                return total
             }
-            .compactMap { movement in
-                financeConvertedMinorUnits(
-                    movement.money,
-                    to: currency,
-                    using: transaction.exchangeRate
-                )
-            }
-            .reduce(Int64.zero, +)
+            return total + amount
+        }
     }
 
-    return max(includedAmount(transaction.outflows) - includedAmount(transaction.inflows), 0)
+    let netAmount = max(includedAmount(transaction.outflows) - includedAmount(transaction.inflows), 0)
+    guard netAmount > 0 else { return [] }
+
+    let savedAllocations = transaction.categoryAllocations?.filter { $0.amount.minorUnits > 0 }
+    guard let savedAllocations, !savedAllocations.isEmpty else {
+        return [TransactionCategoryAllocation(
+            categoryID: transaction.categoryID,
+            amount: Money(currency: currency, minorUnits: netAmount)
+        )]
+    }
+
+    let converted = savedAllocations.compactMap { allocation -> (categoryID: UUID?, amount: Int64)? in
+        guard let amount = financeConvertedMinorUnits(
+            allocation.amount,
+            to: currency,
+            using: transaction.exchangeRate
+        ), amount > 0 else {
+            return nil
+        }
+        return (allocation.categoryID, amount)
+    }
+    guard !converted.isEmpty else {
+        return [TransactionCategoryAllocation(
+            categoryID: transaction.categoryID,
+            amount: Money(currency: currency, minorUnits: netAmount)
+        )]
+    }
+
+    let convertedTotal = converted.reduce(Int64.zero) { $0 + $1.amount }
+    guard convertedTotal > 0 else { return [] }
+    var amounts = converted.map { allocation in
+        var rounded = Decimal()
+        var ratio = Decimal(netAmount) * Decimal(allocation.amount) / Decimal(convertedTotal)
+        NSDecimalRound(&rounded, &ratio, 0, .down)
+        return NSDecimalNumber(decimal: rounded).int64Value
+    }
+    let remainder = netAmount - amounts.reduce(Int64.zero, +)
+    if let largestIndex = amounts.indices.max(by: { amounts[$0] < amounts[$1] }) {
+        amounts[largestIndex] += remainder
+    }
+
+    return zip(converted, amounts).map { allocation, amount in
+        TransactionCategoryAllocation(
+            categoryID: allocation.categoryID,
+            amount: Money(currency: currency, minorUnits: amount)
+        )
+    }
 }
 
 func financeCategoryIncludedInTotals(_ categoryID: UUID?, in categories: [LedgerCategory]) -> Bool {
@@ -1273,14 +1360,24 @@ func financeBudgetSpent(
         Calendar.current.dateInterval(of: .month, for: .now)
             ?? DateInterval(start: .distantPast, duration: .zero)
     )
+    let accountsByID = Dictionary(uniqueKeysWithValues: data.accounts.map { ($0.id, $0) })
     let spent = data.transactions
         .filter {
             $0.kind == .expense
                 && period.contains($0.date)
-                && $0.categoryID == budget.categoryID
         }
         .reduce(Int64.zero) { total, transaction in
-            total + financeNetExpenseAmount(transaction, currency: budget.currency, in: data)
+            let amount = financeCategoryAllocationAmounts(
+                transaction,
+                currency: budget.currency,
+                accountsByID: accountsByID
+            )
+            .filter {
+                $0.categoryID == budget.categoryID
+                    && financeCategoryIncludedInTotals($0.categoryID, in: data.categories)
+            }
+            .reduce(Int64.zero) { $0 + $1.amount.minorUnits }
+            return total + amount
         }
     return Money(currency: budget.currency, minorUnits: spent)
 }

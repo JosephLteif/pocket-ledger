@@ -1032,6 +1032,14 @@ struct DashboardView: View {
                                     .foregroundStyle(projectedOver ? PocketLedgerTheme.warning : PocketLedgerTheme.textTertiary)
                             }
                             .font(.caption.weight(.semibold).monospacedDigit())
+                            HStack {
+                                Text("Scheduled through month-end")
+                                    .foregroundStyle(PocketLedgerTheme.textTertiary)
+                                Spacer()
+                                protectedBalanceText(summary.scheduled.formatted)
+                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                            }
+                            .font(.caption.monospacedDigit())
                         }
                     }
                 }

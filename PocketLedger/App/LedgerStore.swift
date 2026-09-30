@@ -682,7 +682,13 @@ final class LedgerStore: ObservableObject {
         }
 
         var updated = data
-        updated.loans.append(loan)
+        var savedLoan = loan
+        savedLoan.counterpartyContactID = loanContactID(
+            named: savedLoan.counterparty,
+            preferredID: savedLoan.counterpartyContactID,
+            in: &updated
+        )
+        updated.loans.append(savedLoan)
         updated.transactions.append(fundingTransaction)
         guard FinanceDataValidator.validate(updated) == nil else {
             lastActionStatus = "The loan could not be saved. Check its amount and funding account."
@@ -698,12 +704,32 @@ final class LedgerStore: ObservableObject {
             return false
         }
         var updated = data
-        updated.loans[index] = loan
+        var savedLoan = loan
+        savedLoan.counterpartyContactID = loanContactID(
+            named: savedLoan.counterparty,
+            preferredID: savedLoan.counterpartyContactID,
+            in: &updated
+        )
+        updated.loans[index] = savedLoan
         guard FinanceDataValidator.validate(updated) == nil else {
             lastActionStatus = "The loan could not be updated."
             return false
         }
         return persist(updated, successMessage: "Loan updated")
+    }
+
+    private func loanContactID(named name: String, preferredID: UUID?, in data: inout FinanceData) -> UUID {
+        if let preferredID, data.loanContacts.contains(where: { $0.id == preferredID }) {
+            return preferredID
+        }
+        if let contact = data.loanContacts.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }) {
+            return contact.id
+        }
+        let contact = LoanContact(name: name)
+        data.loanContacts.append(contact)
+        return contact.id
     }
 
     @discardableResult

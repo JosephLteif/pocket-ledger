@@ -201,7 +201,6 @@ struct TransactionEditor: View {
     @State private var date = Date.now
     @State private var kind: TransactionKind = .expense
     @State private var isPresentingLoanEditor = false
-    @State private var dismissAfterLoanSave = false
     @State private var loanCreatedNotice = false
     @State private var timing: TransactionTiming = .now
     @State private var scheduleFrequency: ScheduleFrequency = .once
@@ -263,7 +262,8 @@ struct TransactionEditor: View {
         initialAttachmentData: Data? = nil,
         initialAttachmentFileName: String? = nil,
         initialAttachmentContentType: String? = nil,
-        initialReceiptItems: [LedgerReceiptLineItem] = []
+        initialReceiptItems: [LedgerReceiptLineItem] = [],
+        initialLoanEntry: Bool = false
     ) {
         _store = ObservedObject(wrappedValue: store)
         let sourceTransaction = transaction ?? prefilledTransaction
@@ -337,6 +337,7 @@ struct TransactionEditor: View {
         _templateName = State(initialValue: editingTemplate?.name ?? "")
         _date = State(initialValue: transaction?.date ?? scheduledTransaction?.nextRunDate ?? .now)
         _kind = State(initialValue: resolvedInitialKind)
+        _isPresentingLoanEditor = State(initialValue: initialLoanEntry)
         _timing = State(initialValue: transaction == nil && scheduledTransaction == nil ? initialTiming : transaction == nil ? .scheduled : .now)
         _scheduleFrequency = State(initialValue: scheduledTransaction?.frequency ?? initialFrequency)
         _monthlyRule = State(initialValue: scheduledTransaction?.monthlyRule ?? .dayOfMonth)
@@ -447,40 +448,51 @@ struct TransactionEditor: View {
                     Text("Transaction type")
                 }
 
-                if loanCreatedNotice {
-                    Section {
-                        Label("Loan created. Your transaction draft is still open.", systemImage: "checkmark.circle.fill")
-                            .font(.footnote)
-                            .foregroundStyle(PocketLedgerTheme.positive)
-                    }
-                }
-
-                if let saveValidationMessage {
-                    Section("Save needs attention") {
-                        Label(saveValidationMessage, systemImage: "info.circle")
-                            .font(.footnote)
-                            .foregroundStyle(PocketLedgerTheme.textSecondary)
-                    }
-                }
-
-                if isTemplateEditor {
-                    Section("Template") {
-                        TextField("Template name", text: $templateName)
-                    }
-                }
-
-                if kind == .expense {
-                    expensePaymentsSection
-                    detailsSection
-                    expenseDateSection
-                    moreDetailsSection
+                if isPresentingLoanEditor {
+                    LoanEditor(store: store, onSave: {
+                        if hasUnsavedChanges {
+                            loanCreatedNotice = true
+                            isPresentingLoanEditor = false
+                        } else {
+                            dismiss()
+                        }
+                    }, isEmbedded: true)
                 } else {
-                    timingSection
-                    detailsSection
-                    attachmentSection
-                    outgoingMovementSection
-                    receivingMovementSection
-                    exchangeRateSection
+                    if loanCreatedNotice {
+                        Section {
+                            Label("Loan created. Your transaction draft is still open.", systemImage: "checkmark.circle.fill")
+                                .font(.footnote)
+                                .foregroundStyle(PocketLedgerTheme.positive)
+                        }
+                    }
+
+                    if let saveValidationMessage {
+                        Section("Save needs attention") {
+                            Label(saveValidationMessage, systemImage: "info.circle")
+                                .font(.footnote)
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        }
+                    }
+
+                    if isTemplateEditor {
+                        Section("Template") {
+                            TextField("Template name", text: $templateName)
+                        }
+                    }
+
+                    if kind == .expense {
+                        expensePaymentsSection
+                        detailsSection
+                        expenseDateSection
+                        moreDetailsSection
+                    } else {
+                        timingSection
+                        detailsSection
+                        attachmentSection
+                        outgoingMovementSection
+                        receivingMovementSection
+                        exchangeRateSection
+                    }
                 }
 
             }
@@ -533,16 +545,18 @@ struct TransactionEditor: View {
             }
             .interactiveDismissDisabled(hasUnsavedChanges)
             .pocketListSurface()
-            .navigationTitle(navigationTitle)
+            .navigationTitle(isPresentingLoanEditor ? "New loan" : navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .sensoryFeedback(.success, trigger: saveFeedbackTrigger)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: cancel)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(saveButtonTitle, action: save)
-                        .disabled(!canSave)
+                if !isPresentingLoanEditor {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(saveButtonTitle, action: save)
+                            .disabled(!canSave)
+                    }
                 }
             }
             .errorMessageAlert(title: "Transaction not saved", message: $errorMessage)
@@ -567,20 +581,6 @@ struct TransactionEditor: View {
                     selectedCategoryID: categorySelectionBinding,
                     includeUncategorized: true
                 )
-            }
-            .sheet(isPresented: $isPresentingLoanEditor, onDismiss: {
-                if dismissAfterLoanSave {
-                    dismissAfterLoanSave = false
-                    dismiss()
-                }
-            }) {
-                LoanEditor(store: store, onSave: {
-                    if hasUnsavedChanges {
-                        loanCreatedNotice = true
-                    } else {
-                        dismissAfterLoanSave = true
-                    }
-                })
             }
             .fileImporter(
                 isPresented: $isShowingAttachmentImporter,
@@ -613,6 +613,7 @@ struct TransactionEditor: View {
                 if editorType == .loan {
                     isPresentingLoanEditor = true
                 } else if let transactionKind = editorType.transactionKind {
+                    isPresentingLoanEditor = false
                     kind = transactionKind
                 }
             }

@@ -141,7 +141,7 @@ struct LoansView: View {
             }
         }
         .sheet(isPresented: $isPresentingLoanEditor) {
-            LoanEditor(store: store)
+            TransactionEditor(store: store, initialLoanEntry: true)
         }
         .alert("Loan reminders", isPresented: notificationMessagePresented) {
             Button("OK") { notificationMessage = nil }
@@ -473,8 +473,10 @@ struct LoanEditor: View {
     @ObservedObject var store: LedgerStore
     let loan: Loan?
     let onSave: (() -> Void)?
+    let isEmbedded: Bool
     @Environment(\.dismiss) private var dismiss
     @State private var counterparty: String
+    @State private var selectedCounterpartyID: UUID?
     @State private var direction: LoanDirection
     @State private var amountText: String
     @State private var fundedAmountText: String
@@ -485,11 +487,24 @@ struct LoanEditor: View {
     @State private var selectedAccountID: UUID?
     @State private var errorMessage: String?
 
-    init(store: LedgerStore, loan: Loan? = nil, onSave: (() -> Void)? = nil) {
+    init(
+        store: LedgerStore,
+        loan: Loan? = nil,
+        onSave: (() -> Void)? = nil,
+        isEmbedded: Bool = false
+    ) {
         _store = ObservedObject(wrappedValue: store)
         self.loan = loan
         self.onSave = onSave
+        self.isEmbedded = isEmbedded
         _counterparty = State(initialValue: loan?.counterparty ?? "")
+        let contactID = loan?.counterpartyContactID.flatMap { id in
+            store.data.loanContacts.contains(where: { $0.id == id }) ? id : nil
+        }
+            ?? store.data.loanContacts.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(loan?.counterparty ?? "") == .orderedSame
+            })?.id
+        _selectedCounterpartyID = State(initialValue: contactID)
         _direction = State(initialValue: loan?.direction ?? .borrowed)
         _amountText = State(initialValue: "")
         _fundedAmountText = State(initialValue: "")
@@ -507,80 +522,139 @@ struct LoanEditor: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Loan") {
-                    if loan == nil {
-                        Picker("Direction", selection: $direction) {
-                            ForEach(LoanDirection.allCases) { item in
-                                Text(item.displayName).tag(item)
-                            }
+        Group {
+            if isEmbedded {
+                editorSections
+            } else {
+                NavigationStack {
+                    Form { editorSections }
+                        .pocketListSurface()
+                        .navigationTitle(loan == nil ? "New loan" : "Edit loan")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                            ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
                         }
-                    }
-                    TextField(loan?.direction.counterpartyLabel ?? direction.counterpartyLabel, text: $counterparty)
-                    if loan == nil {
-                        CurrencyInputField("Total amount owed", text: $amountText, currency: $loanCurrency)
-                        CurrencyInputField(
-                            direction == .lent ? "Amount given" : "Amount received",
-                            text: $fundedAmountText,
-                            currency: $loanCurrency
-                        )
-                        Text("Leave the funded amount blank to use the total owed. The total can include manually entered interest.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        DatePicker("Started", selection: $startedAt, in: Date.distantPast...Date.now, displayedComponents: .date)
-                    }
-                    Toggle("Add due date", isOn: $hasDueDate)
-                    if hasDueDate {
-                        DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
-                    }
-                }
-
-                if loan == nil {
-                    Section(direction == .lent ? "Money given from" : "Money received into") {
-                        if eligibleAccounts.isEmpty {
-                            Text("Add a cash or bank account before creating a loan.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Picker("Account", selection: selectedAccountBinding) {
-                                ForEach(eligibleAccounts) { account in
-                                    Text("\(account.name) · \(account.currency.rawValue)")
-                                        .tag(Optional(account.id))
-                                }
-                            }
-                        }
-                        if let cashMovementAmount {
-                            LabeledContent("Cash movement") {
-                                Text(cashMovementAmount.formatted)
-                                    .font(.subheadline.weight(.semibold).monospacedDigit())
-                            }
-                            if let fundingRate {
-                                Text(fundingRate.summary)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } else if needsFundingRate {
-                            Text("Add an exchange rate in More → Exchange Rates to record the funding movement.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Section {
-                        Text("The loan uses its own currency. Funding is converted to the selected cash account with a saved exchange rate, and principal stays out of income and expense totals.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
                 }
             }
-            .pocketListSurface()
-            .navigationTitle(loan == nil ? "New loan" : "Edit loan")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
-            }
-            .errorMessageAlert(title: "Loan not saved", message: $errorMessage)
         }
+        .errorMessageAlert(title: "Loan not saved", message: $errorMessage)
+    }
+
+    @ViewBuilder
+    private var editorSections: some View {
+        Section("Loan") {
+            if loan == nil {
+                Picker("Direction", selection: $direction) {
+                    ForEach(LoanDirection.allCases) { item in
+                        Text(item.displayName).tag(item)
+                    }
+                }
+            }
+            if !store.data.loanContacts.isEmpty {
+                Picker(direction.counterpartyLabel, selection: counterpartySelectionBinding) {
+                    Text("New person").tag(nil as UUID?)
+                    ForEach(sortedLoanContacts) { contact in
+                        Text(contact.name).tag(Optional(contact.id))
+                    }
+                }
+                if selectedCounterpartyID == nil {
+                    TextField(direction.counterpartyLabel, text: $counterparty)
+                    Text("New names are saved for future loans.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                TextField(loan?.direction.counterpartyLabel ?? direction.counterpartyLabel, text: $counterparty)
+                if loan == nil {
+                    Text("This name will be saved for future loans.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if loan == nil {
+                CurrencyInputField("Total amount owed", text: $amountText, currency: $loanCurrency)
+                CurrencyInputField(
+                    direction == .lent ? "Amount given" : "Amount received",
+                    text: $fundedAmountText,
+                    currency: $loanCurrency
+                )
+                Text("Leave the funded amount blank to use the total owed. The total can include manually entered interest.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                DatePicker("Started", selection: $startedAt, in: Date.distantPast...Date.now, displayedComponents: .date)
+            }
+            Toggle("Add due date", isOn: $hasDueDate)
+            if hasDueDate {
+                DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
+            }
+        }
+
+        if loan == nil {
+            Section(direction == .lent ? "Money given from" : "Money received into") {
+                if eligibleAccounts.isEmpty {
+                    Text("Add a cash or bank account before creating a loan.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Account", selection: selectedAccountBinding) {
+                        ForEach(eligibleAccounts) { account in
+                            Text("\(account.name) · \(account.currency.rawValue)")
+                                .tag(Optional(account.id))
+                        }
+                    }
+                }
+                if let cashMovementAmount {
+                    LabeledContent("Cash movement") {
+                        Text(cashMovementAmount.formatted)
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                    }
+                    if let fundingRate {
+                        Text(fundingRate.summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if needsFundingRate {
+                    Text("Add an exchange rate in More → Exchange Rates to record the funding movement.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                Text("The loan uses its own currency. Funding is converted to the selected cash account with a saved exchange rate, and principal stays out of income and expense totals.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if isEmbedded {
+                Section {
+                    Button("Create loan", action: save)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    private var sortedLoanContacts: [LoanContact] {
+        store.data.loanContacts.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private var selectedCounterparty: LoanContact? {
+        store.data.loanContacts.first { $0.id == selectedCounterpartyID }
+    }
+
+    private var counterpartySelectionBinding: Binding<UUID?> {
+        Binding(
+            get: { selectedCounterpartyID },
+            set: { id in
+                selectedCounterpartyID = id
+                guard let id else {
+                    counterparty = ""
+                    return
+                }
+                counterparty = store.data.loanContacts.first(where: { $0.id == id })?.name ?? ""
+            }
+        )
     }
 
     private var eligibleAccounts: [Account] {
@@ -625,12 +699,15 @@ struct LoanEditor: View {
 
     private func save() {
         let party = counterparty.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !party.isEmpty else {
+        let selectedContact = selectedCounterparty
+        let savedParty = selectedContact?.name ?? party
+        guard !savedParty.isEmpty else {
             errorMessage = "Enter the person or organization for this loan."
             return
         }
         if var existing = loan {
-            existing.counterparty = party
+            existing.counterparty = savedParty
+            existing.counterpartyContactID = selectedContact?.id
             existing.dueDate = hasDueDate ? dueDate : nil
             guard store.updateLoan(existing) else {
                 errorMessage = store.lastActionStatus ?? "The loan could not be updated."
@@ -659,7 +736,8 @@ struct LoanEditor: View {
         let transactionID = UUID()
         let loan = Loan(
             id: loanID,
-            counterparty: party,
+            counterparty: savedParty,
+            counterpartyContactID: selectedContact?.id,
             direction: direction,
             currency: amount.currency,
             startingAmount: amount,
@@ -672,7 +750,7 @@ struct LoanEditor: View {
         let transaction = LedgerTransaction(
             id: transactionID,
             date: startedAt,
-            note: direction == .lent ? "Loan to \(party)" : "Loan from \(party)",
+            note: direction == .lent ? "Loan to \(savedParty)" : "Loan from \(savedParty)",
             kind: .transfer,
             categoryID: nil,
             outflows: direction == .lent ? [movement] : [],
@@ -687,7 +765,9 @@ struct LoanEditor: View {
             return
         }
         onSave?()
-        dismiss()
+        if !isEmbedded {
+            dismiss()
+        }
     }
 }
 

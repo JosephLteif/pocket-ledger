@@ -964,9 +964,20 @@ struct LoanPayment: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+struct LoanContact: Identifiable, Codable, Equatable, Sendable {
+    let id: UUID
+    var name: String
+
+    init(id: UUID = UUID(), name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
 struct Loan: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     var counterparty: String
+    var counterpartyContactID: UUID?
     var direction: LoanDirection
     var currency: LedgerCurrency
     var startingAmount: Money
@@ -980,6 +991,7 @@ struct Loan: Identifiable, Codable, Equatable, Sendable {
     init(
         id: UUID = UUID(),
         counterparty: String,
+        counterpartyContactID: UUID? = nil,
         direction: LoanDirection,
         currency: LedgerCurrency,
         startingAmount: Money,
@@ -992,6 +1004,7 @@ struct Loan: Identifiable, Codable, Equatable, Sendable {
     ) {
         self.id = id
         self.counterparty = counterparty
+        self.counterpartyContactID = counterpartyContactID
         self.direction = direction
         self.currency = currency
         self.startingAmount = startingAmount
@@ -1604,6 +1617,7 @@ struct FinanceData: Codable, Equatable {
     var categories: [LedgerCategory]
     var transactions: [LedgerTransaction]
     var loans: [Loan]
+    var loanContacts: [LoanContact]
     var managedLegacyLoanAccountIDs: Set<UUID>
     var scheduledTransactions: [ScheduledTransaction]
     var exchangeRates: [ExchangeRate]
@@ -1618,6 +1632,7 @@ struct FinanceData: Codable, Equatable {
         categories: [LedgerCategory],
         transactions: [LedgerTransaction],
         loans: [Loan] = [],
+        loanContacts: [LoanContact] = [],
         managedLegacyLoanAccountIDs: Set<UUID> = [],
         scheduledTransactions: [ScheduledTransaction] = [],
         exchangeRates: [ExchangeRate] = [],
@@ -1631,6 +1646,7 @@ struct FinanceData: Codable, Equatable {
         self.categories = categories
         self.transactions = transactions
         self.loans = loans
+        self.loanContacts = loanContacts
         self.managedLegacyLoanAccountIDs = managedLegacyLoanAccountIDs
         self.scheduledTransactions = scheduledTransactions
         self.exchangeRates = exchangeRates
@@ -1646,6 +1662,7 @@ struct FinanceData: Codable, Equatable {
         case categories
         case transactions
         case loans
+        case loanContacts
         case managedLegacyLoanAccountIDs
         case scheduledTransactions
         case exchangeRates
@@ -1662,6 +1679,7 @@ struct FinanceData: Codable, Equatable {
         categories = try container.decode([LedgerCategory].self, forKey: .categories)
         transactions = try container.decode([LedgerTransaction].self, forKey: .transactions)
         loans = try container.decodeIfPresent([Loan].self, forKey: .loans) ?? []
+        loanContacts = try container.decodeIfPresent([LoanContact].self, forKey: .loanContacts) ?? []
         managedLegacyLoanAccountIDs = try container.decodeIfPresent(
             Set<UUID>.self,
             forKey: .managedLegacyLoanAccountIDs
@@ -1693,6 +1711,7 @@ struct FinanceData: Codable, Equatable {
         try container.encode(categories, forKey: .categories)
         try container.encode(transactions, forKey: .transactions)
         try container.encode(loans, forKey: .loans)
+        try container.encode(loanContacts, forKey: .loanContacts)
         try container.encode(managedLegacyLoanAccountIDs, forKey: .managedLegacyLoanAccountIDs)
         try container.encode(scheduledTransactions, forKey: .scheduledTransactions)
         try container.encode(exchangeRates, forKey: .exchangeRates)

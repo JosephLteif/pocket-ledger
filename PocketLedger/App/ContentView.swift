@@ -353,7 +353,7 @@ struct ContentView: View {
             case .transfer:
                 TransactionEditor(store: store, initialKind: .transfer)
             case .loan:
-                LoanEditor(store: store)
+                TransactionEditor(store: store, initialLoanEntry: true)
             case .scheduled:
                 TransactionEditor(store: store, initialKind: .expense, initialTiming: .scheduled)
             case .template(let templateID):

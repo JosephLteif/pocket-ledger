@@ -17,14 +17,6 @@ private enum MetricsBreakdown: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-struct MetricsCategoryRoute: Hashable {
-    let categoryID: UUID?
-    let categoryTitle: String
-    let currency: LedgerCurrency
-    let anchorDate: Date
-    let selectedInterval: DateInterval
-}
-
 private typealias CategoryMetric = MetricsCategorySnapshot
 
 private struct CategoryMonthPoint: Identifiable {
@@ -547,15 +539,17 @@ struct MetricsView: View {
         return VStack(spacing: 0) {
             if breakdown == .category {
                 ForEach(snapshot.categories) { metric in
-                    NavigationLink(
-                        value: MetricsCategoryRoute(
+                    NavigationLink {
+                        CategoryMetricsDetailView(
+                            store: store,
+                            security: security,
                             categoryID: metric.categoryID,
                             categoryTitle: metric.title,
                             currency: metric.currency,
                             anchorDate: anchorDate,
                             selectedInterval: interval
                         )
-                    ) {
+                    } label: {
                         breakdownRow(
                             title: metric.title,
                             icon: categoryIcon(for: metric.categoryID),
@@ -1130,15 +1124,17 @@ struct CategoryMetricsDetailView: View {
 
                 VStack(spacing: 0) {
                     ForEach(snapshot.subcategories) { metric in
-                        NavigationLink(
-                            value: MetricsCategoryRoute(
+                        NavigationLink {
+                            CategoryMetricsDetailView(
+                                store: store,
+                                security: security,
                                 categoryID: metric.categoryID,
                                 categoryTitle: metric.title,
                                 currency: currency,
                                 anchorDate: anchorDate,
                                 selectedInterval: selectedInterval
                             )
-                        ) {
+                        } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: store.ledgerIndex.categorySystemImage(for: metric.categoryID))
                                     .foregroundStyle(PocketLedgerTheme.accent)

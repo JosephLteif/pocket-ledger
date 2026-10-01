@@ -881,6 +881,8 @@ struct CategoryMetricsDetailView: View {
     @State private var transactionDeletion = TransactionDeletionState()
     @State private var transactionToOpenID: UUID?
     @State private var isShowingTransactionDetail = false
+    @State private var subcategoryToOpen: CategoryMetric?
+    @State private var isShowingSubcategoryDetail = false
 
     init(
         store: LedgerStore,
@@ -980,6 +982,19 @@ struct CategoryMetricsDetailView: View {
                     store: store,
                     security: security,
                     transactionID: transactionToOpenID
+                )
+            }
+        }
+        .navigationDestination(isPresented: $isShowingSubcategoryDetail) {
+            if let subcategoryToOpen {
+                CategoryMetricsDetailView(
+                    store: store,
+                    security: security,
+                    categoryID: subcategoryToOpen.categoryID,
+                    categoryTitle: subcategoryToOpen.title,
+                    currency: currency,
+                    anchorDate: anchorDate,
+                    selectedInterval: selectedInterval
                 )
             }
         }
@@ -1124,16 +1139,9 @@ struct CategoryMetricsDetailView: View {
 
                 VStack(spacing: 0) {
                     ForEach(snapshot.subcategories) { metric in
-                        NavigationLink {
-                            CategoryMetricsDetailView(
-                                store: store,
-                                security: security,
-                                categoryID: metric.categoryID,
-                                categoryTitle: metric.title,
-                                currency: currency,
-                                anchorDate: anchorDate,
-                                selectedInterval: selectedInterval
-                            )
+                        Button {
+                            subcategoryToOpen = metric
+                            isShowingSubcategoryDetail = true
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: store.ledgerIndex.categorySystemImage(for: metric.categoryID))
@@ -1151,6 +1159,10 @@ struct CategoryMetricsDetailView: View {
                                     isRevealed: areBalancesRevealed
                                 )
                                     .font(.subheadline.weight(.semibold).monospacedDigit())
+
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(PocketLedgerTheme.textTertiary)
                             }
                             .contentShape(Rectangle())
                             .padding(.vertical, 13)

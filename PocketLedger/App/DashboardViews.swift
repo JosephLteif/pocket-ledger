@@ -139,6 +139,17 @@ struct MoreView: View {
             .sheet(isPresented: $isShowingSetup) {
                 SetupWizardView(store: store)
             }
+            .navigationDestination(for: MetricsCategoryRoute.self) { route in
+                CategoryMetricsDetailView(
+                    store: store,
+                    security: security,
+                    categoryID: route.categoryID,
+                    categoryTitle: route.categoryTitle,
+                    currency: route.currency,
+                    anchorDate: route.anchorDate,
+                    selectedInterval: route.selectedInterval
+                )
+            }
         }
     }
 }
@@ -240,17 +251,6 @@ struct DashboardView: View {
                 }
             }
             .onChange(of: dashboardPreferences) { _, preferences in preferences.save() }
-            .navigationDestination(for: MetricsCategoryRoute.self) { route in
-                CategoryMetricsDetailView(
-                    store: store,
-                    security: security,
-                    categoryID: route.categoryID,
-                    categoryTitle: route.categoryTitle,
-                    currency: route.currency,
-                    anchorDate: route.anchorDate,
-                    selectedInterval: route.selectedInterval
-                )
-            }
         }
     }
 

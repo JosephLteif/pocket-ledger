@@ -17,7 +17,7 @@ private enum MetricsBreakdown: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-private struct MetricsCategoryRoute: Hashable {
+struct MetricsCategoryRoute: Hashable {
     let categoryID: UUID?
     let categoryTitle: String
     let currency: LedgerCurrency
@@ -206,17 +206,6 @@ struct MetricsView: View {
                     .accessibilityHint("Creates a shareable PDF report")
                 }
             }
-        }
-        .navigationDestination(for: MetricsCategoryRoute.self) { route in
-            CategoryMetricsDetailView(
-                store: store,
-                security: security,
-                categoryID: route.categoryID,
-                categoryTitle: route.categoryTitle,
-                currency: route.currency,
-                anchorDate: route.anchorDate,
-                selectedInterval: route.selectedInterval
-            )
         }
         .onAppear(perform: refreshSnapshot)
         .onChange(of: period) { _, _ in refreshSnapshot() }
@@ -881,7 +870,7 @@ struct MetricsView: View {
 }
 
 @MainActor
-private struct CategoryMetricsDetailView: View {
+struct CategoryMetricsDetailView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false

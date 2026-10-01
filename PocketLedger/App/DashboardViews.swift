@@ -241,6 +241,17 @@ struct DashboardView: View {
             }
             .onChange(of: dashboardPreferences) { _, preferences in preferences.save() }
         }
+        .navigationDestination(for: MetricsCategoryRoute.self) { route in
+            CategoryMetricsDetailView(
+                store: store,
+                security: security,
+                categoryID: route.categoryID,
+                categoryTitle: route.categoryTitle,
+                currency: route.currency,
+                anchorDate: route.anchorDate,
+                selectedInterval: route.selectedInterval
+            )
+        }
     }
 
     private var dashboardDateHeader: some View {

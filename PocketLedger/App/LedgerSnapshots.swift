@@ -88,7 +88,7 @@ struct MetricsSnapshot {
                 guard amount > 0 else { continue }
                 var countedGroups: Set<UUID?> = []
                 for allocation in selectedAllocations where allocation.amount.minorUnits > 0 {
-                    let groupID = index.topLevelCategoryID(for: allocation.categoryID)
+                    let groupID = selectedCategoryID ?? index.topLevelCategoryID(for: allocation.categoryID)
                     let current = categoryTotals[groupID]
                         ?? (index.categoryName(for: groupID), 0, 0)
                     categoryTotals[groupID] = (

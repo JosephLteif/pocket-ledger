@@ -17,6 +17,14 @@ private enum MetricsBreakdown: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private struct MetricsCategoryRoute: Hashable {
+    let categoryID: UUID?
+    let categoryTitle: String
+    let currency: LedgerCurrency
+    let anchorDate: Date
+    let selectedInterval: DateInterval
+}
+
 private typealias CategoryMetric = MetricsCategorySnapshot
 
 private struct CategoryMonthPoint: Identifiable {
@@ -166,81 +174,90 @@ struct MetricsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView(showsIndicators: false) {
-                PocketGlassContainer(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        screenSubtitle
-                        periodControls
-                        periodNavigator
-                        totalsHeader(snapshot)
-                        spendingChart(snapshot)
-                        categoryRows(snapshot)
-                        activityMix(snapshot)
+        ScrollView(showsIndicators: false) {
+            PocketGlassContainer(spacing: 14) {
+                VStack(alignment: .leading, spacing: 0) {
+                    screenSubtitle
+                    periodControls
+                    periodNavigator
+                    totalsHeader(snapshot)
+                    spendingChart(snapshot)
+                    categoryRows(snapshot)
+                    activityMix(snapshot)
+                }
+                .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
+            }
+        }
+        .pocketScreen()
+        .navigationTitle("Metrics")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar(.visible, for: .navigationBar)
+        .toolbar {
+            PocketLedgerToolbar(security: security) {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        isExportOptionsPresented = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
                     }
-                    .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
-                    .padding(.top, 12)
-                    .padding(.bottom, 24)
+                    .accessibilityLabel("Share metrics PDF report")
+                    .accessibilityHint("Creates a shareable PDF report")
                 }
             }
-            .pocketScreen()
-            .navigationTitle("Metrics")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar(.visible, for: .navigationBar)
-            .toolbar {
-                PocketLedgerToolbar(security: security) {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            isExportOptionsPresented = true
-                        } label: {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                        .accessibilityLabel("Share metrics PDF report")
-                        .accessibilityHint("Creates a shareable PDF report")
-                    }
+        }
+        .navigationDestination(for: MetricsCategoryRoute.self) { route in
+            CategoryMetricsDetailView(
+                store: store,
+                security: security,
+                categoryID: route.categoryID,
+                categoryTitle: route.categoryTitle,
+                currency: route.currency,
+                anchorDate: route.anchorDate,
+                selectedInterval: route.selectedInterval
+            )
+        }
+        .onAppear(perform: refreshSnapshot)
+        .onChange(of: period) { _, _ in refreshSnapshot() }
+        .onChange(of: selectedCurrency) { _, _ in refreshSnapshot() }
+        .onChange(of: anchorDate) { _, _ in refreshSnapshot() }
+        .onChange(of: customStart) { _, _ in refreshSnapshot() }
+        .onChange(of: customEnd) { _, _ in refreshSnapshot() }
+        .onChange(of: selectedCategoryID) { _, _ in refreshSnapshot() }
+        .onChange(of: store.ledgerRevision) { _, _ in refreshSnapshot() }
+        .sheet(item: $reportToShare) { report in
+            MetricsReportShareSheet(url: report.url)
+        }
+        .confirmationDialog(
+            "Export Metrics PDF",
+            isPresented: $isExportOptionsPresented,
+            titleVisibility: .visible
+        ) {
+            Button("All \(snapshot.filteredTransactions.count) transactions") {
+                generateReport(transactionLimit: nil)
+            }
+            if snapshot.filteredTransactions.count > 500 {
+                Button("Latest 500 transactions") {
+                    generateReport(transactionLimit: 500)
                 }
             }
-            .onAppear(perform: refreshSnapshot)
-            .onChange(of: period) { _, _ in refreshSnapshot() }
-            .onChange(of: selectedCurrency) { _, _ in refreshSnapshot() }
-            .onChange(of: anchorDate) { _, _ in refreshSnapshot() }
-            .onChange(of: customStart) { _, _ in refreshSnapshot() }
-            .onChange(of: customEnd) { _, _ in refreshSnapshot() }
-            .onChange(of: selectedCategoryID) { _, _ in refreshSnapshot() }
-            .onChange(of: store.ledgerRevision) { _, _ in refreshSnapshot() }
-            .sheet(item: $reportToShare) { report in
-                MetricsReportShareSheet(url: report.url)
+            if snapshot.filteredTransactions.count > 100 {
+                Button("Latest 100 transactions") {
+                    generateReport(transactionLimit: 100)
+                }
             }
-            .confirmationDialog(
-                "Export Metrics PDF",
-                isPresented: $isExportOptionsPresented,
-                titleVisibility: .visible
-            ) {
-                Button("All \(snapshot.filteredTransactions.count) transactions") {
-                    generateReport(transactionLimit: nil)
-                }
-                if snapshot.filteredTransactions.count > 500 {
-                    Button("Latest 500 transactions") {
-                        generateReport(transactionLimit: 500)
-                    }
-                }
-                if snapshot.filteredTransactions.count > 100 {
-                    Button("Latest 100 transactions") {
-                        generateReport(transactionLimit: 100)
-                    }
-                }
-                Button("Summary only") {
-                    generateReport(transactionLimit: 0)
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("The report uses the current period and filters. Transaction details are listed newest first.")
+            Button("Summary only") {
+                generateReport(transactionLimit: 0)
             }
-            .alert("Report not created", isPresented: reportErrorPresented) {
-                Button("OK") { reportError = nil }
-            } message: {
-                Text(reportError ?? "")
-            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The report uses the current period and filters. Transaction details are listed newest first.")
+        }
+        .alert("Report not created", isPresented: reportErrorPresented) {
+            Button("OK") { reportError = nil }
+        } message: {
+            Text(reportError ?? "")
         }
     }
 
@@ -541,17 +558,15 @@ struct MetricsView: View {
         return VStack(spacing: 0) {
             if breakdown == .category {
                 ForEach(snapshot.categories) { metric in
-                    NavigationLink {
-                        CategoryMetricsDetailView(
-                            store: store,
-                            security: security,
+                    NavigationLink(
+                        value: MetricsCategoryRoute(
                             categoryID: metric.categoryID,
                             categoryTitle: metric.title,
                             currency: metric.currency,
                             anchorDate: anchorDate,
                             selectedInterval: interval
                         )
-                    } label: {
+                    ) {
                         breakdownRow(
                             title: metric.title,
                             icon: categoryIcon(for: metric.categoryID),
@@ -1126,17 +1141,15 @@ private struct CategoryMetricsDetailView: View {
 
                 VStack(spacing: 0) {
                     ForEach(snapshot.subcategories) { metric in
-                        NavigationLink {
-                            CategoryMetricsDetailView(
-                                store: store,
-                                security: security,
+                        NavigationLink(
+                            value: MetricsCategoryRoute(
                                 categoryID: metric.categoryID,
                                 categoryTitle: metric.title,
                                 currency: currency,
                                 anchorDate: anchorDate,
                                 selectedInterval: selectedInterval
                             )
-                        } label: {
+                        ) {
                             HStack(spacing: 10) {
                                 Image(systemName: store.ledgerIndex.categorySystemImage(for: metric.categoryID))
                                     .foregroundStyle(PocketLedgerTheme.accent)

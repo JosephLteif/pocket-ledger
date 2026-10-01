@@ -219,30 +219,32 @@ struct DataTransferView: View {
             .buttonStyle(.glass)
             .disabled(isProcessingTransfer)
 
-            Button {
-                startJSONBackupExport()
-            } label: {
-                Label("Export JSON compatibility backup", systemImage: "doc.text")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glass)
-            .disabled(isProcessingTransfer)
+            DisclosureGroup("Compatibility and CSV exports") {
+                Button {
+                    startJSONBackupExport()
+                } label: {
+                    Label("Export JSON compatibility backup", systemImage: "doc.text")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .disabled(isProcessingTransfer)
 
-            Button {
-                startJSONBackupExport(protected: true)
-            } label: {
-                Label("Export protected JSON backup", systemImage: "lock.doc")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glass)
-            .disabled(isProcessingTransfer)
+                Button {
+                    startJSONBackupExport(protected: true)
+                } label: {
+                    Label("Export protected JSON backup", systemImage: "lock.doc")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .disabled(isProcessingTransfer)
 
-            Button(action: exportCSV) {
-                Label("Export transactions as CSV", systemImage: "tablecells")
-                    .frame(maxWidth: .infinity)
+                Button(action: exportCSV) {
+                    Label("Export transactions as CSV", systemImage: "tablecells")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .disabled(isProcessingTransfer)
             }
-            .buttonStyle(.glass)
-            .disabled(isProcessingTransfer)
 
             Text("Protected backups use AES-GCM and an iCloud Keychain key shared with your Apple Account. Restore requires iCloud Keychain on the same account. Plain JSON and full backup exports remain available; CSV stays readable.")
                 .font(.footnote)

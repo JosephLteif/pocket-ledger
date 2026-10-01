@@ -68,13 +68,14 @@ struct LoansView: View {
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(filter == item ? .white : PocketLedgerTheme.textSecondary)
                                     .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
+                                    .frame(minHeight: 44)
                                     .background(
                                         filter == item ? PocketLedgerTheme.accent : PocketLedgerTheme.surface,
                                         in: Capsule()
                                     )
                             }
                             .buttonStyle(.plain)
+                            .accessibilityAddTraits(filter == item ? [.isSelected, .isButton] : .isButton)
                         }
                     }
                     .padding(.vertical, 3)

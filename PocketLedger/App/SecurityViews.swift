@@ -520,14 +520,18 @@ struct AppLockView: View {
         .tint(PocketLedgerTheme.accent)
         .preferredColorScheme(PocketLedgerTheme.appearanceMode.preferredColorScheme)
         .onAppear {
-            requestBiometricUnlockIfPossible()
+            if scenePhase == .active {
+                requestBiometricUnlockIfPossible()
+            } else {
+                shouldRetryBiometricsOnActivation = true
+            }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background {
-                shouldRetryBiometricsOnActivation = true
-            } else if phase == .active, shouldRetryBiometricsOnActivation {
+            if phase == .active, shouldRetryBiometricsOnActivation {
                 shouldRetryBiometricsOnActivation = false
                 requestBiometricUnlockIfPossible()
+            } else if phase != .active, !security.isBiometricPromptActive {
+                shouldRetryBiometricsOnActivation = true
             }
         }
     }

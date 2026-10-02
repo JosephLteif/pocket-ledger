@@ -434,6 +434,7 @@ struct CurrencyInputField: View {
     private let selectableCurrencies: [LedgerCurrency]
     private let focusOnAppear: Bool
     @FocusState private var isFocused: Bool
+    @State private var selection: TextSelection?
 
     init(
         _ title: String,
@@ -465,7 +466,7 @@ struct CurrencyInputField: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            TextField(title, text: $text)
+            TextField(title, text: $text, selection: $selection)
                 .keyboardType(.decimalPad)
                 .monospacedDigit()
                 .focused($isFocused)
@@ -482,6 +483,10 @@ struct CurrencyInputField: View {
             formatText()
             if focusOnAppear { isFocused = true }
         }
+        .onChange(of: text) { _, value in
+            guard isFocused else { return }
+            formatTextWhileEditing(value)
+        }
         .onChange(of: isFocused) { _, focused in
             if !focused {
                 formatText()
@@ -497,6 +502,62 @@ struct CurrencyInputField: View {
     private func formatText() {
         let formatted = currency.formattedInput(text)
         guard formatted != text else { return }
+        text = formatted
+    }
+
+    private func formatTextWhileEditing(_ rawValue: String) {
+        let locale = Locale.current
+        let groupingSeparator = locale.groupingSeparator ?? ","
+        let decimalSeparator = locale.decimalSeparator ?? "."
+        let components = rawValue.components(separatedBy: decimalSeparator)
+        guard components.count <= 2 else { return }
+
+        let rawInteger = components[0].replacingOccurrences(of: groupingSeparator, with: "")
+        let integerInput = rawInteger.isEmpty && components.count == 2 ? "0" : rawInteger
+        let digits = integerInput.hasPrefix("-") ? String(integerInput.dropFirst()) : integerInput
+        guard !digits.isEmpty,
+              digits.allSatisfy(\.isNumber),
+              components.dropFirst().allSatisfy({ $0.allSatisfy(\.isNumber) }) else { return }
+
+        let formatter = NumberFormatter()
+        formatter.locale = locale
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 0
+        guard let number = formatter.number(from: integerInput) else { return }
+
+        let groupedInteger = rawInteger.isEmpty && components.count == 2
+            ? ""
+            : formatter.string(from: number) ?? integerInput
+        let formatted = groupedInteger + (components.count == 2 ? decimalSeparator + components[1] : "")
+        guard formatted != rawValue else { return }
+
+        if let currentSelection = selection,
+           case .selection(let range) = currentSelection.indices {
+            func significantCharacterCount(before index: String.Index) -> Int {
+                rawValue[..<index].reduce(into: 0) { count, character in
+                    if String(character) != groupingSeparator { count += 1 }
+                }
+            }
+
+            func formattedIndex(after count: Int) -> String.Index {
+                var index = formatted.startIndex
+                var seen = 0
+                while index < formatted.endIndex && seen < count {
+                    if String(formatted[index]) != groupingSeparator { seen += 1 }
+                    index = formatted.index(after: index)
+                }
+                return index
+            }
+
+            let lowerBound = formattedIndex(after: significantCharacterCount(before: range.lowerBound))
+            let upperBound = formattedIndex(after: significantCharacterCount(before: range.upperBound))
+            selection = TextSelection(range: lowerBound..<upperBound)
+        } else {
+            selection = TextSelection(insertionPoint: formatted.endIndex)
+        }
+
         text = formatted
     }
 }

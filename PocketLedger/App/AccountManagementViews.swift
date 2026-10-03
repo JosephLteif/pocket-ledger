@@ -25,7 +25,6 @@ struct AccountsView: View {
         List {
             DisclosureGroup(isExpanded: $isAccountSummaryExpanded) {
                 VStack(spacing: 12) {
-                    accountTypeTotalsSummary
                     globalPositionSummary
                 }
                 .padding(.top, 8)
@@ -115,75 +114,6 @@ struct AccountsView: View {
         }
     }
 
-    private var accountTypeTotalsSummary: some View {
-        let activeAccounts = store.activeAccounts
-        let includedAccounts = activeAccounts.filter(\.includeInTotals)
-
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Account totals by type")
-                        .font(.title3.weight(.bold))
-                    Text("Included balances stay in their account currency")
-                        .font(.caption)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-                }
-                Spacer(minLength: 8)
-            }
-
-            if includedAccounts.isEmpty {
-                Text(activeAccounts.isEmpty
-                     ? "Add an account to see totals by type."
-                     : "No accounts are currently included in totals.")
-                    .font(.subheadline)
-                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-                    .padding(.vertical, 6)
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(AccountType.allCases.filter { type in
-                        includedAccounts.contains { $0.type == type }
-                    }) { type in
-                        let typeAccounts = includedAccounts.filter { $0.type == type }
-                        HStack(alignment: .top, spacing: 8) {
-                            Label(type.displayName, systemImage: type.systemImage)
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(PocketLedgerTheme.textSecondary)
-                                .frame(width: 112, alignment: .leading)
-
-                            Spacer(minLength: 4)
-
-                            VStack(alignment: .trailing, spacing: 5) {
-                                ForEach(LedgerCurrency.allCases.filter { currency in
-                                    typeAccounts.contains { $0.currency == currency }
-                                }) { currency in
-                                    let currencyAccounts = typeAccounts.filter { $0.currency == currency }
-                                    let total = currencyAccounts.reduce(Int64.zero) { total, account in
-                                        total + store.valuation(for: account).minorUnits
-                                    }
-                                    HStack(spacing: 6) {
-                                        Text(currency.rawValue)
-                                            .font(.caption2.weight(.bold))
-                                            .foregroundStyle(PocketLedgerTheme.textTertiary)
-                                        ProtectedAmountText(
-                                            value: Money(currency: currency, minorUnits: total).formatted,
-                                            isRevealed: areBalancesRevealed
-                                        )
-                                            .font(.caption.weight(.semibold).monospacedDigit())
-                                            .foregroundStyle(PocketLedgerTheme.textPrimary)
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.7)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.vertical, 5)
-                    }
-                }
-            }
-        }
-        .pocketCard()
-    }
-
     private var globalPositionSummary: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
@@ -192,7 +122,7 @@ struct AccountsView: View {
                         .font(.title3.weight(.bold))
                     Text(positionGrouping == .currency
                          ? "Tap a currency to see assets and liabilities"
-                         : "Type totals stay split by currency")
+                         : "Each type’s share of net worth in the same currency")
                         .font(.caption)
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
@@ -240,6 +170,15 @@ struct AccountsView: View {
                             value: store.liabilityBalance(for: currency),
                             tint: PocketLedgerTheme.warning
                         )
+                        ForEach(AccountType.allCases.filter { positionCurrencies(for: $0).contains(currency) }) { accountType in
+                            HStack(alignment: .top) {
+                                Text(accountType.displayName)
+                                    .font(.caption)
+                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                Spacer(minLength: 8)
+                                netWorthShare(for: accountType, currency: currency)
+                            }
+                        }
                     } label: {
                         HStack(spacing: 10) {
                             Text(currency.rawValue)
@@ -294,18 +233,21 @@ struct AccountsView: View {
 
                             VStack(alignment: .trailing, spacing: 5) {
                                 ForEach(positionCurrencies(for: accountType)) { currency in
-                                    HStack(spacing: 6) {
-                                        Text(currency.rawValue)
-                                            .font(.caption2.weight(.bold))
-                                            .foregroundStyle(PocketLedgerTheme.textTertiary)
-                                        ProtectedAmountText(
-                                            value: netWorth(for: accountType, currency: currency).formatted,
-                                            isRevealed: areBalancesRevealed
-                                        )
-                                            .font(.caption.weight(.semibold).monospacedDigit())
-                                            .foregroundStyle(PocketLedgerTheme.textPrimary)
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.7)
+                                    VStack(alignment: .trailing, spacing: 3) {
+                                        HStack(spacing: 6) {
+                                            Text(currency.rawValue)
+                                                .font(.caption2.weight(.bold))
+                                                .foregroundStyle(PocketLedgerTheme.textTertiary)
+                                            ProtectedAmountText(
+                                                value: netWorth(for: accountType, currency: currency).formatted,
+                                                isRevealed: areBalancesRevealed
+                                            )
+                                                .font(.caption.weight(.semibold).monospacedDigit())
+                                                .foregroundStyle(PocketLedgerTheme.textPrimary)
+                                                .lineLimit(1)
+                                                .minimumScaleFactor(0.7)
+                                        }
+                                        netWorthShare(for: accountType, currency: currency)
                                     }
                                 }
                             }
@@ -314,6 +256,29 @@ struct AccountsView: View {
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func netWorthShare(for accountType: AccountType, currency: LedgerCurrency) -> some View {
+        let total = store.netWorth(for: currency).minorUnits
+        if !areBalancesRevealed {
+            Text("••••")
+                .font(.caption)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                .accessibilityLabel("Hidden share of net worth")
+        } else if total > 0 {
+            let share = Decimal(netWorth(for: accountType, currency: currency).minorUnits) / Decimal(total) * 100
+            Text("\(share.formatted(.number.precision(.fractionLength(1))))% of \(currency.rawValue) net worth")
+                .font(.caption)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                .monospacedDigit()
+                .privacySensitive()
+                .accessibilityLabel("\(accountType.displayName): \(share.formatted(.number.precision(.fractionLength(1)))) percent of \(currency.rawValue) net worth")
+        } else {
+            Text("Share unavailable: net worth is zero or negative")
+                .font(.caption)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
         }
     }
 

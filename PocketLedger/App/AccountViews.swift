@@ -163,7 +163,6 @@ struct AccountDetailView: View {
                 PocketGlassContainer(spacing: 14) {
                     VStack(alignment: .leading, spacing: 18) {
                         balanceCard(account)
-                        totalsScopeCard(account)
 
                         if !hidesGenericActivity {
                             ViewThatFits(in: .horizontal) {
@@ -299,36 +298,6 @@ struct AccountDetailView: View {
         )
     }
 
-    private func totalsScopeCard(_ account: Account) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if store.isManagedLegacyLoanAccount(account.id) {
-                Label("Managed in Loans", systemImage: "arrow.left.arrow.right.circle")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(PocketLedgerTheme.accent)
-                Text("This account remains as the history for the converted loan balances.")
-                    .font(.footnote)
-                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-            } else {
-                Toggle("Include in totals and metrics", isOn: Binding(
-                    get: { account.includeInTotals },
-                    set: { store.setAccountIncludedInTotals(accountID: account.id, included: $0) }
-                ))
-                Text(account.includeInTotals
-                     ? "This account contributes to balances and spending metrics."
-                     : "This account stays visible here but is excluded from balances and spending metrics.")
-                    .font(.footnote)
-                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-            }
-        }
-        .tint(PocketLedgerTheme.accent)
-        .padding(16)
-        .pocketGroupedSurface(cornerRadius: 18)
-        .overlay {
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(PocketLedgerTheme.divider, lineWidth: 1)
-        }
-    }
-
     @ViewBuilder
     private func accountActivityMetrics(account: Account, snapshot: AccountDetailSnapshot) -> some View {
         accountMetric(
@@ -396,7 +365,7 @@ struct AccountDetailView: View {
                         )
                     }
                 } else {
-                    Text("Not reconciled yet")
+                    Text("No statement checked yet")
                 }
             }
             .font(.caption)
@@ -408,26 +377,37 @@ struct AccountDetailView: View {
                     .foregroundStyle(PocketLedgerTheme.textTertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                VStack(spacing: 8) {
-                    Button {
-                        isPresentingReconciliation = true
-                    } label: {
-                        Label("Reconcile statement", systemImage: "checkmark.circle")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Button {
+                            isPresentingReconciliation = true
+                        } label: {
+                            Label("Reconcile", systemImage: "checkmark.circle")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(PocketLedgerTheme.accent)
+                        Text("Match transactions to a dated statement.")
+                            .font(.caption)
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
                     }
-                    .buttonStyle(.glassProminent)
-                    .tint(PocketLedgerTheme.accent)
-
-                    Button {
-                        isPresentingBalanceEditor = true
-                    } label: {
-                        Label("Adjust current balance", systemImage: "slider.horizontal.3")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Button {
+                            isPresentingBalanceEditor = true
+                        } label: {
+                            Label("Adjust balance", systemImage: "slider.horizontal.3")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(PocketLedgerTheme.accent)
+                        Text("Set today’s recorded balance directly.")
+                            .font(.caption)
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
                     }
-                    .buttonStyle(.glass)
-                    .tint(PocketLedgerTheme.accent)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -511,7 +491,7 @@ private struct AccountBalanceEditor: View {
                 }
             }
             .pocketListSurface()
-            .navigationTitle("Edit balance")
+            .navigationTitle("Adjust current balance")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

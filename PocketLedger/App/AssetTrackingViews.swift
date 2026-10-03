@@ -31,12 +31,17 @@ struct AssetTrackingSection: View {
             }
             if account.tracking != nil {
                 Section {
-                    Button("Undo latest asset activity", role: .destructive) { confirmingUndo = true }
-                        .disabled(!areBalancesRevealed)
-                    Text("To correct an entry, undo the latest activity and enter it again. Linked ledger movements are reversed together.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    Button("Turn off asset tracking", role: .destructive) { confirmingDisable = true }
-                        .disabled(!areBalancesRevealed)
+                    VStack(alignment: .leading, spacing: 14) {
+                        Button("Undo latest asset activity", role: .destructive) { confirmingUndo = true }
+                            .disabled(!areBalancesRevealed)
+                        Text("To correct an entry, undo the latest activity and enter it again. Linked ledger movements are reversed together.")
+                            .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
+                        Button("Turn off asset tracking", role: .destructive) { confirmingDisable = true }
+                            .disabled(!areBalancesRevealed)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 14)
+                    .pocketGroupedListRow(index: 0, count: 1)
                 }
             }
         }
@@ -82,9 +87,11 @@ struct AssetTrackingSection: View {
     private func valueRow(_ title: String, _ value: String) -> some View {
         LabeledContent(title) {
             Text(areBalancesRevealed ? value : "••••")
+                .foregroundStyle(PocketLedgerTheme.textPrimary)
                 .monospacedDigit().privacySensitive()
                 .accessibilityLabel(areBalancesRevealed ? value : "Hidden value")
         }
+        .foregroundStyle(PocketLedgerTheme.textSecondary)
     }
 
     @ViewBuilder private var metals: some View {
@@ -94,7 +101,7 @@ struct AssetTrackingSection: View {
             VStack(alignment: .leading, spacing: 12) {
                 if purchases.isEmpty {
                     Text("Track gold and silver by purchase, weight and purity.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
                 } else {
                     valueRow("Recorded balance", store.balance(for: account).formatted)
                     valueRow("Estimated metal value", store.valuation(for: account).formatted)
@@ -104,7 +111,7 @@ struct AssetTrackingSection: View {
                     .disabled(!areBalancesRevealed || account.isArchived)
                 if !areBalancesRevealed {
                     Text("Reveal balances to view or update holdings.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -146,10 +153,10 @@ struct AssetTrackingSection: View {
                         if let price = store.metalPricePerGram(account: account, metal: metal) {
                             valueRow("Pure metal / gram", "\(assetNumber(price)) \(account.currency.rawValue)")
                         } else {
-                            Text("Price needed").foregroundStyle(.secondary)
+                            Text("Price needed").foregroundStyle(PocketLedgerTheme.textSecondary)
                         }
                         Text(store.metalQuoteDescription(account: account, metal: metal))
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(PocketLedgerTheme.textSecondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 10)
@@ -170,39 +177,54 @@ struct AssetTrackingSection: View {
 
     @ViewBuilder private var investment: some View {
         Section("Investment performance") {
-            valueRow("Recorded balance", store.balance(for: account).formatted)
-            valueRow("Unrealized gain/loss", Money(currency: account.currency, minorUnits: account.tracking?.unrealizedMinorUnits ?? 0).formatted)
-            valueRow("Estimated total value", store.valuation(for: account).formatted)
-            if let entry = account.tracking?.lastValuation {
-                LabeledContent("Last valuation", value: entry.date.formatted(date: .abbreviated, time: .omitted))
-                LabeledContent("Entered", value: entry.enteredAt.formatted(date: .abbreviated, time: .shortened))
-            } else {
-                Text("No valuation entered yet.").foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 14) {
+                valueRow("Recorded balance", store.balance(for: account).formatted)
+                valueRow("Unrealized gain/loss", Money(currency: account.currency, minorUnits: account.tracking?.unrealizedMinorUnits ?? 0).formatted)
+                valueRow("Estimated total value", store.valuation(for: account).formatted)
+                if let entry = account.tracking?.lastValuation {
+                    LabeledContent("Last valuation", value: entry.date.formatted(date: .abbreviated, time: .omitted))
+                    LabeledContent("Entered", value: entry.enteredAt.formatted(date: .abbreviated, time: .shortened))
+                } else {
+                    Text("No valuation entered yet.").foregroundStyle(PocketLedgerTheme.textSecondary)
+                }
+                Divider().overlay(PocketLedgerTheme.divider)
+                Text("Update the gain or loss to reflect today’s investment value. Realize it when a gain or loss is confirmed; use a transfer to move money out.")
+                    .font(.footnote)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                Button("Update unrealized gain/loss") { sheet = .investment(false) }
+                    .disabled(!areBalancesRevealed || account.isArchived)
+                Button("Realize gain/loss") { sheet = .investment(true) }
+                    .disabled(!areBalancesRevealed || (account.tracking?.unrealizedMinorUnits ?? 0) == 0 || account.isArchived)
+                Text("Realizing a gain or loss preserves estimated total value.")
+                    .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
+                if !areBalancesRevealed {
+                    Text("Reveal balances to update investment performance.").font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
+                }
             }
-            Button("Update unrealized gain/loss") { sheet = .investment(false) }
-                .disabled(!areBalancesRevealed || account.isArchived)
-            Button("Realize gain/loss") { sheet = .investment(true) }
-                .disabled(!areBalancesRevealed || (account.tracking?.unrealizedMinorUnits ?? 0) == 0 || account.isArchived)
-            Text("Gains stay in this account. Use a transfer for withdrawals. Realizing a gain or loss preserves estimated total value.")
-                .font(.footnote).foregroundStyle(.secondary)
-            if !areBalancesRevealed {
-                Text("Reveal balances to update investment performance.").font(.footnote).foregroundStyle(.secondary)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 14)
+            .buttonStyle(.bordered)
+            .pocketGroupedListRow(index: 0, count: 1)
         }
         if let entries = account.tracking?.investmentEntries, !entries.isEmpty {
             Section("Performance history") {
-                ForEach(Array(entries.suffix(20).reversed())) { entry in
-                    VStack(alignment: .leading, spacing: 4) {
-                        valueRow(entry.kind == .valuation ? "Unrealized valuation" : "Realized gain/loss", entry.amount.formatted)
-                        Text(entry.date.formatted(date: .abbreviated, time: .omitted))
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text("Entered \(entry.enteredAt.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(Array(entries.suffix(20).reversed())) { entry in
+                        VStack(alignment: .leading, spacing: 4) {
+                            valueRow(entry.kind == .valuation ? "Unrealized valuation" : "Realized gain/loss", entry.amount.formatted)
+                            Text(entry.date.formatted(date: .abbreviated, time: .omitted))
+                                .font(.caption).foregroundStyle(PocketLedgerTheme.textSecondary)
+                            Text("Entered \(entry.enteredAt.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption).foregroundStyle(PocketLedgerTheme.textSecondary)
+                        }
+                    }
+                    if entries.count > 20 {
+                        Text("Showing the latest 20 entries.").font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                     }
                 }
-                if entries.count > 20 {
-                    Text("Showing the latest 20 entries.").font(.footnote).foregroundStyle(.secondary)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 14)
+                .pocketGroupedListRow(index: 0, count: 1)
             }
         }
     }
@@ -315,6 +337,7 @@ private struct MetalPurchaseDetailView: View {
     let purchaseID: UUID
 
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
+    @Environment(\.dismiss) private var dismiss
     @State private var salePurchase: MetalPurchase?
 
     private var account: Account? { store.account(with: accountID) }
@@ -332,6 +355,17 @@ private struct MetalPurchaseDetailView: View {
         }
         .navigationTitle("Metal purchase")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden()
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
+                .accessibilityLabel("Back to account")
+            }
+        }
         .pocketScreen()
         .sheet(item: $salePurchase, onDismiss: {
             Task { await store.refreshMetalPrices() }
@@ -352,113 +386,143 @@ private struct MetalPurchaseDetailView: View {
 
         return List {
             Section("Market value") {
-                if let valuation {
-                    protectedRow("Estimated metal value", valuation.formatted)
-                } else {
-                    LabeledContent("Estimated metal value", value: "Price needed")
-                    Text("Set a manual price or refresh a quote to calculate current value and unrealized gain.")
+                VStack(alignment: .leading, spacing: 14) {
+                    if let valuation {
+                        protectedRow("Estimated metal value", valuation.formatted)
+                    } else {
+                        LabeledContent("Estimated metal value", value: "Price needed")
+                        Text("Set a manual price or refresh a quote to calculate current value and unrealized gain.")
+                            .font(.footnote)
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    }
+                    protectedRow("Remaining cost basis", purchase.remainingCost.formatted)
+                    if let gain {
+                        protectedRow("Unrealized gain/loss", signedMetalGain(gain))
+                        if let returnPercentage = metalPurchaseReturnPercentage(gain: gain, cost: purchase.remainingCost) {
+                            protectedRow("Return", "\(assetNumber(returnPercentage))%")
+                        }
+                    }
+                    if let pricePerGram {
+                        protectedRow("Pure-metal price per gram", "\(assetNumber(pricePerGram)) \(account.currency.rawValue)")
+                    }
+                    Text(store.metalQuoteDescription(account: account, metal: purchase.metal))
                         .font(.footnote)
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
-                protectedRow("Remaining cost basis", purchase.remainingCost.formatted)
-                if let gain {
-                    protectedRow("Unrealized gain/loss", signedMetalGain(gain))
-                    if let returnPercentage = metalPurchaseReturnPercentage(gain: gain, cost: purchase.remainingCost) {
-                        protectedRow("Return", "\(assetNumber(returnPercentage))%")
-                    }
-                }
-                if let pricePerGram {
-                    protectedRow("Pure-metal price per gram", "\(assetNumber(pricePerGram)) \(account.currency.rawValue)")
-                }
-                Text(store.metalQuoteDescription(account: account, metal: purchase.metal))
-                    .font(.footnote)
-                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 14)
+                .pocketGroupedListRow(index: 0, count: 1)
             }
 
             Section("Purchase details") {
-                LabeledContent("Metal", value: purchase.metal.displayName)
-                if !purchase.description.isEmpty {
-                    LabeledContent("Description", value: purchase.description)
+                VStack(alignment: .leading, spacing: 14) {
+                    LabeledContent("Metal", value: purchase.metal.displayName)
+                    if !purchase.description.isEmpty {
+                        LabeledContent("Description", value: purchase.description)
+                    }
+                    LabeledContent("Purchase date", value: purchase.date.formatted(date: .long, time: .omitted))
+                    protectedRow("Quantity purchased", assetNumber(purchase.quantity))
+                    protectedRow("Weight per item", "\(assetNumber(purchase.weightPerItem)) \(purchase.unit.displayName.lowercased())")
+                    protectedRow("Total weight purchased", "\(assetNumber(purchase.weightGrams)) g")
+                    protectedRow("Purity", "\(assetNumber(purchase.purity * 100))%")
+                    protectedRow("Pure-metal weight at purchase", "\(assetNumber(purchase.weightGrams * purchase.purity)) g")
+                    protectedRow("Total paid including fees", purchase.totalCost.formatted)
                 }
-                LabeledContent("Purchase date", value: purchase.date.formatted(date: .long, time: .omitted))
-                protectedRow("Quantity purchased", assetNumber(purchase.quantity))
-                protectedRow("Weight per item", "\(assetNumber(purchase.weightPerItem)) \(purchase.unit.displayName.lowercased())")
-                protectedRow("Total weight purchased", "\(assetNumber(purchase.weightGrams)) g")
-                protectedRow("Purity", "\(assetNumber(purchase.purity * 100))%")
-                protectedRow("Pure-metal weight at purchase", "\(assetNumber(purchase.weightGrams * purchase.purity)) g")
-                protectedRow("Total paid including fees", purchase.totalCost.formatted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 14)
+                .pocketGroupedListRow(index: 0, count: 1)
             }
 
             Section("Remaining holding") {
-                protectedRow("Quantity remaining", assetNumber(purchase.remainingQuantity))
-                protectedRow("Weight remaining", "\(assetNumber(purchase.remainingWeightGrams)) g")
-                protectedRow("Pure-metal weight remaining", "\(assetNumber(purchase.pureWeightGrams)) g")
-                protectedRow("Purchase cost remaining", purchase.remainingCost.formatted)
+                VStack(alignment: .leading, spacing: 14) {
+                    protectedRow("Quantity remaining", assetNumber(purchase.remainingQuantity))
+                    protectedRow("Weight remaining", "\(assetNumber(purchase.remainingWeightGrams)) g")
+                    protectedRow("Pure-metal weight remaining", "\(assetNumber(purchase.pureWeightGrams)) g")
+                    protectedRow("Purchase cost remaining", purchase.remainingCost.formatted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 14)
+                .pocketGroupedListRow(index: 0, count: 1)
             }
 
             Section("Sales") {
-                if purchase.sales.isEmpty {
-                    Text("No sales recorded for this purchase.")
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-                } else {
-                    ForEach(purchase.sales) { sale in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text(sale.date.formatted(date: .abbreviated, time: .omitted))
-                                Spacer()
-                                Text(sensitive(sale.proceeds.formatted))
-                                    .fontWeight(.semibold)
-                                    .monospacedDigit()
-                                    .privacySensitive()
-                                    .accessibilityLabel(areBalancesRevealed ? sale.proceeds.formatted : "Hidden value")
-                            }
-                            HStack {
-                                Text(sensitive("\(assetNumber(sale.weightGrams)) g sold"))
-                                    .privacySensitive()
-                                    .accessibilityLabel(areBalancesRevealed
-                                        ? "\(assetNumber(sale.weightGrams)) grams sold"
-                                        : "Hidden sale weight")
-                                Spacer()
-                                Text("Realized \(sensitive(signedMetalGain(sale.gain)))")
-                                    .privacySensitive()
-                                    .accessibilityLabel(areBalancesRevealed
-                                        ? "Realized \(signedMetalGain(sale.gain))"
-                                        : "Hidden realized gain or loss")
-                            }
-                            .font(.caption)
+                VStack(alignment: .leading, spacing: 14) {
+                    if purchase.sales.isEmpty {
+                        Text("No sales recorded for this purchase.")
                             .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    } else {
+                        ForEach(purchase.sales) { sale in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(sale.date.formatted(date: .abbreviated, time: .omitted))
+                                    Spacer()
+                                    Text(sensitive(sale.proceeds.formatted))
+                                        .fontWeight(.semibold)
+                                        .monospacedDigit()
+                                        .privacySensitive()
+                                        .accessibilityLabel(areBalancesRevealed ? sale.proceeds.formatted : "Hidden value")
+                                }
+                                HStack {
+                                    Text(sensitive("\(assetNumber(sale.weightGrams)) g sold"))
+                                        .privacySensitive()
+                                        .accessibilityLabel(areBalancesRevealed
+                                            ? "\(assetNumber(sale.weightGrams)) grams sold"
+                                            : "Hidden sale weight")
+                                    Spacer()
+                                    Text("Realized \(sensitive(signedMetalGain(sale.gain)))")
+                                        .privacySensitive()
+                                        .accessibilityLabel(areBalancesRevealed
+                                            ? "Realized \(signedMetalGain(sale.gain))"
+                                            : "Hidden realized gain or loss")
+                                }
+                                .font(.caption)
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                            }
+                            .accessibilityElement(children: .combine)
                         }
-                        .accessibilityElement(children: .combine)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 14)
+                .pocketGroupedListRow(index: 0, count: 1)
             }
 
             Section {
-                if purchase.remainingWeightGrams > 0 {
-                    Button {
-                        salePurchase = purchase
-                    } label: {
-                        Label("Record sale", systemImage: "arrow.up.forward.circle")
-                            .frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: 14) {
+                    if purchase.remainingWeightGrams > 0 {
+                        Button {
+                            salePurchase = purchase
+                        } label: {
+                            Label("Record sale", systemImage: "arrow.up.forward.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                    .buttonStyle(.borderedProminent)
+                    .tint(PocketLedgerTheme.accent)
+                        .disabled(!areBalancesRevealed || account.isArchived)
+                    } else {
+                        Label("Fully sold", systemImage: "checkmark.circle")
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
                     }
-                    .disabled(!areBalancesRevealed || account.isArchived)
-                } else {
-                    Label("Fully sold", systemImage: "checkmark.circle")
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 14)
+                .pocketGroupedListRow(index: 0, count: 1)
             }
         }
         .listStyle(.plain)
+        .listSectionSpacing(20)
         .scrollContentBackground(.hidden)
     }
 
     private func protectedRow(_ title: String, _ value: String) -> some View {
         LabeledContent(title) {
             Text(sensitive(value))
+                .foregroundStyle(PocketLedgerTheme.textPrimary)
                 .monospacedDigit()
                 .privacySensitive()
                 .accessibilityLabel(areBalancesRevealed ? value : "Hidden value")
         }
+        .foregroundStyle(PocketLedgerTheme.textSecondary)
     }
 
     private func sensitive(_ value: String) -> String {
@@ -558,25 +622,25 @@ private struct MetalPurchaseEditor: View {
                     }
                     TextField("Fineness out of 1,000", text: $purity).keyboardType(.decimalPad)
                     Text("Pure metal weight is total weight multiplied by fineness / 1,000. For example, 18K gold has fineness 750.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
                 Section("Funding") {
                     Toggle("Historical holding", isOn: $historical)
                     if historical {
                         Text("Records an existing holding without charging another account.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                     } else {
                         Picker("Paid from", selection: $fundingID) {
                             Text("Choose account").tag(Optional<UUID>.none)
                             ForEach(fundingAccounts) { Text($0.name).tag(Optional($0.id)) }
                         }
                         Text("Only active cash and bank accounts in \(account.currency.rawValue) are available.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                     }
                     if account.tracking?.metalPurchases.isEmpty != false {
                         Toggle("Reconcile recorded balance to tracked cost", isOn: $reconcile)
                         Text("Setup replaces this physical account's recorded balance with tracked purchase cost, avoiding double counting. Add all existing holdings before relying on totals.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                     }
                 }
             }
@@ -647,7 +711,7 @@ private struct MetalSaleEditor: View {
                         }
                     }
                     Text("Purchase cost is allocated in proportion to weight sold. Proceeds return principal and record the realized gain or loss.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
             }
             .pocketListSurface()
@@ -715,10 +779,10 @@ private struct MetalPricingEditor: View {
                         }
                         DatePicker("As of", selection: $asOf, in: ...Date(), displayedComponents: [.date, .hourAndMinute])
                         Text("Enter the price of pure metal. Each holding's weight is adjusted for purity automatically.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                     } else {
                         Text("Gold API provides USD quotes per troy ounce. Your existing exchange rates convert the quote to \(account.currency.rawValue). Quotes refresh on opening after 15 minutes; unavailable rates require manual pricing.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                     }
                 }
             }
@@ -783,12 +847,12 @@ private struct InvestmentEntryEditor: View {
                     Text(realizing
                          ? "Moves this amount from unrealized performance into the recorded balance. Total value stays the same; the last valuation date stays unchanged."
                          : "Replaces the previous unrealized amount. Enter zero to clear it. This does not change the recorded balance.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                     if !realizing && account.tracking?.lastValuation == nil {
                         LabeledContent("Recorded balance", value: store.balance(for: account).formatted)
                         Toggle("Recorded balance excludes this unrealized amount", isOn: $confirmedBalance)
                         Text("If your recorded balance already contains this gain or loss, correct it before adding unrealized performance to avoid double counting.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                     }
                 }
             }

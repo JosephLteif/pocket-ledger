@@ -106,6 +106,7 @@ struct GlobalSearchView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
     @Binding var searchText: String
+    let onAddAction: (AddAction) -> Void
     @State private var results = GlobalSearchSnapshot.empty
     @State private var transactionDocuments: [GlobalSearchTransactionDocument] = []
     @State private var transactionDocumentsRevision: Int?
@@ -208,7 +209,7 @@ struct GlobalSearchView: View {
                             ForEach(Array(results.accounts.enumerated()), id: \.element.id) { entry in
                                 let account = entry.element
                                 NavigationLink {
-                                    AccountDetailView(store: store, security: security, accountID: account.id)
+                                    AccountDetailView(store: store, security: security, accountID: account.id, onAddAction: onAddAction)
                                 } label: {
                                     SearchAccountRow(
                                         account: account,
@@ -232,6 +233,7 @@ struct GlobalSearchView: View {
                                 NavigationLink {
                                     TransactionsView(
                                         store: store,
+                                        onAddAction: onAddAction,
                                         security: security,
                                         initialCategoryID: category.id
                                     )
@@ -273,6 +275,7 @@ struct GlobalSearchView: View {
                                 NavigationLink {
                                     TransactionsView(
                                         store: store,
+                                        onAddAction: onAddAction,
                                         security: security,
                                         initialSearch: query
                                     )

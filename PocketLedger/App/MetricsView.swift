@@ -128,6 +128,7 @@ private struct CategoryMetricsDetailSnapshot {
 struct MetricsView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
+    let onAddAction: (AddAction) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
@@ -569,6 +570,7 @@ struct MetricsView: View {
                     NavigationLink {
                         TransactionsView(
                             store: store,
+                            onAddAction: onAddAction,
                             security: security,
                             initialFilter: .expense,
                             initialPeriod: .custom,

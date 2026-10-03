@@ -81,6 +81,7 @@ struct AccountDetailView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
     let accountID: UUID
+    let onAddAction: (AddAction) -> Void
 
     @State private var isPresentingAccountEditor = false
     @State private var isPresentingBalanceEditor = false
@@ -114,6 +115,7 @@ struct AccountDetailView: View {
                             }
                             .accessibilityLabel("Edit account")
                         }
+                        AddTransactionToolbar(store: store, onAction: onAddAction)
                     }
                 }
             }

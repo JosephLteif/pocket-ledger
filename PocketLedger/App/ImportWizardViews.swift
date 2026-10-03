@@ -88,6 +88,10 @@ struct ImportPreparationInputs: Equatable {
     func matches(_ draft: ImportDraft, ledgerRevision: Int) -> Bool {
         self == ImportPreparationInputs(draft: draft, ledgerRevision: ledgerRevision)
     }
+
+    func requiresDiscardConfirmation(for draft: ImportDraft, hasAdvancedPastSource: Bool) -> Bool {
+        hasAdvancedPastSource || !matches(draft, ledgerRevision: ledgerRevision)
+    }
 }
 
 private struct ImportBuildInput: @unchecked Sendable {
@@ -151,6 +155,9 @@ struct ImportWizardView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var draft: ImportDraft
+    @State private var initialPreparationInputs: ImportPreparationInputs
+    @State private var hasAdvancedPastSource = false
+    @State private var isConfirmingDiscard = false
     @State private var presentedSheet: ImportWizardSheet?
     @State private var isPreparing = false
     @State private var preparationTask: Task<Void, Never>?
@@ -165,13 +172,16 @@ struct ImportWizardView: View {
     init(store: LedgerStore, document: ImportedDocument) {
         _store = ObservedObject(wrappedValue: store)
         self.document = document
-        _draft = State(
-            initialValue: ImportDraft(
-                document: document,
-                existing: store.data,
-                rememberedRules: ImportRuleStore.load()
-            )
+        let initialDraft = ImportDraft(
+            document: document,
+            existing: store.data,
+            rememberedRules: ImportRuleStore.load()
         )
+        _draft = State(initialValue: initialDraft)
+        _initialPreparationInputs = State(initialValue: ImportPreparationInputs(
+            draft: initialDraft,
+            ledgerRevision: store.ledgerRevision
+        ))
     }
 
     var body: some View {
@@ -186,9 +196,11 @@ struct ImportWizardView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .cancellationAction) {
                     Button("Cancel", role: .cancel) {
-                        cancelPreparation()
-                        draft.discard()
-                        dismiss()
+                        if requiresDiscardConfirmation {
+                            isConfirmingDiscard = true
+                        } else {
+                            discardImport()
+                        }
                     }
                     if draft.step != .source {
                         Button("Back") {
@@ -239,6 +251,16 @@ struct ImportWizardView: View {
             }
         }
         .accessibilityIdentifier("importWizard")
+        .interactiveDismissDisabled(requiresDiscardConfirmation)
+        .onChange(of: draft.step) { _, step in
+            if step != .source { hasAdvancedPastSource = true }
+        }
+        .confirmationDialog("Discard this import?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
+            Button("Discard import", role: .destructive, action: discardImport)
+            Button("Keep editing", role: .cancel) {}
+        } message: {
+            Text("Your mappings and staged changes will be discarded. Your saved ledger will stay unchanged.")
+        }
         .onDisappear(perform: cancelPreparation)
         .sheet(item: $presentedSheet) { sheet in
             NavigationStack {
@@ -246,6 +268,19 @@ struct ImportWizardView: View {
             }
                 .presentationDetents([.medium, .large])
         }
+    }
+
+    private var requiresDiscardConfirmation: Bool {
+        initialPreparationInputs.requiresDiscardConfirmation(
+            for: draft,
+            hasAdvancedPastSource: hasAdvancedPastSource
+        )
+    }
+
+    private func discardImport() {
+        cancelPreparation()
+        draft.discard()
+        dismiss()
     }
 
     @ViewBuilder

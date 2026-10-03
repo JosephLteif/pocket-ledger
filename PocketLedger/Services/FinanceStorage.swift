@@ -100,6 +100,18 @@ final class FinanceStorage {
         recoverySnapshotURL = localDirectory.appendingPathComponent("PocketLedger-last-good.json")
     }
 
+    init(databaseURL: URL) {
+        let container = Self.makeModelContainer(at: databaseURL)
+        modelContainer = container
+        self.databaseURL = databaseURL
+        storageLocation = container == nil ? .unavailable : .local
+        let directory = databaseURL.deletingLastPathComponent()
+        attachmentDirectory = Self.makeAttachmentDirectory(
+            at: directory.appendingPathComponent("Attachments", isDirectory: true)
+        )
+        recoverySnapshotURL = directory.appendingPathComponent("PocketLedger-last-good.json")
+    }
+
     var isPersistent: Bool {
         modelContainer != nil
     }

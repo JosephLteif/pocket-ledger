@@ -60,10 +60,11 @@ final class LedgerStore: ObservableObject {
     @Published private(set) var ledgerRevision = 0
     @Published private(set) var metalPriceFailures: Set<PreciousMetal> = []
 
-    private let storage = FinanceStorage(context: "main-app")
+    private let storage: FinanceStorage
     private(set) var ledgerIndex: LedgerIndex
 
-    init() {
+    init(storage: FinanceStorage = FinanceStorage(context: "main-app")) {
+        self.storage = storage
         let loadedData = storage.load()
         data = loadedData
         ledgerIndex = LedgerIndex(data: loadedData)
@@ -314,14 +315,14 @@ final class LedgerStore: ObservableObject {
     func updateTransactionCategories(
         ids: Set<UUID>,
         categoryID: UUID?
-    ) -> Bool {
+    ) -> Set<UUID>? {
         guard categoryID == nil || data.categories.contains(where: { $0.id == categoryID }) else {
             lastActionStatus = "Category not found"
-            return false
+            return nil
         }
 
         var updated = data
-        var changed = false
+        var changedIDs: Set<UUID> = []
         for index in updated.transactions.indices where ids.contains(updated.transactions[index].id) {
             guard updated.transactions[index].loanID == nil else { continue }
             updated.transactions[index].categoryID = categoryID
@@ -332,27 +333,27 @@ final class LedgerStore: ObservableObject {
                     updated.transactions[index].outflows[movementIndex].hasCategoryAssignment = true
                 }
             }
-            changed = true
+            changedIDs.insert(updated.transactions[index].id)
         }
-        guard changed else {
-            lastActionStatus = "No transactions selected"
-            return false
+        guard !changedIDs.isEmpty else {
+            lastActionStatus = "No selected transactions can have their category changed."
+            return nil
         }
-        return persist(updated, successMessage: "Transaction categories updated")
+        return persist(updated, successMessage: "Transaction categories updated") ? changedIDs : nil
     }
 
     @discardableResult
     func updateSingleAccountTransactions(
         ids: Set<UUID>,
         accountID: UUID
-    ) -> Bool {
+    ) -> Set<UUID>? {
         guard let targetAccount = account(with: accountID) else {
             lastActionStatus = "Account not found"
-            return false
+            return nil
         }
 
         var updated = data
-        var changed = 0
+        var changedIDs: Set<UUID> = []
         for index in updated.transactions.indices where ids.contains(updated.transactions[index].id) {
             var transaction = updated.transactions[index]
             guard transaction.loanID == nil else { continue }
@@ -376,14 +377,14 @@ final class LedgerStore: ObservableObject {
                 continue
             }
             updated.transactions[index] = transaction
-            changed += 1
+            changedIDs.insert(transaction.id)
         }
 
-        guard changed > 0 else {
+        guard !changedIDs.isEmpty else {
             lastActionStatus = "No selected single-account transactions matched that account"
-            return false
+            return nil
         }
-        return persist(updated, successMessage: "Transaction accounts updated")
+        return persist(updated, successMessage: "Transaction accounts updated") ? changedIDs : nil
     }
 
     @discardableResult

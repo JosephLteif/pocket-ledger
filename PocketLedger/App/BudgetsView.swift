@@ -4,6 +4,7 @@ import SwiftUI
 struct BudgetsView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
+    let onAddAction: (AddAction) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @State private var editingBudget: LedgerBudget?
@@ -143,6 +144,7 @@ struct BudgetsView: View {
                 NavigationLink {
                     TransactionsView(
                         store: store,
+                        onAddAction: onAddAction,
                         security: security,
                         initialFilter: .expense,
                         initialPeriod: .thisMonth,

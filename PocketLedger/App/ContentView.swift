@@ -30,6 +30,7 @@ struct ContentView: View {
         ZStack {
             unlockedContent
                 .allowsHitTesting(!(security.isPasscodeEnabled && !isUnlocked))
+                .accessibilityHidden(security.isPasscodeEnabled && !isUnlocked)
 
             if security.isPasscodeEnabled && !isUnlocked {
                 AppLockView(security: security, isUnlocked: $isUnlocked)
@@ -230,7 +231,12 @@ struct ContentView: View {
 
             Tab(value: AppTab.search, role: .search) {
                 NavigationStack {
-                    GlobalSearchView(store: store, security: security, searchText: $searchText)
+                    GlobalSearchView(
+                        store: store,
+                        security: security,
+                        searchText: $searchText,
+                        onAddAction: { addAction = $0 }
+                    )
                         .searchable(
                             text: $searchText,
                             isPresented: $isSearchPresented,

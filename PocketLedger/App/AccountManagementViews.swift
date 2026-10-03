@@ -337,7 +337,7 @@ struct AccountsView: View {
             ForEach(Array(accounts.enumerated()), id: \.element.id) { entry in
                 let account = entry.element
                 NavigationLink {
-                    AccountDetailView(store: store, security: security, accountID: account.id)
+                    AccountDetailView(store: store, security: security, accountID: account.id, onAddAction: onAddAction)
                 } label: {
                     AccountRow(
                         account: account,
@@ -457,7 +457,7 @@ struct AccountsView: View {
                 ForEach(Array(archivedAccounts.enumerated()), id: \.element.id) { entry in
                     let account = entry.element
                     NavigationLink {
-                        AccountDetailView(store: store, security: security, accountID: account.id)
+                        AccountDetailView(store: store, security: security, accountID: account.id, onAddAction: onAddAction)
                     } label: {
                         HStack(spacing: 12) {
                             PocketIcon(

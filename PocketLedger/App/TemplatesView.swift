@@ -25,7 +25,7 @@ struct TemplatesView: View {
                                 .foregroundStyle(PocketLedgerTheme.textTertiary)
                             Text("No templates yet")
                                 .font(.headline)
-                            Text("Save a transaction as a template from the transaction history context menu.")
+                            Text("Create a template here, or save an existing transaction as a template from its history menu.")
                                 .font(.subheadline)
                                 .foregroundStyle(PocketLedgerTheme.textSecondary)
                                 .multilineTextAlignment(.center)

@@ -18,7 +18,7 @@ struct MoreView: View {
                 if !attentionItems.isEmpty || !store.data.attentionState.dismissedIDs.isEmpty {
                     Section("Review") {
                         NavigationLink {
-                            AttentionInboxView(store: store, security: security, onAddExpense: onAddExpense)
+                            AttentionInboxView(store: store, security: security, onAddExpense: onAddExpense, onAddAction: onAddAction)
                         } label: {
                             Label {
                                 HStack {
@@ -40,7 +40,7 @@ struct MoreView: View {
 
                 Section("Insights") {
                     NavigationLink {
-                        MetricsView(store: store, security: security)
+                        MetricsView(store: store, security: security, onAddAction: onAddAction)
                     } label: {
                         Label("Metrics", systemImage: "chart.xyaxis.line")
                     }
@@ -56,7 +56,7 @@ struct MoreView: View {
                     .listRowBackground(PocketLedgerTheme.surface)
 
                     NavigationLink {
-                        BudgetsView(store: store, security: security)
+                        BudgetsView(store: store, security: security, onAddAction: onAddAction)
                     } label: {
                         Label("Budgets", systemImage: "chart.bar.doc.horizontal")
                     }
@@ -395,7 +395,7 @@ struct DashboardView: View {
     private var attentionSnapshot: some View {
         if !snapshot.attentionItems.isEmpty {
             NavigationLink {
-                AttentionInboxView(store: store, security: security, onAddExpense: onAddExpense)
+                AttentionInboxView(store: store, security: security, onAddExpense: onAddExpense, onAddAction: onAddAction)
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -659,6 +659,7 @@ struct DashboardView: View {
                     TransactionsView(
                         store: store,
                         onAddExpense: onAddExpense,
+                        onAddAction: onAddAction,
                         security: security,
                         initialFilter: .all,
                         initialPeriod: .thisMonth
@@ -677,6 +678,7 @@ struct DashboardView: View {
                     TransactionsView(
                         store: store,
                         onAddExpense: onAddExpense,
+                        onAddAction: onAddAction,
                         security: security,
                         initialFilter: .expense,
                         initialPeriod: .thisMonth,
@@ -991,7 +993,7 @@ struct DashboardView: View {
                 HStack {
                     sectionHeader(title: "Budget pulse", detail: "This month")
                     NavigationLink {
-                        BudgetsView(store: store, security: security)
+                        BudgetsView(store: store, security: security, onAddAction: onAddAction)
                     } label: {
                         Image(systemName: "chevron.right")
                             .font(.caption.weight(.bold))
@@ -1166,6 +1168,7 @@ private struct AttentionInboxView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
     let onAddExpense: () -> Void
+    let onAddAction: (AddAction) -> Void
 
     var body: some View {
         let attentionItems = store.attentionItems
@@ -1278,6 +1281,7 @@ private struct AttentionInboxView: View {
             TransactionsView(
                 store: store,
                 onAddExpense: onAddExpense,
+                onAddAction: onAddAction,
                 security: security,
                 initialFilter: .uncategorized
             )
@@ -1285,13 +1289,14 @@ private struct AttentionInboxView: View {
             TransactionsView(
                 store: store,
                 onAddExpense: onAddExpense,
+                onAddAction: onAddAction,
                 security: security,
                 initialFilter: .transfer
             )
         case .scheduledTransactions:
             ScheduledTransactionsView(store: store)
         case .budgets:
-            BudgetsView(store: store, security: security)
+            BudgetsView(store: store, security: security, onAddAction: onAddAction)
         }
     }
 }

@@ -467,7 +467,9 @@ struct TransactionEditor: View {
                     }
 
                     if let saveValidationMessage {
-                        Section("Save needs attention") {
+                        Section(hasUnsavedChanges || editingTransactionID != nil || editingTemplateID != nil || isEditingScheduledTransaction
+                            ? "Save needs attention"
+                            : "To save") {
                             Label(saveValidationMessage, systemImage: "info.circle")
                                 .font(.footnote)
                                 .foregroundStyle(PocketLedgerTheme.textSecondary)

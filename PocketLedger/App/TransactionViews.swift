@@ -63,6 +63,12 @@ enum TransactionQuickFilter: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    func reconciled(with filter: TransactionFilter, period: TransactionPeriod) -> Self {
+        if self == .uncategorized && filter != .uncategorized { return .none }
+        if self == .thisMonth && (filter != .all || period != .thisMonth) { return .none }
+        return self
+    }
+
     var title: String {
         switch self {
         case .none:
@@ -94,6 +100,15 @@ struct TransactionListSnapshot {
     let displayedPage: Int
     let expenseTotals: [LedgerCurrency: Int64]
     let incomeTotals: [LedgerCurrency: Int64]
+
+    static func filterSummary(
+        filter: TransactionFilter,
+        quickFilter: TransactionQuickFilter,
+        periodTitle: String
+    ) -> String {
+        let extra = quickFilter == .cash || quickFilter == .needsReceipt ? " · \(quickFilter.title)" : ""
+        return "\(filter.rawValue) · \(periodTitle)\(extra)"
+    }
 
     static var empty: TransactionListSnapshot {
         TransactionListSnapshot(
@@ -264,7 +279,7 @@ struct TransactionsView: View {
 
     @ObservedObject var store: LedgerStore
     let onAddExpense: () -> Void
-    private let onAddAction: ((AddAction) -> Void)?
+    private let onAddAction: (AddAction) -> Void
     private let security: AppSecurityService
     @State private var selectedFilter: TransactionFilter
     @State private var selectedPeriod: TransactionPeriod
@@ -275,7 +290,6 @@ struct TransactionsView: View {
     @State private var transactionPage = 0
     @State private var editingTransaction: LedgerTransaction?
     @State private var transactionToTemplate: LedgerTransaction?
-    @State private var isPresentingBillScanner = false
     @State private var isShowingFilters = false
     @State private var isSelectingTransactions = false
     @State private var isPresentingBulkCategoryPicker = false
@@ -283,6 +297,7 @@ struct TransactionsView: View {
     @State private var isShowingBulkDeleteConfirmation = false
     @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
     @State private var transactionDeletionError: String?
+    @State private var bulkEditStatus: String?
     @State private var listSnapshot = TransactionListSnapshot.empty
     @State private var drilldownCategoryID: UUID?
     @State private var drilldownIncludesCategoryDescendants = true
@@ -295,7 +310,7 @@ struct TransactionsView: View {
     init(
         store: LedgerStore,
         onAddExpense: @escaping () -> Void = {},
-        onAddAction: ((AddAction) -> Void)? = nil,
+        onAddAction: @escaping (AddAction) -> Void,
         security: AppSecurityService,
         initialFilter: TransactionFilter = .all,
         initialPeriod: TransactionPeriod = .all,
@@ -311,8 +326,6 @@ struct TransactionsView: View {
         self.onAddExpense = onAddExpense
         self.onAddAction = onAddAction
         self.security = security
-        _selectedFilter = State(initialValue: initialFilter)
-        _selectedPeriod = State(initialValue: initialPeriod)
         _drilldownCategoryID = State(initialValue: initialCategoryID)
         _drilldownIncludesCategoryDescendants = State(initialValue: initialCategoryIncludesDescendants)
         _drilldownAccountID = State(initialValue: initialAccountID)
@@ -322,11 +335,12 @@ struct TransactionsView: View {
         let persistedQuickFilter = TransactionQuickFilter(
             rawValue: UserDefaults.standard.string(forKey: Self.lastQuickFilterKey) ?? ""
         ) ?? .none
-        _selectedQuickFilter = State(
-            initialValue: initialFilter == .uncategorized
-                ? .uncategorized
-                : hasExplicitContext ? .none : persistedQuickFilter
-        )
+        let quickFilter: TransactionQuickFilter = initialFilter == .uncategorized
+            ? .uncategorized
+            : hasExplicitContext ? .none : persistedQuickFilter
+        _selectedQuickFilter = State(initialValue: quickFilter)
+        _selectedFilter = State(initialValue: quickFilter == .uncategorized ? .uncategorized : initialFilter)
+        _selectedPeriod = State(initialValue: quickFilter == .thisMonth ? .thisMonth : initialPeriod)
         _searchText = State(initialValue: initialSearch)
         let calendar = Calendar.current
         let start = initialCustomStartDate ?? calendar.date(byAdding: .day, value: -30, to: .now) ?? .now
@@ -436,6 +450,7 @@ struct TransactionsView: View {
                         }
                     } else {
                         Button {
+                            bulkEditStatus = nil
                             isSelectingTransactions = true
                         } label: {
                             Image(systemName: "checklist")
@@ -444,34 +459,39 @@ struct TransactionsView: View {
                         .accessibilityIdentifier("select-transactions")
                     }
                 }
-                if let onAddAction {
-                    AddTransactionToolbar(store: store, onAction: onAddAction)
-                } else {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            isPresentingBillScanner = true
-                        } label: {
-                            Image(systemName: "doc.viewfinder")
-                        }
-                        .accessibilityLabel("Scan bill")
-                    }
-                }
+                AddTransactionToolbar(store: store, onAction: onAddAction)
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !deletedTransactionsForUndo.isEmpty {
-                undoBanner(for: deletedTransactionsForUndo)
+            VStack(spacing: 0) {
+                if let bulkEditStatus {
+                    HStack {
+                        Text(bulkEditStatus)
+                            .font(.footnote)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Dismiss") { self.bulkEditStatus = nil }
+                            .frame(minHeight: 44)
+                    }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .background(.regularMaterial)
+                    .accessibilityIdentifier("bulk-edit-status")
+                }
+                if !deletedTransactionsForUndo.isEmpty {
+                    undoBanner(for: deletedTransactionsForUndo)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
         }
         .onAppear(perform: refreshListSnapshot)
         .onChange(of: selectedFilter) { _, _ in
+            selectedQuickFilter = selectedQuickFilter.reconciled(with: selectedFilter, period: selectedPeriod)
             transactionPage = 0
             refreshListSnapshot()
         }
         .onChange(of: selectedPeriod) { _, _ in
+            selectedQuickFilter = selectedQuickFilter.reconciled(with: selectedFilter, period: selectedPeriod)
             transactionPage = 0
             refreshListSnapshot()
         }
@@ -503,9 +523,6 @@ struct TransactionsView: View {
             refreshListSnapshot()
             transactionPage = listSnapshot.displayedPage
         }
-        .sheet(isPresented: $isPresentingBillScanner) {
-            BillScannerView(store: store)
-        }
         .sheet(item: $editingTransaction) { transaction in
             TransactionEditor(store: store, transaction: transaction)
         }
@@ -526,13 +543,14 @@ struct TransactionsView: View {
     }
 
     private var activeFilterSummary: String {
-        let kind = selectedQuickFilter != .none && selectedQuickFilter != .thisMonth
-            ? selectedQuickFilter.title
-            : selectedFilter.rawValue
         let period = selectedPeriod == .custom
             ? "\(customStartDate.formatted(date: .abbreviated, time: .omitted))–\(customEndDate.formatted(date: .abbreviated, time: .omitted))"
             : selectedPeriod.rawValue
-        return "\(kind) · \(period)"
+        return TransactionListSnapshot.filterSummary(
+            filter: selectedFilter,
+            quickFilter: selectedQuickFilter,
+            periodTitle: period
+        )
     }
 
     private var filtersButton: some View {
@@ -546,7 +564,8 @@ struct TransactionsView: View {
                 Text(activeFilterSummary)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
-                    .lineLimit(1)
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(PocketLedgerTheme.textTertiary)
@@ -582,7 +601,7 @@ struct TransactionsView: View {
                         }
                     }
 
-                    Section("Saved filter") {
+                    Section("Quick filter") {
                         Menu {
                             ForEach(TransactionQuickFilter.allCases) { filter in
                                 Button {
@@ -596,7 +615,7 @@ struct TransactionsView: View {
                                 }
                             }
                         } label: {
-                            Label("Saved filter: \(selectedQuickFilter.title)", systemImage: "line.3.horizontal.decrease.circle")
+                            Label("Quick filter: \(selectedQuickFilter.title)", systemImage: "line.3.horizontal.decrease.circle")
                         }
                         .accessibilityIdentifier("transaction-saved-filter")
                     }
@@ -761,18 +780,23 @@ struct TransactionsView: View {
 
     private func applyBulkCategory(_ categoryID: UUID?) {
         guard !selectedTransactionIDs.isEmpty else { return }
-        if store.updateTransactionCategories(ids: selectedTransactionIDs, categoryID: categoryID) {
-            selectedTransactionIDs.removeAll()
-            isSelectingTransactions = false
-        }
+        finishBulkEdit(store.updateTransactionCategories(ids: selectedTransactionIDs, categoryID: categoryID))
     }
 
     private func applyBulkAccount(_ accountID: UUID) {
         guard !selectedTransactionIDs.isEmpty else { return }
-        if store.updateSingleAccountTransactions(ids: selectedTransactionIDs, accountID: accountID) {
-            selectedTransactionIDs.removeAll()
-            isSelectingTransactions = false
+        finishBulkEdit(store.updateSingleAccountTransactions(ids: selectedTransactionIDs, accountID: accountID))
+    }
+
+    private func finishBulkEdit(_ updatedIDs: Set<UUID>?) {
+        guard let updatedIDs else {
+            bulkEditStatus = nil
+            transactionDeletionError = store.lastActionStatus ?? "The selected transactions could not be updated."
+            return
         }
+        selectedTransactionIDs.subtract(updatedIDs)
+        bulkEditStatus = "Updated \(updatedIDs.count) · Skipped \(selectedTransactionIDs.count)"
+        isSelectingTransactions = !selectedTransactionIDs.isEmpty
     }
 
     private func applyQuickFilter(_ filter: TransactionQuickFilter) {
@@ -1216,6 +1240,9 @@ struct TransactionRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
+        .accessibilityValue(isSelectionMode && canSelectTransaction
+            ? (isSelected ? "Selected" : "Not selected")
+            : "")
         .accessibilityLabel(
             "\(transaction.note), \(displaySubtitle), \(areBalancesRevealed ? displayAmountText : "Hidden amount")"
         )

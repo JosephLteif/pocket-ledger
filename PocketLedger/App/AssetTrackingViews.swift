@@ -268,7 +268,7 @@ private struct MetalPurchaseRow: View {
         isProtected: Bool = true
     ) -> some View {
         let alignment: HorizontalAlignment = trailing ? .trailing : .leading
-        VStack(alignment: alignment, spacing: 3) {
+        return VStack(alignment: alignment, spacing: 3) {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)

@@ -31,7 +31,9 @@ The **Build unsigned iOS IPA** workflow uses a macOS runner and XcodeGen to crea
 2. Select **Build unsigned iOS IPA** and choose **Run workflow**.
 3. Download the artifact from the completed run.
 
-The unsigned artifact is for development and sideloading; it is not an App Store distribution build. Apple signing, App Store metadata, and on-device behavior require separate Apple-side setup and review.
+For Sideloadly, download **PocketLedger-iphone-sideload** and load `PocketLedger-iphone-sideload.ipa`. It includes the iPhone app and iOS widget, and omits the Watch companion that fails during Sideloadly signing. The **PocketLedger-unsigned** artifact retains the full iPhone and Watch bundle for signing and installation tools that support it.
+
+The unsigned artifacts are for development and sideloading; they are not App Store distribution builds. Apple signing, App Store metadata, and on-device behavior require separate Apple-side setup and review.
 
 ## Project layout
 

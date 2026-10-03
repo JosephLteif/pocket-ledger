@@ -349,6 +349,26 @@ jobs:
           fi
           unzip -l "$IPA_PATH"
 
+      - name: Package iPhone sideload IPA
+        run: |
+          set -euo pipefail
+          SIDELOAD_ROOT="$RUNNER_TEMP/iphone-sideload"
+          SIDELOAD_IPA="$GITHUB_WORKSPACE/PocketLedger-iphone-sideload.ipa"
+          mkdir -p "$SIDELOAD_ROOT/Payload"
+          ditto "$RUNNER_TEMP/package/PocketLedger.app" "$SIDELOAD_ROOT/Payload/PocketLedger.app"
+          # Omit watchOS binaries from the iPhone package used by Sideloadly.
+          rm -rf "$SIDELOAD_ROOT/Payload/PocketLedger.app/PlugIns/PocketLedgerWatch.app"
+          ditto -c -k --sequesterRsrc --keepParent "$SIDELOAD_ROOT/Payload" "$SIDELOAD_IPA"
+          unzip -t "$SIDELOAD_IPA"
+          unzip -Z1 "$SIDELOAD_IPA" | grep -Eq '^Payload/PocketLedger\.app/PlugIns/PocketLedgerWidget\.appex/Info\.plist$' || {
+            echo "Sideload IPA is missing the iOS widget."
+            exit 1
+          }
+          if unzip -Z1 "$SIDELOAD_IPA" | grep -Eq '^Payload/PocketLedger\.app/(PlugIns|Watch)/PocketLedgerWatch\.app(/|$)'; then
+            echo "Sideload IPA still contains the Watch companion."
+            exit 1
+          fi
+
       - name: Write build information
         run: |
           set -euo pipefail
@@ -366,5 +386,14 @@ jobs:
           name: PocketLedger-unsigned
           path: |
             PocketLedger-unsigned.ipa
+            build-info.txt
+          retention-days: 7
+
+      - name: Upload iPhone sideload IPA
+        uses: actions/upload-artifact@v7
+        with:
+          name: PocketLedger-iphone-sideload
+          path: |
+            PocketLedger-iphone-sideload.ipa
             build-info.txt
           retention-days: 7

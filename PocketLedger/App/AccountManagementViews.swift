@@ -3,6 +3,11 @@ import SwiftUI
 
 @MainActor
 struct AccountsView: View {
+    private enum PositionGrouping: Hashable {
+        case currency
+        case accountType
+    }
+
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
     let onAddAction: (AddAction) -> Void
@@ -12,6 +17,7 @@ struct AccountsView: View {
     @State private var accountDeletionError: String?
     @State private var isArchivedAccountsExpanded = false
     @State private var isAccountSummaryExpanded = false
+    @State private var positionGrouping = PositionGrouping.currency
     @State private var expandedPositionCurrency: LedgerCurrency?
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
@@ -181,9 +187,11 @@ struct AccountsView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Net worth by currency")
+                    Text(positionGrouping == .currency ? "Net worth by currency" : "Net worth by account type")
                         .font(.title3.weight(.bold))
-                    Text("Tap a currency to see assets and liabilities")
+                    Text(positionGrouping == .currency
+                         ? "Tap a currency to see assets and liabilities"
+                         : "Type totals stay split by currency")
                         .font(.caption)
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
@@ -194,52 +202,148 @@ struct AccountsView: View {
                     .foregroundStyle(PocketLedgerTheme.accent)
             }
 
-            VStack(spacing: 0) {
-                ForEach(LedgerCurrency.allCases) { currency in
-                    if currency != LedgerCurrency.allCases[0] {
-                        Divider().overlay(PocketLedgerTheme.divider)
-                    }
+            Picker("Group net worth by", selection: $positionGrouping) {
+                Text("Currency").tag(PositionGrouping.currency)
+                Text("Account type").tag(PositionGrouping.accountType)
+            }
+            .pickerStyle(.segmented)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        DisclosureGroup(isExpanded: Binding(
-                            get: { expandedPositionCurrency == currency },
-                            set: { expandedPositionCurrency = $0 ? currency : nil }
-                        )) {
-                            accountPositionRow(
-                                title: "Assets",
-                                value: store.assetBalance(for: currency),
-                                tint: PocketLedgerTheme.income
-                            )
-                            accountPositionRow(
-                                title: "Liabilities",
-                                value: store.liabilityBalance(for: currency),
-                                tint: PocketLedgerTheme.warning
-                            )
-                        } label: {
-                            HStack(spacing: 10) {
-                                Text(currency.rawValue)
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-
-                                Spacer(minLength: 8)
-
-                                ProtectedAmountText(
-                                    value: store.netWorth(for: currency).formatted,
-                                    isRevealed: areBalancesRevealed
-                                )
-                                    .font(.headline.weight(.semibold).monospacedDigit())
-                                    .foregroundStyle(PocketLedgerTheme.textPrimary)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.75)
-                            }
-                        }
-                        .tint(PocketLedgerTheme.textSecondary)
-                    }
-                    .padding(.vertical, 8)
-                }
+            if positionGrouping == .currency {
+                currencyPositionSummary
+            } else {
+                accountTypePositionSummary
             }
         }
         .pocketCard()
+    }
+
+    private var currencyPositionSummary: some View {
+        VStack(spacing: 0) {
+            ForEach(LedgerCurrency.allCases) { currency in
+                if currency != LedgerCurrency.allCases[0] {
+                    Divider().overlay(PocketLedgerTheme.divider)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    DisclosureGroup(isExpanded: Binding(
+                        get: { expandedPositionCurrency == currency },
+                        set: { expandedPositionCurrency = $0 ? currency : nil }
+                    )) {
+                        accountPositionRow(
+                            title: "Assets",
+                            value: store.assetBalance(for: currency),
+                            tint: PocketLedgerTheme.income
+                        )
+                        accountPositionRow(
+                            title: "Liabilities",
+                            value: store.liabilityBalance(for: currency),
+                            tint: PocketLedgerTheme.warning
+                        )
+                    } label: {
+                        HStack(spacing: 10) {
+                            Text(currency.rawValue)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
+
+                            Spacer(minLength: 8)
+
+                            ProtectedAmountText(
+                                value: store.netWorth(for: currency).formatted,
+                                isRevealed: areBalancesRevealed
+                            )
+                                .font(.headline.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(PocketLedgerTheme.textPrimary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                        }
+                    }
+                    .tint(PocketLedgerTheme.textSecondary)
+                }
+                .padding(.vertical, 8)
+            }
+        }
+    }
+
+    private var accountTypePositionSummary: some View {
+        let accountTypes = AccountType.allCases.filter { !positionCurrencies(for: $0).isEmpty }
+
+        return Group {
+            if accountTypes.isEmpty {
+                Text(store.activeAccounts.isEmpty
+                     ? "Add an account to see net worth by type."
+                     : "No accounts are currently included in totals.")
+                    .font(.subheadline)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    .padding(.vertical, 6)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(accountTypes.enumerated()), id: \.element.id) { entry in
+                        let accountType = entry.element
+                        if entry.offset > 0 {
+                            Divider().overlay(PocketLedgerTheme.divider)
+                        }
+
+                        HStack(alignment: .top, spacing: 8) {
+                            Label(accountType.displayName, systemImage: accountType.systemImage)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                .frame(width: 112, alignment: .leading)
+
+                            Spacer(minLength: 4)
+
+                            VStack(alignment: .trailing, spacing: 5) {
+                                ForEach(positionCurrencies(for: accountType)) { currency in
+                                    HStack(spacing: 6) {
+                                        Text(currency.rawValue)
+                                            .font(.caption2.weight(.bold))
+                                            .foregroundStyle(PocketLedgerTheme.textTertiary)
+                                        ProtectedAmountText(
+                                            value: netWorth(for: accountType, currency: currency).formatted,
+                                            isRevealed: areBalancesRevealed
+                                        )
+                                            .font(.caption.weight(.semibold).monospacedDigit())
+                                            .foregroundStyle(PocketLedgerTheme.textPrimary)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.7)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                }
+            }
+        }
+    }
+
+    private func positionCurrencies(for accountType: AccountType) -> [LedgerCurrency] {
+        LedgerCurrency.allCases.filter { currency in
+            store.activeAccounts.contains {
+                $0.type == accountType && $0.currency == currency && $0.includeInTotals
+            } || (accountType == .loan && store.data.loans.contains {
+                $0.currency == currency && !$0.isSettled
+            })
+        }
+    }
+
+    private func netWorth(for accountType: AccountType, currency: LedgerCurrency) -> Money {
+        let includedAccounts = store.activeAccounts.filter {
+            $0.currency == currency && $0.includeInTotals
+        }
+        let minorUnits: Int64
+
+        if accountType == .loan {
+            let otherAssetBalances = includedAccounts
+                .filter { $0.type != .loan }
+                .reduce(Int64.zero) { $0 + store.balance(for: $1).minorUnits }
+            minorUnits = store.netWorth(for: currency).minorUnits - otherAssetBalances
+        } else {
+            minorUnits = includedAccounts
+                .filter { $0.type == accountType }
+                .reduce(Int64.zero) { $0 + store.balance(for: $1).minorUnits }
+        }
+
+        return Money(currency: currency, minorUnits: minorUnits)
     }
 
     private func accountPositionRow(

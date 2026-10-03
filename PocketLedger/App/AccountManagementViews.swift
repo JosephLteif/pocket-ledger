@@ -158,7 +158,7 @@ struct AccountsView: View {
                                 }) { currency in
                                     let currencyAccounts = typeAccounts.filter { $0.currency == currency }
                                     let total = currencyAccounts.reduce(Int64.zero) { total, account in
-                                        total + store.balance(for: account).minorUnits
+                                        total + store.valuation(for: account).minorUnits
                                     }
                                     HStack(spacing: 6) {
                                         Text(currency.rawValue)
@@ -336,12 +336,12 @@ struct AccountsView: View {
         if accountType == .loan {
             let otherAssetBalances = includedAccounts
                 .filter { $0.type != .loan }
-                .reduce(Int64.zero) { $0 + store.balance(for: $1).minorUnits }
+                .reduce(Int64.zero) { $0 + store.valuation(for: $1).minorUnits }
             minorUnits = store.netWorth(for: currency).minorUnits - otherAssetBalances
         } else {
             minorUnits = includedAccounts
                 .filter { $0.type == accountType }
-                .reduce(Int64.zero) { $0 + store.balance(for: $1).minorUnits }
+                .reduce(Int64.zero) { $0 + store.valuation(for: $1).minorUnits }
         }
 
         return Money(currency: currency, minorUnits: minorUnits)
@@ -376,7 +376,7 @@ struct AccountsView: View {
                 } label: {
                     AccountRow(
                         account: account,
-                        balance: store.balance(for: account),
+                        balance: store.valuation(for: account),
                         areBalancesRevealed: areBalancesRevealed
                     )
                         .padding(.horizontal, 12)
@@ -742,7 +742,11 @@ struct AccountEditor: View {
                                 .tag(accountType)
                         }
                     }
-                    .disabled(isManagedLegacyLoan)
+                    .disabled(isManagedLegacyLoan || account?.tracking != nil)
+                    if account?.tracking != nil {
+                        Text("Undo tracking history and turn off asset tracking in account details before changing type, currency, or opening balance.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                     if hasCurrencyImpact {
                         Text("Changing currency updates this account's opening balance and all related transactions. Amounts keep their displayed numeric value; no exchange-rate conversion is applied.")
                             .font(.footnote)
@@ -759,7 +763,7 @@ struct AccountEditor: View {
 
                 Section("Opening balance") {
                     CurrencyInputField("Amount", text: $openingBalance, currency: $currency)
-                        .disabled(isManagedLegacyLoan)
+                        .disabled(isManagedLegacyLoan || account?.tracking != nil)
                     Text("The amount is stored in the account's own currency.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)

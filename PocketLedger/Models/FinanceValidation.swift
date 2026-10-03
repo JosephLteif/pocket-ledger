@@ -264,6 +264,7 @@ enum FinanceDataValidationError: LocalizedError, Equatable {
     case invalidBudget(index: Int)
     case invalidExchangeRate(index: Int)
     case invalidLoan(String)
+    case invalidAssetTracking(String)
 
     var errorDescription: String? {
         switch self {
@@ -289,6 +290,8 @@ enum FinanceDataValidationError: LocalizedError, Equatable {
             return "Exchange rate \(index + 1) is invalid."
         case .invalidLoan(let counterparty):
             return "Loan with \(counterparty) has invalid amounts, references, or payment history."
+        case .invalidAssetTracking(let message):
+            return message
         }
     }
 }
@@ -325,6 +328,9 @@ enum FinanceDataValidator {
 
         for account in data.accounts where account.openingBalance.currency != account.currency {
             return .accountCurrencyMismatch(account.name)
+        }
+        if let error = FinanceAssetTracking.validationError(in: data) {
+            return .invalidAssetTracking(error)
         }
 
         for accountID in data.managedLegacyLoanAccountIDs {

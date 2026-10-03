@@ -58,6 +58,7 @@ final class LedgerStore: ObservableObject {
     @Published private(set) var data: FinanceData
     @Published private(set) var lastActionStatus: String?
     @Published private(set) var ledgerRevision = 0
+    @Published private(set) var metalPriceFailures: Set<PreciousMetal> = []
 
     private let storage = FinanceStorage(context: "main-app")
     private(set) var ledgerIndex: LedgerIndex
@@ -887,6 +888,14 @@ final class LedgerStore: ObservableObject {
         }
         let original = data.accounts[index]
         var accountToSave = account
+        if let tracking = original.tracking {
+            guard account.currency == original.currency, account.type == original.type,
+                  account.openingBalance == original.openingBalance else {
+                lastActionStatus = "Undo tracking history and disable tracking before changing type, currency, or opening balance."
+                return false
+            }
+            accountToSave.tracking = tracking
+        }
         if isManagedLegacyLoanAccount(account.id) {
             guard account.type == .loan,
                   account.currency == original.currency,
@@ -1497,6 +1506,110 @@ final class LedgerStore: ObservableObject {
         ledgerIndex.balance(for: account)
     }
 
+    func valuation(for account: Account) -> Money { ledgerIndex.valuation(for: account) }
+
+    func metalPricePerGram(account: Account, metal: PreciousMetal) -> Decimal? {
+        FinanceAssetTracking.pricePerGram(account: account, metal: metal, data: data)
+    }
+
+    func metalValuation(account: Account, purchase: MetalPurchase) -> Money? {
+        guard let price = metalPricePerGram(account: account, metal: purchase.metal) else { return nil }
+        return try? FinanceAssetTracking.money(purchase.pureWeightGrams * price, currency: account.currency)
+    }
+
+    func metalQuoteDescription(account: Account, metal: PreciousMetal) -> String {
+        if let setting = account.tracking?.metalPricing.first(where: { $0.metal == metal }), setting.mode == .manual {
+            return "Manual · \(setting.asOf?.formatted(date: .abbreviated, time: .shortened) ?? "Price needed")"
+        }
+        guard let quote = data.metalQuotes.first(where: { $0.metal == metal }) else { return "Price needed · enter a manual price or refresh" }
+        let stale = metalPriceFailures.contains(metal) || Date.now.timeIntervalSince(quote.marketDate) > 900
+        let conversion = account.currency != .usd && metalPricePerGram(account: account, metal: metal) == nil
+            ? " · Exchange rate needed; enter a manual price" : ""
+        return "Gold API\(stale ? " · Stale" : "") · \(quote.marketDate.formatted(date: .abbreviated, time: .shortened))\(conversion)"
+    }
+
+    func refreshMetalPrices(force: Bool = false) async {
+        let metals = Set(data.accounts.filter { !$0.isArchived && $0.type == .physicalAsset }.flatMap { account in
+            (account.tracking?.metalPurchases ?? []).filter { purchase in
+                purchase.remainingWeightGrams > 0 && account.tracking?.metalPricing.first(where: { $0.metal == purchase.metal })?.mode != .manual
+            }.map(\.metal)
+        })
+        for metal in metals {
+            do {
+                let quote = try await MetalPriceService.shared.fetch(metal: metal, cached: data.metalQuotes.first { $0.metal == metal }, force: force)
+                var updated = data
+                updated.metalQuotes.removeAll { $0.metal == metal }
+                updated.metalQuotes.append(quote)
+                if persist(updated, successMessage: "Metal prices updated") { metalPriceFailures.remove(metal) }
+                else { metalPriceFailures.insert(metal) }
+            } catch {
+                metalPriceFailures.insert(metal)
+                lastActionStatus = "Price refresh failed. Last saved quotes remain available; you can enter a manual price."
+            }
+        }
+    }
+
+    @discardableResult
+    private func saveAssetActivity(_ change: () throws -> FinanceData, message: String) -> Bool {
+        do { return persist(try change(), successMessage: message, allowingAssetActivity: true) }
+        catch { lastActionStatus = error.localizedDescription; return false }
+    }
+
+    @discardableResult
+    func addMetalPurchase(accountID: UUID, purchase: MetalPurchase, fundingAccountID: UUID?, reconcileOpeningBalance: Bool) -> Bool {
+        saveAssetActivity({ try FinanceAssetTracking.addPurchase(in: data, accountID: accountID, purchase: purchase, fundingAccountID: fundingAccountID, reconcileOpeningBalance: reconcileOpeningBalance) }, message: "Metal purchase saved")
+    }
+
+    @discardableResult
+    func sellMetal(accountID: UUID, purchaseID: UUID, weightGrams: Decimal, proceeds: Money, date: Date, destinationAccountID: UUID) -> Bool {
+        saveAssetActivity({ try FinanceAssetTracking.sell(in: data, accountID: accountID, purchaseID: purchaseID, weightGrams: weightGrams, proceeds: proceeds, date: date, destinationAccountID: destinationAccountID) }, message: "Metal sale saved")
+    }
+
+    @discardableResult
+    func updateInvestmentValuation(accountID: UUID, amount: Money, date: Date, confirmRecordedBalance: Bool) -> Bool {
+        saveAssetActivity({ try FinanceAssetTracking.updateInvestment(in: data, accountID: accountID, amount: amount, date: date, confirmRecordedBalance: confirmRecordedBalance) }, message: "Investment valuation updated")
+    }
+
+    @discardableResult
+    func realizeInvestment(accountID: UUID, amount: Money, date: Date) -> Bool {
+        saveAssetActivity({ try FinanceAssetTracking.realizeInvestment(in: data, accountID: accountID, amount: amount, date: date) }, message: "Investment gain or loss realized")
+    }
+
+    @discardableResult
+    func undoLatestAssetActivity(accountID: UUID) -> Bool {
+        saveAssetActivity({ try FinanceAssetTracking.undoLatest(in: data, accountID: accountID) }, message: "Latest tracking entry undone")
+    }
+
+    @discardableResult
+    func disableAssetTracking(accountID: UUID) -> Bool {
+        guard let index = data.accounts.firstIndex(where: { $0.id == accountID }), data.accounts[index].tracking?.hasHistory != true else {
+            lastActionStatus = "Undo tracking history before disabling tracking."
+            return false
+        }
+        var updated = data
+        updated.accounts[index].tracking = nil
+        return persist(updated, successMessage: "Tracking disabled", allowingAssetActivity: true)
+    }
+
+    @discardableResult
+    func setMetalPricing(accountID: UUID, setting: MetalPriceSetting) -> Bool {
+        guard let index = data.accounts.firstIndex(where: { $0.id == accountID && $0.type == .physicalAsset && !$0.isArchived }), data.accounts[index].tracking != nil else {
+            lastActionStatus = "Add a purchase before setting its price."
+            return false
+        }
+        if setting.mode == .manual {
+            guard let price = setting.manualPricePerGram, !price.isNaN, price > 0, price < 1_000_000_000,
+                  let date = setting.asOf, Calendar.current.startOfDay(for: date) <= Calendar.current.startOfDay(for: .now) else {
+                lastActionStatus = "Enter a positive pure-metal price and a date that is not in the future."
+                return false
+            }
+        }
+        var updated = data
+        updated.accounts[index].tracking?.metalPricing.removeAll { $0.metal == setting.metal }
+        updated.accounts[index].tracking?.metalPricing.append(setting)
+        return persist(updated, successMessage: "Metal pricing updated", allowingAssetActivity: true)
+    }
+
     func reconciliation(for accountID: UUID) -> AccountReconciliation? {
         data.reconciliations[accountID]
     }
@@ -1701,7 +1814,7 @@ final class LedgerStore: ObservableObject {
     func assetBalance(for currency: LedgerCurrency) -> Money {
         Money(
             currency: currency,
-            minorUnits: availableBalance(for: currency).minorUnits
+            minorUnits: ledgerIndex.assetValuationBalance(for: currency).minorUnits
                 + ledgerIndex.lentLoanBalance(for: currency).minorUnits
         )
     }
@@ -1830,8 +1943,25 @@ final class LedgerStore: ObservableObject {
     private func persist(
         _ proposed: FinanceData,
         successMessage: String,
-        allowingCorruptedReplacement: Bool = false
+        allowingCorruptedReplacement: Bool = false,
+        allowingAssetActivity: Bool = false
     ) -> Bool {
+        if let error = FinanceAssetTracking.validationError(in: proposed) {
+            lastActionStatus = error
+            return false
+        }
+        if !allowingAssetActivity && !allowingCorruptedReplacement {
+            let linkedIDs = data.accounts.reduce(into: Set<UUID>()) { $0.formUnion($1.tracking?.transactionIDs ?? []) }
+            let oldLinked = data.transactions.filter { linkedIDs.contains($0.id) }
+            let newLinked = proposed.transactions.filter { linkedIDs.contains($0.id) }
+            guard oldLinked == newLinked,
+                  data.accounts.filter({ $0.tracking != nil }).allSatisfy({ old in
+                      proposed.accounts.contains { $0.id == old.id && $0.tracking == old.tracking }
+                  }) else {
+                lastActionStatus = "Correct linked investment or metal activity from its account tracking history."
+                return false
+            }
+        }
         var updated = proposed
         if data.transactions != updated.transactions {
             let oldTransactions = Dictionary(uniqueKeysWithValues: data.transactions.map { ($0.id, $0) })

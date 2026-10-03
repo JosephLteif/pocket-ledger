@@ -492,7 +492,7 @@ struct DashboardView: View {
                                         .font(.subheadline)
                                         .lineLimit(1)
                                     Spacer()
-                                    protectedBalanceText(store.ledgerIndex.balance(for: account).formatted)
+                                    protectedBalanceText(store.valuation(for: account).formatted)
                                         .font(.subheadline.weight(.semibold).monospacedDigit())
                                         .foregroundStyle(account.includeInTotals ? PocketLedgerTheme.textPrimary : PocketLedgerTheme.textTertiary)
                                 }

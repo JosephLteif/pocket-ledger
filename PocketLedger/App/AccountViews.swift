@@ -183,6 +183,8 @@ struct AccountDetailView: View {
             }
             .listSectionSeparator(.hidden)
 
+            AssetTrackingSection(store: store, account: account, areBalancesRevealed: areBalancesRevealed)
+
             Section {
                 if snapshot.transactions.isEmpty {
                     VStack(spacing: 8) {
@@ -359,12 +361,17 @@ struct AccountDetailView: View {
             }
 
             ProtectedAmountText(
-                value: store.balance(for: account).formatted,
+                value: store.valuation(for: account).formatted,
                 isRevealed: areBalancesRevealed
             )
                 .font(.largeTitle.weight(.bold).monospacedDigit())
                 .monospacedDigit()
                 .lineLimit(2)
+
+            if account.tracking != nil {
+                Text(account.type == .physicalAsset ? "Estimated metal value" : "Estimated total value")
+                    .font(.caption).foregroundStyle(PocketLedgerTheme.textTertiary)
+            }
 
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle")

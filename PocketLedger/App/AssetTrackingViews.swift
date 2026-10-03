@@ -91,18 +91,25 @@ struct AssetTrackingSection: View {
         let purchases = account.tracking?.metalPurchases ?? []
 
         Section {
-            if purchases.isEmpty {
-                Text("Track gold and silver by purchase, weight and purity.")
-                    .foregroundStyle(.secondary)
-            } else {
-                valueRow("Recorded balance", store.balance(for: account).formatted)
-                valueRow("Estimated metal value", store.valuation(for: account).formatted)
+            VStack(alignment: .leading, spacing: 12) {
+                if purchases.isEmpty {
+                    Text("Track gold and silver by purchase, weight and purity.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    valueRow("Recorded balance", store.balance(for: account).formatted)
+                    valueRow("Estimated metal value", store.valuation(for: account).formatted)
+                }
+                Button("Add metal purchase") { sheet = .purchase }
+                    .buttonStyle(.plain)
+                    .disabled(!areBalancesRevealed || account.isArchived)
+                if !areBalancesRevealed {
+                    Text("Reveal balances to view or update holdings.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             }
-            Button("Add metal purchase") { sheet = .purchase }
-                .disabled(!areBalancesRevealed || account.isArchived)
-            if !areBalancesRevealed {
-                Text("Reveal balances to view or update holdings.").font(.footnote).foregroundStyle(.secondary)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 10)
+            .pocketGroupedListRow(index: 0, count: 1)
         } header: { Text("Metals") } footer: {
             Text("Estimated metal value excludes jewelry workmanship and retail premiums. Missing prices use purchase cost in totals.")
         }
@@ -125,23 +132,38 @@ struct AssetTrackingSection: View {
                 }
             }
         }
-        Section("Metal prices") {
-            ForEach(PreciousMetal.allCases) { metal in
-                VStack(alignment: .leading, spacing: 6) {
-                    Button("\(metal.displayName) pricing") { sheet = .pricing(metal) }
-                        .disabled(!areBalancesRevealed || account.isArchived || account.tracking?.metalPurchases.isEmpty != false)
-                    if let price = store.metalPricePerGram(account: account, metal: metal) {
-                        valueRow("Pure metal / gram", "\(assetNumber(price)) \(account.currency.rawValue)")
-                    } else {
-                        Text("Price needed").foregroundStyle(.secondary)
+        let heldMetals = PreciousMetal.allCases.filter { metal in
+            purchases.contains { $0.metal == metal && $0.remainingWeightGrams > 0 }
+        }
+        if !heldMetals.isEmpty {
+            Section("Metal prices") {
+                ForEach(Array(heldMetals.enumerated()), id: \.element.id) { entry in
+                    let metal = entry.element
+                    VStack(alignment: .leading, spacing: 6) {
+                        Button("\(metal.displayName) pricing") { sheet = .pricing(metal) }
+                            .buttonStyle(.plain)
+                            .disabled(!areBalancesRevealed || account.isArchived)
+                        if let price = store.metalPricePerGram(account: account, metal: metal) {
+                            valueRow("Pure metal / gram", "\(assetNumber(price)) \(account.currency.rawValue)")
+                        } else {
+                            Text("Price needed").foregroundStyle(.secondary)
+                        }
+                        Text(store.metalQuoteDescription(account: account, metal: metal))
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    Text(store.metalQuoteDescription(account: account, metal: metal))
-                        .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 10)
+                    .pocketGroupedListRow(index: entry.offset, count: heldMetals.count + 1)
                 }
-            }
-            Button("Refresh market prices") { Task { await store.refreshMetalPrices(force: true) } }
-            if account.tracking?.metalPurchases.isEmpty != false {
-                Text("Add a purchase to configure metal pricing.").font(.footnote).foregroundStyle(.secondary)
+                Button {
+                    Task { await store.refreshMetalPrices(force: true) }
+                } label: {
+                    Label("Refresh market prices", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 10)
+                .pocketGroupedListRow(index: heldMetals.count, count: heldMetals.count + 1)
             }
         }
     }

@@ -157,19 +157,22 @@ struct AccountDetailView: View {
     }
 
     private func accountContent(_ account: Account, snapshot: AccountDetailSnapshot) -> some View {
-        List {
+        let hidesGenericActivity = account.type == .physicalAsset && account.tracking?.metalPurchases.isEmpty == false
+        return List {
             Section {
                 PocketGlassContainer(spacing: 14) {
                     VStack(alignment: .leading, spacing: 18) {
                         balanceCard(account)
                         totalsScopeCard(account)
 
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 10) {
-                                accountActivityMetrics(account: account, snapshot: snapshot)
-                            }
-                            VStack(spacing: 10) {
-                                accountActivityMetrics(account: account, snapshot: snapshot)
+                        if !hidesGenericActivity {
+                            ViewThatFits(in: .horizontal) {
+                                HStack(spacing: 10) {
+                                    accountActivityMetrics(account: account, snapshot: snapshot)
+                                }
+                                VStack(spacing: 10) {
+                                    accountActivityMetrics(account: account, snapshot: snapshot)
+                                }
                             }
                         }
                     }
@@ -185,88 +188,90 @@ struct AccountDetailView: View {
 
             AssetTrackingSection(store: store, account: account, areBalancesRevealed: areBalancesRevealed)
 
-            Section {
-                if snapshot.transactions.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "tray")
-                            .font(.title2)
-                            .foregroundStyle(PocketLedgerTheme.textTertiary)
-                        Text("No transactions for this account")
-                            .font(.headline)
-                        Text("Transactions that use this account will appear here.")
-                            .font(.subheadline)
-                            .foregroundStyle(PocketLedgerTheme.textSecondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 28)
-                    .listRowInsets(
-                        EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
-                    )
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                } else {
-                    ForEach(Array(snapshot.pageTransactions.enumerated()), id: \.element.id) { entry in
-                        let transaction = entry.element
-                        TransactionRow(
-                            transaction: transaction,
-                            store: store,
-                            onEdit: { editingTransaction = transaction },
-                            onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-                            onDelete: { transactionDeletion.delete(transaction, in: store) },
-                            onSaveTemplate: { transactionToTemplate = transaction },
-                            allowsActions: true,
-                            accountContext: account
-                        )
-                        .pocketGroupedListRow(
-                            index: entry.offset,
-                            count: snapshot.pageTransactions.count
-                        )
-                    }
-
-                    if snapshot.pageCount > 1 {
-                        HStack(spacing: 16) {
-                            Button {
-                                transactionPage = max(0, snapshot.displayedPage - 1)
-                            } label: {
-                                Label("Previous", systemImage: "chevron.left")
-                            }
-                            .disabled(snapshot.displayedPage == 0)
-
-                            Text("Page \(snapshot.displayedPage + 1) of \(snapshot.pageCount)")
-                                .font(.caption.weight(.semibold).monospacedDigit())
+            if !hidesGenericActivity {
+                Section {
+                    if snapshot.transactions.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "tray")
+                                .font(.title2)
+                                .foregroundStyle(PocketLedgerTheme.textTertiary)
+                            Text("No transactions for this account")
+                                .font(.headline)
+                            Text("Transactions that use this account will appear here.")
+                                .font(.subheadline)
                                 .foregroundStyle(PocketLedgerTheme.textSecondary)
-
-                            Button {
-                                transactionPage = min(snapshot.pageCount - 1, snapshot.displayedPage + 1)
-                            } label: {
-                                Label("Next", systemImage: "chevron.right")
-                                    .labelStyle(.titleAndIcon)
-                            }
-                            .disabled(snapshot.displayedPage == snapshot.pageCount - 1)
+                                .multilineTextAlignment(.center)
                         }
-                        .font(.caption.weight(.semibold))
                         .frame(maxWidth: .infinity)
-                        .padding(.top, 4)
+                        .padding(.vertical, 28)
                         .listRowInsets(
                             EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
                         )
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
+                    } else {
+                        ForEach(Array(snapshot.pageTransactions.enumerated()), id: \.element.id) { entry in
+                            let transaction = entry.element
+                            TransactionRow(
+                                transaction: transaction,
+                                store: store,
+                                onEdit: { editingTransaction = transaction },
+                                onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
+                                onDelete: { transactionDeletion.delete(transaction, in: store) },
+                                onSaveTemplate: { transactionToTemplate = transaction },
+                                allowsActions: true,
+                                accountContext: account
+                            )
+                            .pocketGroupedListRow(
+                                index: entry.offset,
+                                count: snapshot.pageTransactions.count
+                            )
+                        }
+
+                        if snapshot.pageCount > 1 {
+                            HStack(spacing: 16) {
+                                Button {
+                                    transactionPage = max(0, snapshot.displayedPage - 1)
+                                } label: {
+                                    Label("Previous", systemImage: "chevron.left")
+                                }
+                                .disabled(snapshot.displayedPage == 0)
+
+                                Text("Page \(snapshot.displayedPage + 1) of \(snapshot.pageCount)")
+                                    .font(.caption.weight(.semibold).monospacedDigit())
+                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+
+                                Button {
+                                    transactionPage = min(snapshot.pageCount - 1, snapshot.displayedPage + 1)
+                                } label: {
+                                    Label("Next", systemImage: "chevron.right")
+                                        .labelStyle(.titleAndIcon)
+                                }
+                                .disabled(snapshot.displayedPage == snapshot.pageCount - 1)
+                            }
+                            .font(.caption.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
+                            .listRowInsets(
+                                EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
+                            )
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        }
                     }
+                } header: {
+                    HStack {
+                        Text("Account activity")
+                            .font(.title3.weight(.bold))
+                        Spacer()
+                        Text("All time")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(PocketLedgerTheme.textTertiary)
+                    }
+                    .textCase(nil)
                 }
-            } header: {
-                HStack {
-                    Text("Account activity")
-                        .font(.title3.weight(.bold))
-                    Spacer()
-                    Text("All time")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(PocketLedgerTheme.textTertiary)
-                }
-                .textCase(nil)
+                .listSectionSeparator(.hidden)
             }
-            .listSectionSeparator(.hidden)
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)

@@ -12,12 +12,11 @@ struct AssetTrackingSection: View {
     @State private var errorMessage: String?
 
     private enum AssetSheet: Identifiable {
-        case purchase, pricing(PreciousMetal), sale(MetalPurchase), investment(Bool)
+        case purchase, pricing(PreciousMetal), investment(Bool)
         var id: String {
             switch self {
             case .purchase: "purchase"
             case .pricing(let metal): "price-\(metal.rawValue)"
-            case .sale(let purchase): "sale-\(purchase.id)"
             case .investment(let realizing): "investment-\(realizing)"
             }
         }
@@ -51,8 +50,6 @@ struct AssetTrackingSection: View {
                 MetalPurchaseEditor(store: store, account: account)
             case .pricing(let metal):
                 MetalPricingEditor(store: store, account: account, metal: metal)
-            case .sale(let purchase):
-                MetalSaleEditor(store: store, account: account, purchase: purchase)
             case .investment(let realizing):
                 InvestmentEntryEditor(store: store, account: account, realizing: realizing)
             }
@@ -91,8 +88,10 @@ struct AssetTrackingSection: View {
     }
 
     @ViewBuilder private var metals: some View {
+        let purchases = account.tracking?.metalPurchases ?? []
+
         Section {
-            if account.tracking?.metalPurchases.isEmpty != false {
+            if purchases.isEmpty {
                 Text("Track gold and silver by purchase, weight and purity.")
                     .foregroundStyle(.secondary)
             } else {
@@ -106,6 +105,25 @@ struct AssetTrackingSection: View {
             }
         } header: { Text("Metals") } footer: {
             Text("Estimated metal value excludes jewelry workmanship and retail premiums. Missing prices use purchase cost in totals.")
+        }
+        if !purchases.isEmpty {
+            Section("Purchases") {
+                ForEach(Array(purchases.enumerated()), id: \.element.id) { entry in
+                    let purchase = entry.element
+                    NavigationLink {
+                        MetalPurchaseDetailView(store: store, accountID: account.id, purchaseID: purchase.id)
+                    } label: {
+                        MetalPurchaseRow(
+                            store: store,
+                            account: account,
+                            purchase: purchase,
+                            areBalancesRevealed: areBalancesRevealed
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .pocketGroupedListRow(index: entry.offset, count: purchases.count)
+                }
+            }
         }
         Section("Metal prices") {
             ForEach(PreciousMetal.allCases) { metal in
@@ -124,43 +142,6 @@ struct AssetTrackingSection: View {
             Button("Refresh market prices") { Task { await store.refreshMetalPrices(force: true) } }
             if account.tracking?.metalPurchases.isEmpty != false {
                 Text("Add a purchase to configure metal pricing.").font(.footnote).foregroundStyle(.secondary)
-            }
-        }
-        ForEach(account.tracking?.metalPurchases ?? []) { purchase in
-            Section {
-                valueRow("Purchased quantity", assetNumber(purchase.quantity))
-                valueRow("Weight per item", "\(assetNumber(purchase.weightPerItem)) \(purchase.unit.displayName.lowercased())")
-                valueRow("Remaining quantity", assetNumber(purchase.remainingQuantity))
-                valueRow("Remaining weight", "\(assetNumber(purchase.remainingWeightGrams)) g")
-                valueRow("Pure metal weight", "\(assetNumber(purchase.pureWeightGrams)) g")
-                valueRow("Purity", "\(assetNumber(purchase.purity * 100))%")
-                valueRow("Total paid including fees", purchase.totalCost.formatted)
-                valueRow("Remaining purchase cost", purchase.remainingCost.formatted)
-                if let value = store.metalValuation(account: account, purchase: purchase) {
-                    valueRow("Estimated metal value", value.formatted)
-                    let gain = Decimal(value.minorUnits) - Decimal(purchase.remainingCost.minorUnits)
-                    if let gainMoney = try? FinanceAssetTracking.money(gain / Decimal(account.currency.minorUnitScale), currency: account.currency) {
-                        valueRow("Unrealized gain/loss", gainMoney.formatted)
-                    }
-                    if purchase.remainingCost.minorUnits > 0 {
-                        valueRow("Return", "\(assetNumber(gain / Decimal(purchase.remainingCost.minorUnits) * 100))%")
-                    }
-                } else {
-                    Text("Price needed · Unrealized gain unavailable").foregroundStyle(.secondary)
-                }
-                LabeledContent("Purchased", value: purchase.date.formatted(date: .abbreviated, time: .omitted))
-                Button("Record sale") { sheet = .sale(purchase) }
-                    .disabled(!areBalancesRevealed || purchase.remainingWeightGrams <= 0 || account.isArchived)
-                ForEach(purchase.sales) { sale in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Sold \(sale.date.formatted(date: .abbreviated, time: .omitted))").font(.subheadline)
-                        valueRow("Weight sold", "\(assetNumber(sale.weightGrams)) g")
-                        valueRow("Net proceeds", sale.proceeds.formatted)
-                        valueRow("Realized gain/loss", sale.gain.formatted)
-                    }
-                }
-            } header: {
-                Text(purchase.description.isEmpty ? purchase.metal.displayName : "\(purchase.metal.displayName) · \(purchase.description)")
             }
         }
     }
@@ -203,6 +184,278 @@ struct AssetTrackingSection: View {
             }
         }
     }
+}
+
+@MainActor
+private struct MetalPurchaseRow: View {
+    @ObservedObject var store: LedgerStore
+    let account: Account
+    let purchase: MetalPurchase
+    let areBalancesRevealed: Bool
+
+    private var valuation: Money? { store.metalValuation(account: account, purchase: purchase) }
+    private var gain: Money? { valuation.flatMap { metalPurchaseGain(value: $0, cost: purchase.remainingCost) } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                PocketIcon(
+                    systemImage: "circle.fill",
+                    tint: purchase.metal == .gold ? .yellow : .gray,
+                    size: 36
+                )
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(purchase.description.isEmpty ? "\(purchase.metal.displayName) purchase" : purchase.description)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text("\(purchase.metal.displayName) · \(purchase.date.formatted(date: .abbreviated, time: .omitted))")
+                        .font(.caption)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(PocketLedgerTheme.textTertiary)
+                    .accessibilityHidden(true)
+            }
+
+            HStack(alignment: .top, spacing: 12) {
+                valueMetric(
+                    title: "Current value",
+                    value: valuation.map { protected($0.formatted) } ?? "Price needed",
+                    isProtected: valuation != nil
+                )
+                Spacer(minLength: 8)
+                valueMetric(
+                    title: purchase.sales.isEmpty ? "Purchase cost" : "Cost remaining",
+                    value: protected(purchase.remainingCost.formatted),
+                    trailing: true
+                )
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "scalemass")
+                    .accessibilityHidden(true)
+                Text(areBalancesRevealed
+                     ? "\(assetNumber(purchase.remainingQuantity)) of \(assetNumber(purchase.quantity)) remaining · \(assetNumber(purchase.remainingWeightGrams)) g"
+                     : "••••")
+                    .accessibilityLabel(areBalancesRevealed
+                        ? "\(assetNumber(purchase.remainingQuantity)) of \(assetNumber(purchase.quantity)) remaining, \(assetNumber(purchase.remainingWeightGrams)) grams"
+                        : "Hidden holding quantities")
+                Spacer(minLength: 0)
+                if let gain {
+                    Text(areBalancesRevealed ? signedMetalGain(gain) : "••••")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(gain.minorUnits >= 0 ? PocketLedgerTheme.positive : .red)
+                        .accessibilityLabel(areBalancesRevealed ? signedMetalGain(gain) : "Hidden gain or loss")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(PocketLedgerTheme.textSecondary)
+            .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens purchase details")
+    }
+
+    private func valueMetric(
+        title: String,
+        value: String,
+        trailing: Bool = false,
+        isProtected: Bool = true
+    ) -> some View {
+        let alignment: HorizontalAlignment = trailing ? .trailing : .leading
+        VStack(alignment: alignment, spacing: 3) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
+            Text(value)
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .lineLimit(2)
+                .privacySensitive()
+                .accessibilityLabel(areBalancesRevealed || !isProtected ? value : "Hidden amount")
+        }
+        .frame(maxWidth: .infinity, alignment: trailing ? .trailing : .leading)
+    }
+
+    private func protected(_ value: String) -> String {
+        areBalancesRevealed ? value : "••••"
+    }
+}
+
+@MainActor
+private struct MetalPurchaseDetailView: View {
+    @ObservedObject var store: LedgerStore
+    let accountID: UUID
+    let purchaseID: UUID
+
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
+    @State private var salePurchase: MetalPurchase?
+
+    private var account: Account? { store.account(with: accountID) }
+    private var purchase: MetalPurchase? {
+        account?.tracking?.metalPurchases.first { $0.id == purchaseID }
+    }
+
+    var body: some View {
+        Group {
+            if let account, let purchase {
+                detailList(account: account, purchase: purchase)
+            } else {
+                ContentUnavailableView("Purchase unavailable", systemImage: "shippingbox")
+            }
+        }
+        .navigationTitle("Metal purchase")
+        .navigationBarTitleDisplayMode(.inline)
+        .pocketScreen()
+        .sheet(item: $salePurchase, onDismiss: {
+            Task { await store.refreshMetalPrices() }
+        }) { salePurchase in
+            if let account = store.account(with: accountID) {
+                MetalSaleEditor(store: store, account: account, purchase: salePurchase)
+            }
+        }
+        .onChange(of: areBalancesRevealed) { _, revealed in
+            if !revealed { salePurchase = nil }
+        }
+    }
+
+    private func detailList(account: Account, purchase: MetalPurchase) -> some View {
+        let valuation = store.metalValuation(account: account, purchase: purchase)
+        let gain = valuation.flatMap { metalPurchaseGain(value: $0, cost: purchase.remainingCost) }
+        let pricePerGram = store.metalPricePerGram(account: account, metal: purchase.metal)
+
+        return List {
+            Section("Market value") {
+                if let valuation {
+                    protectedRow("Estimated metal value", valuation.formatted)
+                } else {
+                    LabeledContent("Estimated metal value", value: "Price needed")
+                    Text("Set a manual price or refresh a quote to calculate current value and unrealized gain.")
+                        .font(.footnote)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                }
+                protectedRow("Remaining cost basis", purchase.remainingCost.formatted)
+                if let gain {
+                    protectedRow("Unrealized gain/loss", signedMetalGain(gain))
+                    if let returnPercentage = metalPurchaseReturnPercentage(gain: gain, cost: purchase.remainingCost) {
+                        protectedRow("Return", "\(assetNumber(returnPercentage))%")
+                    }
+                }
+                if let pricePerGram {
+                    protectedRow("Pure-metal price per gram", "\(assetNumber(pricePerGram)) \(account.currency.rawValue)")
+                }
+                Text(store.metalQuoteDescription(account: account, metal: purchase.metal))
+                    .font(.footnote)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            }
+
+            Section("Purchase details") {
+                LabeledContent("Metal", value: purchase.metal.displayName)
+                if !purchase.description.isEmpty {
+                    LabeledContent("Description", value: purchase.description)
+                }
+                LabeledContent("Purchase date", value: purchase.date.formatted(date: .long, time: .omitted))
+                protectedRow("Quantity purchased", assetNumber(purchase.quantity))
+                protectedRow("Weight per item", "\(assetNumber(purchase.weightPerItem)) \(purchase.unit.displayName.lowercased())")
+                protectedRow("Total weight purchased", "\(assetNumber(purchase.weightGrams)) g")
+                protectedRow("Purity", "\(assetNumber(purchase.purity * 100))%")
+                protectedRow("Pure-metal weight at purchase", "\(assetNumber(purchase.weightGrams * purchase.purity)) g")
+                protectedRow("Total paid including fees", purchase.totalCost.formatted)
+            }
+
+            Section("Remaining holding") {
+                protectedRow("Quantity remaining", assetNumber(purchase.remainingQuantity))
+                protectedRow("Weight remaining", "\(assetNumber(purchase.remainingWeightGrams)) g")
+                protectedRow("Pure-metal weight remaining", "\(assetNumber(purchase.pureWeightGrams)) g")
+                protectedRow("Purchase cost remaining", purchase.remainingCost.formatted)
+            }
+
+            Section("Sales") {
+                if purchase.sales.isEmpty {
+                    Text("No sales recorded for this purchase.")
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                } else {
+                    ForEach(purchase.sales) { sale in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(sale.date.formatted(date: .abbreviated, time: .omitted))
+                                Spacer()
+                                Text(sensitive(sale.proceeds.formatted))
+                                    .fontWeight(.semibold)
+                                    .monospacedDigit()
+                                    .privacySensitive()
+                                    .accessibilityLabel(areBalancesRevealed ? sale.proceeds.formatted : "Hidden value")
+                            }
+                            HStack {
+                                Text(sensitive("\(assetNumber(sale.weightGrams)) g sold"))
+                                    .privacySensitive()
+                                    .accessibilityLabel(areBalancesRevealed
+                                        ? "\(assetNumber(sale.weightGrams)) grams sold"
+                                        : "Hidden sale weight")
+                                Spacer()
+                                Text("Realized \(sensitive(signedMetalGain(sale.gain)))")
+                                    .privacySensitive()
+                                    .accessibilityLabel(areBalancesRevealed
+                                        ? "Realized \(signedMetalGain(sale.gain))"
+                                        : "Hidden realized gain or loss")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+
+            Section {
+                if purchase.remainingWeightGrams > 0 {
+                    Button {
+                        salePurchase = purchase
+                    } label: {
+                        Label("Record sale", systemImage: "arrow.up.forward.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(!areBalancesRevealed || account.isArchived)
+                } else {
+                    Label("Fully sold", systemImage: "checkmark.circle")
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+
+    private func protectedRow(_ title: String, _ value: String) -> some View {
+        LabeledContent(title) {
+            Text(sensitive(value))
+                .monospacedDigit()
+                .privacySensitive()
+                .accessibilityLabel(areBalancesRevealed ? value : "Hidden value")
+        }
+    }
+
+    private func sensitive(_ value: String) -> String {
+        areBalancesRevealed ? value : "••••"
+    }
+}
+
+private func metalPurchaseGain(value: Money, cost: Money) -> Money? {
+    let amount = (Decimal(value.minorUnits) - Decimal(cost.minorUnits)) / Decimal(value.currency.minorUnitScale)
+    return try? FinanceAssetTracking.money(amount, currency: value.currency)
+}
+
+private func metalPurchaseReturnPercentage(gain: Money, cost: Money) -> Decimal? {
+    guard cost.minorUnits > 0 else { return nil }
+    return Decimal(gain.minorUnits) / Decimal(cost.minorUnits) * 100
+}
+
+private func signedMetalGain(_ gain: Money) -> String {
+    gain.minorUnits > 0 ? "+\(gain.formatted)" : gain.formatted
 }
 
 private func assetNumber(_ value: Decimal) -> String {

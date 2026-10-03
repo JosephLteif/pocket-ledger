@@ -112,6 +112,7 @@ targets:
     platform: watchOS
     sources:
       - path: PocketLedger/Models/FinanceModel.swift
+      - path: PocketLedger/Models/AccountTrackingModels.swift
       - path: PocketLedger/WatchShared
       - path: PocketLedgerWatch
     resources:
@@ -147,6 +148,7 @@ targets:
     platform: watchOS
     sources:
       - path: PocketLedger/Models/FinanceModel.swift
+      - path: PocketLedger/Models/AccountTrackingModels.swift
       - path: PocketLedger/WatchShared
       - path: PocketLedgerWatchWidget
     resources:

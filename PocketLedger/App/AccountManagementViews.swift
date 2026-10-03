@@ -29,6 +29,7 @@ struct AccountsView: View {
                     globalPositionSummary
                 }
                 .padding(.top, 8)
+                .padding(.leading, -16)
             } label: {
                 Label("Account overview", systemImage: "chart.pie")
                     .font(.headline)

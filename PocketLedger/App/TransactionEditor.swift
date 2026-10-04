@@ -82,6 +82,7 @@ private struct TransactionEditorSnapshot: Equatable {
 @MainActor
 private struct MovementLineEditor: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject private var proAccess = ProEntitlementStore.shared
     @Binding var line: MovementDraft
     let amountPlaceholder: String
     let allowsArchivedAccount: Bool
@@ -209,6 +210,7 @@ struct TransactionEditor: View {
     @State private var attachmentReplacements: [UUID: PendingAttachmentReplacement] = [:]
     @State private var originalEditorSnapshot: TransactionEditorSnapshot?
     @State private var isShowingDiscardConfirmation = false
+    @State private var isShowingProUpgrade = false
     @State private var errorMessage: String?
     @State private var isShowingMoreDetails = false
     @State private var saveFeedbackTrigger = 0
@@ -568,6 +570,9 @@ struct TransactionEditor: View {
         ) { entity, activity in
             activity.title = "Viewing \(entity.note.isEmpty ? entity.kind : entity.note)"
             activity.appEntityIdentifier = EntityIdentifier(for: entity)
+        }
+        .sheet(isPresented: $isShowingProUpgrade) {
+            ProUpgradeView(access: proAccess)
         }
     }
 
@@ -1839,7 +1844,12 @@ struct TransactionEditor: View {
                 ? store.updateScheduledTransaction(scheduledTransaction)
                 : store.addScheduledTransaction(scheduledTransaction)
             guard saved else {
-                errorMessage = store.lastActionStatus ?? "The schedule could not be saved."
+                if let feature = store.proAccessRequired {
+                    proAccess.requestUpgrade(for: feature)
+                    isShowingProUpgrade = true
+                } else {
+                    errorMessage = store.lastActionStatus ?? "The schedule could not be saved."
+                }
                 return
             }
         } else {

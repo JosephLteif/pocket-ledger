@@ -5,6 +5,7 @@ import UIKit
 @MainActor
 struct ContentView: View {
     @StateObject private var store = LedgerStore()
+    @StateObject private var proAccess = ProEntitlementStore.shared
     @StateObject private var security = AppSecurityService()
     @StateObject private var intentSearchRouter = FinanceIntentSearchRouter.shared
     @StateObject private var visualBillScanRouter = VisualBillScanRouter.shared
@@ -37,6 +38,7 @@ struct ContentView: View {
             if phase == .active {
                 security.refresh()
                 store.reload()
+                Task { await proAccess.refreshEntitlements() }
                 openPendingQuickExpense()
                 store.processDueScheduledTransactions()
                 let schedules = store.data.scheduledTransactions
@@ -71,6 +73,7 @@ struct ContentView: View {
             openPendingVisualBillScan()
         }
         .task {
+            await proAccess.refreshEntitlements()
             areBalancesRevealed = false
             openPendingIntentSearch()
             if ProcessInfo.processInfo.arguments.contains("-ImportWizardUITest") {
@@ -125,7 +128,7 @@ struct ContentView: View {
     }
 
     private func handleDeepLink(_ url: URL) {
-        if url.scheme == "pocketledger", url.host == "add", url.path == "/expense" {
+        if url.scheme == FinanceStorage.urlScheme, url.host == "add", url.path == "/expense" {
             let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             let amountText = queryItems.first(where: { $0.name == "amount" })?.value ?? ""
             let currency = queryItems.first(where: { $0.name == "currency" })?.value
@@ -506,7 +509,7 @@ enum AppTab: String, Hashable {
     }
 
     init?(url: URL) {
-        guard url.scheme == "pocketledger" else { return nil }
+        guard url.scheme == FinanceStorage.urlScheme else { return nil }
         let destination = url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard destination == Self.overview.rawValue
             || destination == Self.accounts.rawValue

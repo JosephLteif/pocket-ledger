@@ -13,6 +13,14 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: 26.0
     WATCHOS_DEPLOYMENT_TARGET: 26.0
     SWIFT_VERSION: 6.0
+    POCKET_LEDGER_BUNDLE_ID_BASE: com.josephlteif.pocketledger
+    POCKET_LEDGER_BUNDLE_ID_SUFFIX: ""
+    POCKET_LEDGER_APP_GROUP_ID_BASE: group.com.josephlteif.pocketledger
+    POCKET_LEDGER_APP_GROUP_ID_SUFFIX: ""
+    POCKET_LEDGER_DISPLAY_NAME: Pocket Ledger
+    POCKET_LEDGER_WIDGET_DISPLAY_NAME: Pocket Ledger Balance
+    POCKET_LEDGER_URL_SCHEME: pocketledger
+    POCKET_LEDGER_URL_SUFFIX: ""
 
 packages:
   ZIPFoundation:
@@ -34,7 +42,7 @@ targets:
       - path: PocketLedger/Config/PrivacyInfo.xcprivacy
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.josephlteif.financedemo
+        PRODUCT_BUNDLE_IDENTIFIER: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX)
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_FILE: PocketLedger/Config/Info.plist
         CODE_SIGN_ENTITLEMENTS: PocketLedger/Config/PocketLedger.entitlements
@@ -43,8 +51,8 @@ targets:
     info:
       path: PocketLedger/Config/Info.plist
       properties:
-        CFBundleDisplayName: Pocket Ledger
-        CFBundleName: Pocket Ledger
+        CFBundleDisplayName: $(POCKET_LEDGER_DISPLAY_NAME)
+        CFBundleName: $(POCKET_LEDGER_DISPLAY_NAME)
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
         NSCameraUsageDescription: "Pocket Ledger uses the camera to read bill items."
@@ -53,9 +61,11 @@ targets:
         NSSupportsLiveActivities: true
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
-            CFBundleURLName: com.josephlteif.pocketledger
+            CFBundleURLName: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX)
             CFBundleURLSchemes:
-              - pocketledger
+              - $(POCKET_LEDGER_URL_SCHEME)$(POCKET_LEDGER_URL_SUFFIX)
+        PocketLedgerAppGroupIdentifier: $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
+        PocketLedgerURLScheme: $(POCKET_LEDGER_URL_SCHEME)$(POCKET_LEDGER_URL_SUFFIX)
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
         UISupportedInterfaceOrientations:
@@ -64,7 +74,7 @@ targets:
       path: PocketLedger/Config/PocketLedger.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.josephlteif.financedemo
+          - $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
     dependencies:
       - package: ZIPFoundation
       - target: PocketLedgerWidget
@@ -88,24 +98,25 @@ targets:
       - path: PocketLedgerWidget/Config/PrivacyInfo.xcprivacy
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.josephlteif.financedemo.widget
+        PRODUCT_BUNDLE_IDENTIFIER: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX).widget
         INFOPLIST_FILE: PocketLedgerWidget/Config/Info.plist
         CODE_SIGN_ENTITLEMENTS: PocketLedgerWidget/Config/PocketLedgerWidget.entitlements
         TARGETED_DEVICE_FAMILY: 1
     info:
       path: PocketLedgerWidget/Config/Info.plist
       properties:
-        CFBundleDisplayName: Pocket Ledger Balance
+        CFBundleDisplayName: $(POCKET_LEDGER_WIDGET_DISPLAY_NAME)
         CFBundleName: Pocket Ledger Widget
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        PocketLedgerAppGroupIdentifier: $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
     entitlements:
       path: PocketLedgerWidget/Config/PocketLedgerWidget.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.josephlteif.financedemo
+          - $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
 
   PocketLedgerWatch:
     type: application
@@ -118,7 +129,7 @@ targets:
       - path: PocketLedgerWatch/Config/PrivacyInfo.xcprivacy
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.josephlteif.financedemo.watchkitapp
+        PRODUCT_BUNDLE_IDENTIFIER: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX).watchkitapp
         TARGETED_DEVICE_FAMILY: "4"
         SUPPORTS_MACCATALYST: NO
     info:
@@ -129,13 +140,14 @@ targets:
         CFBundleName: Pocket Ledger
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
-        WKCompanionAppBundleIdentifier: com.josephlteif.financedemo
+        WKCompanionAppBundleIdentifier: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX)
         WKRunsIndependentlyOfCompanionApp: false
+        PocketLedgerAppGroupIdentifier: $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
     entitlements:
       path: PocketLedgerWatch/Config/PocketLedgerWatch.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.josephlteif.financedemo
+          - $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
     dependencies:
       - target: PocketLedgerWatchWidget
         embed: true
@@ -153,7 +165,7 @@ targets:
       - path: PocketLedgerWatchWidget/Config/PrivacyInfo.xcprivacy
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.josephlteif.financedemo.watchkitapp.widget
+        PRODUCT_BUNDLE_IDENTIFIER: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX).watchkitapp.widget
         TARGETED_DEVICE_FAMILY: "4"
     info:
       path: PocketLedgerWatchWidget/Config/Info.plist
@@ -164,11 +176,12 @@ targets:
         CFBundleVersion: "1"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        PocketLedgerAppGroupIdentifier: $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
     entitlements:
       path: PocketLedgerWatchWidget/Config/PocketLedgerWatchWidget.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.josephlteif.financedemo
+          - $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
 
   PocketLedgerTests:
     type: bundle.unit-test
@@ -179,5 +192,5 @@ targets:
       - target: PocketLedger
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.josephlteif.financedemo.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.josephlteif.pocketledger.tests
         GENERATE_INFOPLIST_FILE: YES

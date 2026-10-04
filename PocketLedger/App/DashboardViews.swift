@@ -5,6 +5,7 @@ import SwiftUI
 struct MoreView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
+    @ObservedObject private var proAccess = ProEntitlementStore.shared
     let onAddExpense: () -> Void
     let onAddAction: (AddAction) -> Void
     @State private var isShowingSetup = false
@@ -43,6 +44,16 @@ struct MoreView: View {
                         MetricsView(store: store, security: security)
                     } label: {
                         Label("Metrics", systemImage: "chart.xyaxis.line")
+                    }
+                    .listRowBackground(PocketLedgerTheme.surface)
+                }
+
+                Section("Pocket Ledger Pro") {
+                    ProUpgradeButton(feature: .general) {
+                        Label(
+                            proAccess.hasProAccess ? "Pro is active" : "Explore Pro",
+                            systemImage: proAccess.hasProAccess ? "checkmark.seal.fill" : "sparkles"
+                        )
                     }
                     .listRowBackground(PocketLedgerTheme.surface)
                 }

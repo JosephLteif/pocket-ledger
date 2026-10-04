@@ -5,11 +5,13 @@ import SwiftUI
 struct AccountsView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
+    @ObservedObject private var proAccess = ProEntitlementStore.shared
     let onAddAction: (AddAction) -> Void
     @State private var isPresentingAccount = false
     @State private var editingAccount: Account?
     @State private var accountToDelete: Account?
     @State private var accountDeletionError: String?
+    @State private var isShowingProUpgrade = false
     @State private var isArchivedAccountsExpanded = false
     @State private var isAccountSummaryExpanded = false
     @State private var expandedPositionCurrency: LedgerCurrency?
@@ -17,20 +19,44 @@ struct AccountsView: View {
 
     var body: some View {
         List {
-            DisclosureGroup(isExpanded: $isAccountSummaryExpanded) {
-                VStack(spacing: 12) {
-                    accountTypeTotalsSummary
-                    globalPositionSummary
-                }
-                .padding(.top, 8)
-            } label: {
-                Label("Account overview", systemImage: "chart.pie")
-                    .font(.headline)
-                    .foregroundStyle(PocketLedgerTheme.textPrimary)
+            HStack {
+                Label("Active accounts", systemImage: "wallet.pass")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Text(proAccess.hasProAccess
+                     ? "\(store.activeAccounts.count)"
+                     : "\(store.activeAccounts.count) of \(PocketLedgerTierPolicy.freeAccountLimit)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
             }
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
+            if proAccess.hasProAccess {
+                DisclosureGroup(isExpanded: $isAccountSummaryExpanded) {
+                    VStack(spacing: 12) {
+                        accountTypeTotalsSummary
+                        globalPositionSummary
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Label("Account overview", systemImage: "chart.pie")
+                        .font(.headline)
+                        .foregroundStyle(PocketLedgerTheme.textPrimary)
+                }
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
+            } else {
+                ProUpgradePrompt(
+                    title: "Net worth and allocation",
+                    detail: "See assets, liabilities, and how your accounts contribute to net worth.",
+                    feature: .netWorth
+                )
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
 
             ForEach(AccountType.allCases) { accountType in
                 let accounts = store.activeAccounts.filter { $0.type == accountType }
@@ -70,13 +96,26 @@ struct AccountsView: View {
                     systemImage: "plus.circle"
                 )
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        presentAccount(nil)
-                    } label: {
-                        Image(systemName: "person.crop.circle.badge.plus")
+                    if !proAccess.hasProAccess,
+                       store.activeAccounts.count >= PocketLedgerTierPolicy.freeAccountLimit {
+                        ProUpgradeButton(feature: .accounts) {
+                            Image(systemName: "person.crop.circle.badge.plus")
+                        }
+                        .accessibilityLabel("Unlock more accounts with Pro")
+                    } else {
+                        Button {
+                            presentAccount(nil)
+                        } label: {
+                            Image(systemName: "person.crop.circle.badge.plus")
+                        }
+                        .accessibilityLabel("Add account")
                     }
-                    .accessibilityLabel("Add account")
                 }
+            }
+        }
+        .background {
+            Color.clear.sheet(isPresented: $isShowingProUpgrade) {
+                ProUpgradeView(access: proAccess)
             }
         }
         .sheet(isPresented: $isPresentingAccount, onDismiss: { editingAccount = nil }) {
@@ -427,7 +466,7 @@ struct AccountsView: View {
                                 tint: PocketLedgerTheme.accent,
                                 titleColor: .white
                             ) {
-                                _ = store.setAccountArchived(accountID: account.id, isArchived: false)
+                                restoreAccount(account.id)
                             }
                         }
                     }
@@ -500,6 +539,15 @@ struct AccountsView: View {
     private func presentAccount(_ account: Account?) {
         editingAccount = account
         isPresentingAccount = true
+    }
+
+    private func restoreAccount(_ accountID: UUID) {
+        guard !store.setAccountArchived(accountID: accountID, isArchived: false),
+              let feature = store.proAccessRequired else {
+            return
+        }
+        proAccess.requestUpgrade(for: feature)
+        isShowingProUpgrade = true
     }
 
     private var deleteAccountConfirmationPresented: Binding<Bool> {
@@ -594,6 +642,7 @@ private struct AccountRow: View {
 @MainActor
 struct AccountEditor: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject private var proAccess = ProEntitlementStore.shared
     let account: Account?
     let initialCurrency: LedgerCurrency?
     let onSaved: (Account) -> Void
@@ -604,6 +653,7 @@ struct AccountEditor: View {
     @State private var openingBalance = "0"
     @State private var includeInTotals = true
     @State private var errorMessage: String?
+    @State private var isShowingProUpgrade = false
     @State private var pendingAccount: Account?
     @State private var isConfirmingCurrencyChange = false
     @State private var isConfirmingDiscard = false
@@ -637,12 +687,23 @@ struct AccountEditor: View {
                 Section("Account") {
                     TextField("Name", text: $name)
                     Picker("Type", selection: $type) {
-                        ForEach(AccountType.allCases) { accountType in
+                        ForEach(AccountType.allCases.filter {
+                            proAccess.hasProAccess
+                                || !PocketLedgerTierPolicy.accountTypeRequiresPro($0)
+                                || $0 == account?.type
+                        }) { accountType in
                             Label(accountType.displayName, systemImage: accountType.systemImage)
                                 .tag(accountType)
                         }
                     }
                     .disabled(isManagedLegacyLoan)
+                    if !proAccess.hasProAccess {
+                        ProUpgradePrompt(
+                            title: "Advanced account types",
+                            detail: "Pro adds loan, investment, and physical-asset accounts.",
+                            feature: .accountTypes
+                        )
+                    }
                     if hasCurrencyImpact {
                         Text("Changing currency updates this account's opening balance and all related transactions. Amounts keep their displayed numeric value; no exchange-rate conversion is applied.")
                             .font(.footnote)
@@ -703,6 +764,11 @@ struct AccountEditor: View {
                 Button("Discard changes", role: .destructive) { dismiss() }
                 Button("Keep editing", role: .cancel) {}
             }
+            .background {
+                Color.clear.sheet(isPresented: $isShowingProUpgrade) {
+                    ProUpgradeView(access: proAccess)
+                }
+            }
         }
     }
 
@@ -755,7 +821,12 @@ struct AccountEditor: View {
     private func persist(_ value: Account) {
         let saved = account == nil ? store.addAccount(value) : store.updateAccount(value)
         guard saved else {
-            errorMessage = store.lastActionStatus ?? "The account could not be saved."
+            if let feature = store.proAccessRequired {
+                proAccess.requestUpgrade(for: feature)
+                isShowingProUpgrade = true
+            } else {
+                errorMessage = store.lastActionStatus ?? "The account could not be saved."
+            }
             return
         }
         onSaved(value)

@@ -73,13 +73,14 @@ struct BudgetsView: View {
                             Image(systemName: "plus")
                         }
                         .accessibilityLabel("Unlock more budgets with Pro")
+                        .accessibilityHint("Creates a new monthly budget")
                     } else {
                         Button(action: presentNewBudget) {
                             Image(systemName: "plus")
                         }
                         .accessibilityLabel("Add budget")
+                        .accessibilityHint("Creates a new monthly budget")
                     }
-                    .accessibilityHint("Creates a new monthly budget")
                 }
             }
         }

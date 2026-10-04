@@ -108,7 +108,8 @@ struct PocketLedgerBackupDocument: FileDocument {
 }
 
 struct PocketLedgerBackupBundleDocument: FileDocument {
-    static let readableContentTypes: [UTType] = [.data]
+    static let contentType = UTType(exportedAs: "com.josephlteif.pocketledger.backup", conformingTo: .data)
+    static let readableContentTypes: [UTType] = [contentType]
 
     let data: Data
 

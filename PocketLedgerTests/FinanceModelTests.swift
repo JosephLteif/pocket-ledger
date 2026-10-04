@@ -1,4 +1,5 @@
 import XCTest
+import UniformTypeIdentifiers
 @testable import PocketLedger
 
 final class FinanceModelTests: XCTestCase {
@@ -811,6 +812,14 @@ final class FinanceModelTests: XCTestCase {
         let data = FinanceData(accounts: [account], categories: [category], transactions: [transaction])
 
         XCTAssertEqual(financeNetExpenseAmount(transaction, currency: .usd, in: data), 0)
+    }
+
+    func testBackupBundleFileTypeMatchesExportedExtension() throws {
+        let contentType = PocketLedgerBackupBundleDocument.contentType
+        XCTAssertTrue(contentType.conforms(to: .data))
+        XCTAssertEqual(contentType.preferredFilenameExtension, "pocketledger")
+        XCTAssertEqual(try XCTUnwrap(UTType(filenameExtension: "pocketledger")), contentType)
+        XCTAssertEqual(PocketLedgerBackupBundleDocument.readableContentTypes, [contentType])
     }
 
     func testBackupBundleRoundTripsAttachmentBytes() throws {

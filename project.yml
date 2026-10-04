@@ -61,6 +61,14 @@ targets:
         NSCameraUsageDescription: "Pocket Ledger uses the camera to read bill items."
         NSFaceIDUsageDescription: "Pocket Ledger uses Face ID to unlock your financial data."
         NSPhotoLibraryUsageDescription: "Pocket Ledger uses selected bill photos to read bill items."
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.josephlteif.pocketledger.backup
+            UTTypeDescription: Pocket Ledger Full Backup
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - pocketledger
         NSSupportsLiveActivities: true
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor

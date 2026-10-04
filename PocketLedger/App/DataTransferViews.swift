@@ -88,7 +88,7 @@ struct DataTransferView: View {
         }
         .fileImporter(
             isPresented: $isShowingImporter,
-            allowedContentTypes: [.data],
+            allowedContentTypes: [PocketLedgerBackupBundleDocument.contentType, .data],
             allowsMultipleSelection: false,
             onCompletion: importFile
         )
@@ -102,8 +102,8 @@ struct DataTransferView: View {
         .fileExporter(
             isPresented: $isExportingBackupBundle,
             document: backupBundleDocument,
-            contentType: .data,
-            defaultFilename: "Pocket-Ledger-backup.pocketledger",
+            contentType: PocketLedgerBackupBundleDocument.contentType,
+            defaultFilename: "Pocket-Ledger-backup",
             onCompletion: exportCompleted
         )
         .fileExporter(
@@ -299,10 +299,10 @@ struct DataTransferView: View {
 
     private var importCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Import from another app", systemImage: "arrow.down.doc")
+            Label("Import or restore a backup", systemImage: "arrow.down.doc")
                 .font(.title3.weight(.bold))
 
-            Text("Choose a CSV, TSV, JSON, Excel workbook, or SQLite backup such as Money Manager's .mmbak file. The next screen lets you select a table and map its columns.")
+            Text("Choose a Pocket Ledger full backup (.pocketledger) or JSON backup to review and restore your ledger. CSV, TSV, Excel, and SQLite files such as Money Manager's .mmbak open the column-mapping importer.")
                 .font(.subheadline)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
 

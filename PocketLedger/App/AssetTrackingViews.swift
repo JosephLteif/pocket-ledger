@@ -20,7 +20,7 @@ struct AssetPurchaseEditor: View {
             } else {
                 NavigationStack {
                     List {
-                        Section("Choose an account") {
+                        Section {
                             ForEach(store.activeAccounts.filter { $0.type == accountType }) { account in
                                 Button {
                                     selectedAccountID = account.id
@@ -29,6 +29,8 @@ struct AssetPurchaseEditor: View {
                                 }
                             }
                             Button("Create account", systemImage: "plus") { isCreatingAccount = true }
+                        } header: {
+                            Text("Choose an account")
                         } footer: {
                             Text("A purchase moves money into an asset account. It is a transfer and does not count as spending.")
                         }

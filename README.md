@@ -33,6 +33,10 @@ The **Build unsigned iOS IPA** workflow uses a macOS runner and XcodeGen to crea
 
 The unsigned artifact is for development and sideloading; it is not an App Store distribution build. Apple signing, App Store metadata, and on-device behavior require separate Apple-side setup and review.
 
+## Build an isolated sandbox sideload
+
+The **Build Pocket Ledger Sandbox IPA** workflow creates a second installable app with bundle ID `com.josephlteif.pocketledger.sandbox` and app group `group.com.josephlteif.pocketledger.sandbox`. It uses a separate storage container and can sit beside the normal `com.josephlteif.pocketledger` app, so test transactions do not mix with the ledger you use every day. Run it from the Actions page and install its uploaded IPA through your sideloading tool.
+
 ## Project layout
 
 - `PocketLedger/App`: SwiftUI screens, ledger state, import/export, and app intents.

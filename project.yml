@@ -19,6 +19,8 @@ settings:
     POCKET_LEDGER_APP_GROUP_ID_SUFFIX: ""
     POCKET_LEDGER_DISPLAY_NAME: Pocket Ledger
     POCKET_LEDGER_WIDGET_DISPLAY_NAME: Pocket Ledger Balance
+    POCKET_LEDGER_WATCH_DISPLAY_NAME: Pocket Ledger
+    POCKET_LEDGER_WATCH_WIDGET_DISPLAY_NAME: Pocket Ledger Complication
     POCKET_LEDGER_URL_SCHEME: pocketledger
     POCKET_LEDGER_URL_SUFFIX: ""
     POCKET_LEDGER_DEVELOPER_PRO_OVERRIDE: "NO"
@@ -138,8 +140,8 @@ targets:
       path: PocketLedgerWatch/Config/Info.plist
       properties:
         WKWatchKitApp: true
-        CFBundleDisplayName: Pocket Ledger
-        CFBundleName: Pocket Ledger
+        CFBundleDisplayName: $(POCKET_LEDGER_WATCH_DISPLAY_NAME)
+        CFBundleName: $(POCKET_LEDGER_WATCH_DISPLAY_NAME)
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
         WKCompanionAppBundleIdentifier: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX)
@@ -172,8 +174,8 @@ targets:
     info:
       path: PocketLedgerWatchWidget/Config/Info.plist
       properties:
-        CFBundleDisplayName: Pocket Ledger Complication
-        CFBundleName: Pocket Ledger Complication
+        CFBundleDisplayName: $(POCKET_LEDGER_WATCH_WIDGET_DISPLAY_NAME)
+        CFBundleName: $(POCKET_LEDGER_WATCH_WIDGET_DISPLAY_NAME)
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
         NSExtension:

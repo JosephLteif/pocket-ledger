@@ -1,4 +1,4 @@
-name: Build unsigned iOS IPA
+name: Build unsigned iOS IPAs
 
 on:
   workflow_dispatch:
@@ -16,8 +16,10 @@ permissions:
   contents: read
 
 jobs:
-  build-ios:
-    name: Build iOS app
+  build-and-package:
+    name: Build two complete sideload IPAs
+    needs: test-ios
+    if: always() && (needs.test-ios.result == 'success' || needs.test-ios.result == 'skipped')
     runs-on: xcode-27
 
     steps:
@@ -51,7 +53,7 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml
 
-      - name: Compile app and widget for a generic iOS device
+      - name: Build normal iPhone app and widget
         run: |
           set -o pipefail
           xcodebuild \
@@ -60,123 +62,196 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -derivedDataPath "$RUNNER_TEMP/NormalDerivedData" \
             -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/SourcePackages" \
             POCKET_LEDGER_DEVELOPER_PRO_OVERRIDE=YES \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-normal.log"
 
-      - name: Archive iOS app
+      - name: Build normal Apple Watch app and complication
         run: |
-          set -euo pipefail
-          tar -czf "$GITHUB_WORKSPACE/PocketLedger-app.tar.gz" \
-            -C "$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos" \
-            PocketLedger.app
-
-      - name: Upload iOS app
-        uses: actions/upload-artifact@v7
-        with:
-          name: PocketLedger-ios-build
-          path: PocketLedger-app.tar.gz
-          retention-days: 1
-
-  build-sandbox:
-    name: Build sandbox iPhone IPA
-    uses: ./.github/workflows/ios-build-sandbox.yml
-
-  build-watch:
-    name: Build watch app
-    runs-on: macos-26
-
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v7
-
-      - name: Cache Swift package data
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/Library/Caches/org.swift.swiftpm
-            ~/Library/Developer/Xcode/SourcePackages
-          key: ${{ runner.os }}-swiftpm-${{ hashFiles('project.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-swiftpm-
-
-      - name: Install XcodeGen
-        run: |
-          if ! command -v xcodegen >/dev/null 2>&1; then
-            brew install xcodegen
-          fi
-
-      - name: Generate Xcode project
-        run: xcodegen generate --spec project.yml
-
-      - name: Compile watch simulator and device builds
-        run: |
-          set -u
-          simulator_log="$RUNNER_TEMP/xcodebuild-watch.log"
-          device_log="$RUNNER_TEMP/xcodebuild-watch-device.log"
-
-          xcodebuild \
-            -project PocketLedger.xcodeproj \
-            -scheme PocketLedgerWatch \
-            -configuration Debug \
-            -sdk watchsimulator \
-            -destination "generic/platform=watchOS Simulator" \
-            -derivedDataPath "$RUNNER_TEMP/WatchDerivedData" \
-            -clonedSourcePackagesDirPath "$RUNNER_TEMP/WatchSimulatorSourcePackages" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            build > "$simulator_log" 2>&1 &
-          simulator_pid=$!
-
+          set -o pipefail
           xcodebuild \
             -project PocketLedger.xcodeproj \
             -scheme PocketLedgerWatch \
             -configuration Release \
             -sdk watchos \
             -destination "generic/platform=watchOS" \
-            -derivedDataPath "$RUNNER_TEMP/WatchDeviceDerivedData" \
-            -clonedSourcePackagesDirPath "$RUNNER_TEMP/WatchDeviceSourcePackages" \
+            -derivedDataPath "$RUNNER_TEMP/NormalWatchDerivedData" \
+            -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/SourcePackages" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            build > "$device_log" 2>&1 &
-          device_pid=$!
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-watch-normal.log"
 
-          simulator_status=0
-          device_status=0
-          wait "$simulator_pid" || simulator_status=$?
-          wait "$device_pid" || device_status=$?
+      - name: Build sandbox iPhone app and widget
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project PocketLedger.xcodeproj \
+            -scheme PocketLedger \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$RUNNER_TEMP/SandboxDerivedData" \
+            -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/SourcePackages" \
+            POCKET_LEDGER_DEVELOPER_PRO_OVERRIDE=YES \
+            POCKET_LEDGER_BUNDLE_ID_SUFFIX=.sandbox \
+            POCKET_LEDGER_APP_GROUP_ID_SUFFIX=.sandbox \
+            POCKET_LEDGER_DISPLAY_NAME="Pocket Ledger Sandbox" \
+            POCKET_LEDGER_WIDGET_DISPLAY_NAME="Pocket Ledger Sandbox Balance" \
+            POCKET_LEDGER_URL_SUFFIX=-sandbox \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-sandbox.log"
 
-          cat "$simulator_log"
-          cat "$device_log"
+      - name: Build sandbox Apple Watch app and complication
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project PocketLedger.xcodeproj \
+            -scheme PocketLedgerWatch \
+            -configuration Release \
+            -sdk watchos \
+            -destination "generic/platform=watchOS" \
+            -derivedDataPath "$RUNNER_TEMP/SandboxWatchDerivedData" \
+            -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/SourcePackages" \
+            POCKET_LEDGER_BUNDLE_ID_SUFFIX=.sandbox \
+            POCKET_LEDGER_APP_GROUP_ID_SUFFIX=.sandbox \
+            POCKET_LEDGER_WATCH_DISPLAY_NAME="Pocket Ledger Sandbox" \
+            POCKET_LEDGER_WATCH_WIDGET_DISPLAY_NAME="Pocket Ledger Sandbox Complication" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-watch-sandbox.log"
 
-          if [ "$simulator_status" -ne 0 ]; then
-            exit "$simulator_status"
-          fi
-          exit "$device_status"
-
-      - name: Archive watch app
+      - name: Stage both app variants
         run: |
           set -euo pipefail
-          tar -czf "$GITHUB_WORKSPACE/PocketLedger-watch.tar.gz" \
-            -C "$RUNNER_TEMP/WatchDeviceDerivedData/Build/Products/Release-watchos" \
-            PocketLedgerWatch.app
+          mkdir -p "$RUNNER_TEMP/sideload/normal" "$RUNNER_TEMP/sideload/sandbox"
+          ditto "$RUNNER_TEMP/NormalDerivedData/Build/Products/Release-iphoneos/PocketLedger.app" \
+            "$RUNNER_TEMP/sideload/normal/PocketLedger.app"
+          ditto "$RUNNER_TEMP/NormalWatchDerivedData/Build/Products/Release-watchos/PocketLedgerWatch.app" \
+            "$RUNNER_TEMP/sideload/normal/PocketLedgerWatch.app"
+          ditto "$RUNNER_TEMP/SandboxDerivedData/Build/Products/Release-iphoneos/PocketLedger.app" \
+            "$RUNNER_TEMP/sideload/sandbox/PocketLedger.app"
+          ditto "$RUNNER_TEMP/SandboxWatchDerivedData/Build/Products/Release-watchos/PocketLedgerWatch.app" \
+            "$RUNNER_TEMP/sideload/sandbox/PocketLedgerWatch.app"
 
-      - name: Upload watch app
+      - name: Package and verify the two iPhone, Watch, and widget IPAs
+        run: |
+          set -euo pipefail
+
+          check_plist_value() {
+            local plist="$1"
+            local key="$2"
+            local expected="$3"
+            local actual
+            actual=$(/usr/libexec/PlistBuddy -c "Print :$key" "$plist")
+            if [ "$actual" != "$expected" ]; then
+              echo "Unexpected $key in $plist: $actual (expected $expected)"
+              return 1
+            fi
+          }
+
+          require_entry() {
+            local entries="$1"
+            local entry="$2"
+            grep -Fxq "$entry" "$entries" || {
+              echo "IPA is missing $entry"
+              return 1
+            }
+          }
+
+          package_ipa() {
+            local variant="$1"
+            local bundle_suffix="$2"
+            local app_display_name="$3"
+            local widget_display_name="$4"
+            local watch_display_name="$5"
+            local watch_widget_display_name="$6"
+            local ipa_name="$7"
+            local app_bundle_id="com.josephlteif.pocketledger$bundle_suffix"
+            local app_group_id="group.com.josephlteif.pocketledger$bundle_suffix"
+            local watch_bundle_id="$app_bundle_id.watchkitapp"
+            local source_app="$RUNNER_TEMP/sideload/$variant/PocketLedger.app"
+            local source_watch="$RUNNER_TEMP/sideload/$variant/PocketLedgerWatch.app"
+            local package_root="$RUNNER_TEMP/package-$variant"
+            local app_path="$package_root/Payload/PocketLedger.app"
+            local watch_path="$app_path/PlugIns/PocketLedgerWatch.app"
+            local ipa_path="$GITHUB_WORKSPACE/$ipa_name"
+            local entries="$RUNNER_TEMP/$variant-ipa-entries.txt"
+            local widget_path="$app_path/PlugIns/PocketLedgerWidget.appex"
+            local watch_widget_path="$watch_path/PlugIns/PocketLedgerWatchWidget.appex"
+
+            test -d "$source_app" || { echo "Missing $variant iPhone app"; return 1; }
+            test -d "$source_watch" || { echo "Missing $variant Watch app"; return 1; }
+            mkdir -p "$package_root/Payload"
+            ditto "$source_app" "$app_path"
+            mkdir -p "$app_path/PlugIns"
+            ditto "$source_watch" "$watch_path"
+
+            test -d "$widget_path" || { echo "Missing $variant iPhone widget"; return 1; }
+            test -d "$watch_widget_path" || { echo "Missing $variant Watch widget"; return 1; }
+
+            check_plist_value "$app_path/Info.plist" CFBundleIdentifier "$app_bundle_id"
+            check_plist_value "$app_path/Info.plist" CFBundleDisplayName "$app_display_name"
+            check_plist_value "$app_path/Info.plist" PocketLedgerDeveloperProOverrideEnabled YES
+            check_plist_value "$app_path/Info.plist" PocketLedgerAppGroupIdentifier "$app_group_id"
+            check_plist_value "$widget_path/Info.plist" CFBundleDisplayName "$widget_display_name"
+            check_plist_value "$widget_path/Info.plist" CFBundleIdentifier "$app_bundle_id.widget"
+            check_plist_value "$widget_path/Info.plist" PocketLedgerAppGroupIdentifier "$app_group_id"
+            check_plist_value "$widget_path/Info.plist" NSExtension:NSExtensionPointIdentifier com.apple.widgetkit-extension
+            check_plist_value "$watch_path/Info.plist" CFBundleDisplayName "$watch_display_name"
+            check_plist_value "$watch_path/Info.plist" CFBundleIdentifier "$watch_bundle_id"
+            check_plist_value "$watch_path/Info.plist" WKCompanionAppBundleIdentifier "$app_bundle_id"
+            check_plist_value "$watch_path/Info.plist" PocketLedgerAppGroupIdentifier "$app_group_id"
+            check_plist_value "$watch_widget_path/Info.plist" CFBundleDisplayName "$watch_widget_display_name"
+            check_plist_value "$watch_widget_path/Info.plist" CFBundleIdentifier "$watch_bundle_id.widget"
+            check_plist_value "$watch_widget_path/Info.plist" PocketLedgerAppGroupIdentifier "$app_group_id"
+            check_plist_value "$watch_widget_path/Info.plist" NSExtension:NSExtensionPointIdentifier com.apple.widgetkit-extension
+
+            for extension_plist in "$widget_path/Info.plist" "$watch_widget_path/Info.plist"; do
+              if /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPrincipalClass' "$extension_plist" >/dev/null 2>&1; then
+                echo "Unexpected NSExtensionPrincipalClass in $extension_plist"
+                return 1
+              fi
+            done
+
+            ditto -c -k --sequesterRsrc --keepParent "$package_root/Payload" "$ipa_path"
+            unzip -t "$ipa_path"
+            unzip -Z1 "$ipa_path" > "$entries"
+            require_entry "$entries" Payload/PocketLedger.app/PlugIns/PocketLedgerWidget.appex/Info.plist
+            require_entry "$entries" Payload/PocketLedger.app/PlugIns/PocketLedgerWatch.app/Info.plist
+            require_entry "$entries" Payload/PocketLedger.app/PlugIns/PocketLedgerWatch.app/PlugIns/PocketLedgerWatchWidget.appex/Info.plist
+            if grep -Eq '^Payload/PocketLedger\.app/Watch/PocketLedgerWatch\.app(/|$)' "$entries"; then
+              echo "The legacy Watch/ embedding path must not be packaged."
+              return 1
+            fi
+            echo "Verified $ipa_name ($app_bundle_id; $watch_bundle_id; iPhone and Watch widgets)"
+          }
+
+          package_ipa normal "" "Pocket Ledger" "Pocket Ledger Balance" "Pocket Ledger" "Pocket Ledger Complication" "PocketLedger-unsigned.ipa"
+          package_ipa sandbox ".sandbox" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Balance" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Complication" "PocketLedger-sandbox-iphone-sideload.ipa"
+
+          test "$(find "$GITHUB_WORKSPACE" -maxdepth 1 -name '*.ipa' -type f | wc -l | tr -d '[:space:]')" = "2"
+
+      - name: Upload the two IPA files
         uses: actions/upload-artifact@v7
         with:
-          name: PocketLedger-watch-build
-          path: PocketLedger-watch.tar.gz
-          retention-days: 1
-
+          name: PocketLedger-unsigned
+          path: |
+            PocketLedger-unsigned.ipa
+            PocketLedger-sandbox-iphone-sideload.ipa
+          if-no-files-found: error
+          retention-days: 7
   test-ios:
     name: Run iOS tests
     runs-on: xcode-27
@@ -262,144 +337,3 @@ jobs:
             DEVELOPMENT_TEAM="" \
             test-without-building \
             -only-testing:PocketLedgerTests 2>&1 | tee "$RUNNER_TEMP/xcodebuild-logic-tests.log"
-
-  package:
-    name: Package unsigned IPA
-    needs: [build-ios, build-sandbox, build-watch, test-ios]
-    if: ${{ always() && needs.build-ios.result == 'success' && needs.build-sandbox.result == 'success' && needs.build-watch.result == 'success' && (needs.test-ios.result == 'success' || needs.test-ios.result == 'skipped') }}
-    runs-on: xcode-27
-
-    steps:
-      - name: Download iOS app
-        uses: actions/download-artifact@v7
-        with:
-          name: PocketLedger-ios-build
-          path: ios-build
-
-      - name: Download watch app
-        uses: actions/download-artifact@v7
-        with:
-          name: PocketLedger-watch-build
-          path: watch-build
-
-      - name: Download sandbox IPA
-        uses: actions/download-artifact@v7
-        with:
-          name: PocketLedger-sandbox-iphone-sideload
-          path: sandbox-build
-
-      - name: Verify sandbox IPA
-        run: |
-          set -euo pipefail
-          SANDBOX_IPA="sandbox-build/PocketLedger-sandbox-iphone-sideload.ipa"
-          test -f "$SANDBOX_IPA" || { echo "Missing sandbox IPA: $SANDBOX_IPA"; exit 1; }
-          unzip -t "$SANDBOX_IPA"
-          unzip -p "$SANDBOX_IPA" Payload/PocketLedger.app/Info.plist > "$RUNNER_TEMP/sandbox-app-info.plist"
-          DEVELOPER_PRO_OVERRIDE="$(/usr/libexec/PlistBuddy -c 'Print :PocketLedgerDeveloperProOverrideEnabled' "$RUNNER_TEMP/sandbox-app-info.plist")"
-          test "$DEVELOPER_PRO_OVERRIDE" = "YES" || {
-            echo "Developer Pro override is not enabled in the sandbox sideload app: $DEVELOPER_PRO_OVERRIDE"
-            exit 1
-          }
-          unzip -Z1 "$SANDBOX_IPA" | grep -Eq '^Payload/PocketLedger\.app/PlugIns/PocketLedgerWidget\.appex/Info\.plist$' || {
-            echo "Sandbox IPA is missing its WidgetKit extension."
-            exit 1
-          }
-          cp "$SANDBOX_IPA" "$GITHUB_WORKSPACE/PocketLedger-sandbox-iphone-sideload.ipa"
-          cp "sandbox-build/sandbox-build-info.txt" "$GITHUB_WORKSPACE/sandbox-build-info.txt"
-
-      - name: Embed watch app and verify bundle
-        run: |
-          set -euo pipefail
-          PACKAGE_ROOT="$RUNNER_TEMP/package"
-          mkdir -p "$PACKAGE_ROOT"
-          tar -xzf ios-build/PocketLedger-app.tar.gz -C "$PACKAGE_ROOT"
-          tar -xzf watch-build/PocketLedger-watch.tar.gz -C "$PACKAGE_ROOT"
-
-          APP_PATH="$PACKAGE_ROOT/PocketLedger.app"
-          WATCH_SOURCE_PATH="$PACKAGE_ROOT/PocketLedgerWatch.app"
-          test -d "$APP_PATH" || { echo "Missing iOS app: $APP_PATH"; exit 1; }
-          test -d "$WATCH_SOURCE_PATH" || { echo "Missing watch app: $WATCH_SOURCE_PATH"; exit 1; }
-          mkdir -p "$APP_PATH/Watch"
-          ditto "$WATCH_SOURCE_PATH" "$APP_PATH/Watch/PocketLedgerWatch.app"
-
-          test -d "$APP_PATH/PlugIns" || { echo "Missing PlugIns directory: $APP_PATH/PlugIns"; exit 1; }
-          WATCH_APP_PATH="$APP_PATH/Watch/PocketLedgerWatch.app"
-          test -d "$WATCH_APP_PATH" || { echo "Missing embedded watch app: $WATCH_APP_PATH"; exit 1; }
-          test ! -e "$APP_PATH/PlugIns/PocketLedgerWatch.app" || {
-            echo "Watch app was embedded as an iOS plug-in instead of a Watch bundle."
-            exit 1
-          }
-          test -d "$WATCH_APP_PATH/PlugIns/PocketLedgerWatchWidget.appex" || {
-            echo "Missing embedded watch complication: $WATCH_APP_PATH/PlugIns/PocketLedgerWatchWidget.appex"
-            exit 1
-          }
-          WIDGET_PATH=""
-          for candidate in "$APP_PATH"/PlugIns/*.appex; do
-            if [ -d "$candidate" ]; then
-              WIDGET_PATH="$candidate"
-              break
-            fi
-          done
-          test -n "$WIDGET_PATH" || { echo "No WidgetKit .appex found in $APP_PATH/PlugIns"; exit 1; }
-          test -f "$APP_PATH/Assets.car" || { echo "Missing compiled asset catalog: $APP_PATH/Assets.car"; exit 1; }
-          DISPLAY_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$APP_PATH/Info.plist")"
-          test "$DISPLAY_NAME" = "Pocket Ledger" || {
-            echo "Unexpected app display name: $DISPLAY_NAME"
-            exit 1
-          }
-          DEVELOPER_PRO_OVERRIDE="$(/usr/libexec/PlistBuddy -c 'Print :PocketLedgerDeveloperProOverrideEnabled' "$APP_PATH/Info.plist")"
-          test "$DEVELOPER_PRO_OVERRIDE" = "YES" || {
-            echo "Developer Pro override is not enabled in the sideload app: $DEVELOPER_PRO_OVERRIDE"
-            exit 1
-          }
-          echo "App: $APP_PATH"
-          echo "Watch app: $WATCH_APP_PATH"
-          echo "Widget extension: $WIDGET_PATH"
-          echo "Compiled asset catalog: $APP_PATH/Assets.car"
-          echo "Display name: $DISPLAY_NAME"
-          file "$APP_PATH/PocketLedger"
-
-      - name: Package unsigned IPA
-        run: |
-          set -euo pipefail
-          APP_PATH="$RUNNER_TEMP/package/PocketLedger.app"
-          PACKAGE_ROOT="$RUNNER_TEMP/unsigned-ipa"
-          IPA_PATH="$GITHUB_WORKSPACE/PocketLedger-unsigned.ipa"
-          rm -rf "$PACKAGE_ROOT"
-          rm -f "$IPA_PATH"
-          mkdir -p "$PACKAGE_ROOT/Payload"
-          ditto "$APP_PATH" "$PACKAGE_ROOT/Payload/PocketLedger.app"
-          ditto -c -k --sequesterRsrc --keepParent "$PACKAGE_ROOT/Payload" "$IPA_PATH"
-          test -f "$IPA_PATH"
-          unzip -t "$IPA_PATH"
-          unzip -Z1 "$IPA_PATH" | grep -Eq '^Payload/PocketLedger\.app/PlugIns/[^/]+\.appex(/|$)' || {
-            echo "Packaged IPA does not contain an embedded widget extension."
-            exit 1
-          }
-          unzip -Z1 "$IPA_PATH" | grep -Eq '^Payload/PocketLedger\.app/Watch/PocketLedgerWatch\.app(/|$)' || {
-            echo "Packaged IPA does not contain the embedded watch app."
-            exit 1
-          }
-          unzip -l "$IPA_PATH"
-
-      - name: Write build information
-        run: |
-          set -euo pipefail
-          {
-            echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
-            echo "Swift: $(swift --version | head -n 1)"
-            echo "Commit: $GITHUB_SHA"
-            echo "Build date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } > build-info.txt
-          cat build-info.txt
-
-      - name: Upload unsigned IPA
-        uses: actions/upload-artifact@v7
-        with:
-          name: PocketLedger-unsigned
-          path: |
-            PocketLedger-unsigned.ipa
-            PocketLedger-sandbox-iphone-sideload.ipa
-            build-info.txt
-            sandbox-build-info.txt
-          retention-days: 7

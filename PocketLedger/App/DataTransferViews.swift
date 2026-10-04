@@ -362,6 +362,30 @@ struct DataTransferView: View {
                 let prepared = await Task.detached(priority: .userInitiated) {
                     do {
                         let bytes = try Data(contentsOf: url)
+                        if let protected = try ProtectedLedgerBackupCodec.decodeIfProtected(bytes) {
+                            switch protected.contentType {
+                            case .bundle:
+                                let bundle = try LedgerBackupCodec.decodeBundle(protected.data)
+                                return PreparedFileImportResult(result: .success(PreparedFileImport(
+                                    backup: BackupImportCandidate(
+                                        fileName: url.lastPathComponent,
+                                        backup: PocketLedgerBackup(data: bundle.data, exportedAt: bundle.exportedAt),
+                                        attachmentFiles: Dictionary(uniqueKeysWithValues: bundle.attachments.map { ($0.id, $0.data) })
+                                    ),
+                                    document: nil
+                                )))
+                            case .json:
+                                let backup = try LedgerBackupCodec.decode(protected.data)
+                                return PreparedFileImportResult(result: .success(PreparedFileImport(
+                                    backup: BackupImportCandidate(
+                                        fileName: url.lastPathComponent,
+                                        backup: backup,
+                                        attachmentFiles: [:]
+                                    ),
+                                    document: nil
+                                )))
+                            }
+                        }
                         if let bundle = try? LedgerBackupCodec.decodeBundle(bytes) {
                             return PreparedFileImportResult(result: .success(PreparedFileImport(
                                 backup: BackupImportCandidate(

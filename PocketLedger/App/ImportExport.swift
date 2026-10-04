@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import Security
 import SQLite3
 import SwiftUI
 import UniformTypeIdentifiers
@@ -86,6 +88,92 @@ enum LedgerBackupCodec {
             throw FinanceImportError.invalidFile("This Pocket Ledger backup bundle version is not supported.")
         }
         return backup
+    }
+}
+
+enum ProtectedBackupContentType: String, Codable, Sendable {
+    case json
+    case bundle
+}
+
+struct ProtectedBackupPayload: Sendable {
+    let contentType: ProtectedBackupContentType
+    let data: Data
+}
+
+enum ProtectedLedgerBackupCodec {
+    private static let format = "pocket-ledger-protected-backup"
+    private static let keychainService = "com.josephlteif.pocketledger.protected-backup"
+    private static let keychainAccount = "aes-gcm-key-v1"
+
+    private struct Header: Decodable {
+        let format: String
+    }
+
+    private struct Envelope: Decodable {
+        let format: String
+        let version: Int
+        let algorithm: String
+        let keyIdentifier: String
+        let contentType: ProtectedBackupContentType
+        let sealedData: Data
+    }
+
+    private enum BackupError: LocalizedError {
+        case invalidEnvelope
+        case keyUnavailable
+        case keychainFailure
+        case authenticationFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidEnvelope:
+                return "This protected Pocket Ledger backup is damaged or uses an unsupported format."
+            case .keyUnavailable:
+                return "This protected backup needs the Pocket Ledger key from iCloud Keychain. Use the app that created it, sign in to the same Apple Account, enable iCloud Keychain, and try again."
+            case .keychainFailure:
+                return "Pocket Ledger could not access its iCloud Keychain backup key. Unlock the device and try again."
+            case .authenticationFailed:
+                return "This protected backup could not be authenticated. Its contents may have changed or the key does not match."
+            }
+        }
+    }
+
+    static func decodeIfProtected(_ data: Data, using key: SymmetricKey? = nil) throws -> ProtectedBackupPayload? {
+        let decoder = JSONDecoder()
+        guard let header = try? decoder.decode(Header.self, from: data),
+              header.format == format else { return nil }
+        guard let envelope = try? decoder.decode(Envelope.self, from: data),
+              envelope.version == 1,
+              envelope.algorithm == "AES-GCM",
+              envelope.keyIdentifier == keychainAccount,
+              let sealedBox = try? AES.GCM.SealedBox(combined: envelope.sealedData) else {
+            throw BackupError.invalidEnvelope
+        }
+        let decryptionKey = try key ?? readKey()
+        do {
+            let decrypted = try AES.GCM.open(sealedBox, using: decryptionKey)
+            return ProtectedBackupPayload(contentType: envelope.contentType, data: decrypted)
+        } catch {
+            throw BackupError.authenticationFailed
+        }
+    }
+
+    private static func readKey() throws -> SymmetricKey {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+            kSecAttrSynchronizable as String: kCFBooleanTrue as Any,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let keyData = result as? Data, keyData.count == 32 else {
+            throw status == errSecItemNotFound ? BackupError.keyUnavailable : BackupError.keychainFailure
+        }
+        return SymmetricKey(data: keyData)
     }
 }
 

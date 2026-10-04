@@ -99,6 +99,7 @@ jobs:
             -destination "generic/platform=iOS" \
             -derivedDataPath "$RUNNER_TEMP/SandboxDerivedData" \
             -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/SourcePackages" \
+            ASSETCATALOG_COMPILER_APPICON_NAME=AppIconSandbox \
             POCKET_LEDGER_DEVELOPER_PRO_OVERRIDE=YES \
             POCKET_LEDGER_BUNDLE_ID_SUFFIX=.sandbox \
             POCKET_LEDGER_APP_GROUP_ID_SUFFIX=.sandbox \

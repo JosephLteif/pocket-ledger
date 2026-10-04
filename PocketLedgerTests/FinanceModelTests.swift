@@ -1,5 +1,6 @@
 import XCTest
 import UniformTypeIdentifiers
+import CryptoKit
 @testable import PocketLedger
 
 final class FinanceModelTests: XCTestCase {
@@ -820,6 +821,45 @@ final class FinanceModelTests: XCTestCase {
         XCTAssertEqual(contentType.preferredFilenameExtension, "pocketledger")
         XCTAssertEqual(try XCTUnwrap(UTType(filenameExtension: "pocketledger")), contentType)
         XCTAssertEqual(PocketLedgerBackupBundleDocument.readableContentTypes, [contentType])
+    }
+
+    func testProtectedBackupsDecryptBeforeLedgerDecoding() throws {
+        let key = SymmetricKey(size: .bits256)
+        let ledger = FinanceData(accounts: [], categories: [], transactions: [])
+        for contentType in [ProtectedBackupContentType.bundle, .json] {
+            let plaintext = try contentType == .bundle
+                ? LedgerBackupCodec.encodeBundle(ledger, attachmentData: [:])
+                : LedgerBackupCodec.encode(ledger)
+            let sealedData = try XCTUnwrap(AES.GCM.seal(plaintext, using: key).combined)
+            let envelope: [String: Any] = [
+                "format": "pocket-ledger-protected-backup",
+                "version": 1,
+                "algorithm": "AES-GCM",
+                "keyIdentifier": "aes-gcm-key-v1",
+                "contentType": contentType.rawValue,
+                "sealedData": sealedData.base64EncodedString()
+            ]
+            let bytes = try JSONSerialization.data(withJSONObject: envelope)
+            let decoded = try XCTUnwrap(ProtectedLedgerBackupCodec.decodeIfProtected(bytes, using: key))
+            XCTAssertEqual(decoded.contentType, contentType)
+            XCTAssertEqual(decoded.data, plaintext)
+            switch contentType {
+            case .bundle:
+                XCTAssertEqual(try LedgerBackupCodec.decodeBundle(decoded.data).data, ledger)
+            case .json:
+                XCTAssertEqual(try LedgerBackupCodec.decode(decoded.data).data, ledger)
+            }
+            XCTAssertThrowsError(try ProtectedLedgerBackupCodec.decodeIfProtected(bytes, using: SymmetricKey(size: .bits256)))
+            var unsupported = envelope
+            unsupported["version"] = 99
+            XCTAssertThrowsError(try ProtectedLedgerBackupCodec.decodeIfProtected(
+                JSONSerialization.data(withJSONObject: unsupported), using: key
+            ))
+        }
+        XCTAssertNil(try ProtectedLedgerBackupCodec.decodeIfProtected(LedgerBackupCodec.encode(ledger), using: key))
+        XCTAssertThrowsError(try ProtectedLedgerBackupCodec.decodeIfProtected(
+            Data("{\"format\":\"pocket-ledger-protected-backup\"}".utf8), using: key
+        ))
     }
 
     func testBackupBundleRoundTripsAttachmentBytes() throws {

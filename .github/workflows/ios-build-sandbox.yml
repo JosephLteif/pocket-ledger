@@ -46,6 +46,7 @@ jobs:
             -destination "generic/platform=iOS" \
             -derivedDataPath "$RUNNER_TEMP/SandboxDerivedData" \
             -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/SourcePackages" \
+            POCKET_LEDGER_DEVELOPER_PRO_OVERRIDE=YES \
             POCKET_LEDGER_BUNDLE_ID_SUFFIX=.sandbox \
             POCKET_LEDGER_APP_GROUP_ID_SUFFIX=.sandbox \
             POCKET_LEDGER_DISPLAY_NAME="Pocket Ledger Sandbox" \
@@ -72,6 +73,7 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :PocketLedgerAppGroupIdentifier' "$APP_PATH/Info.plist")" = "group.com.josephlteif.pocketledger.sandbox"
           test "$(/usr/libexec/PlistBuddy -c 'Print :PocketLedgerURLScheme' "$APP_PATH/Info.plist")" = "pocketledger-sandbox"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$APP_PATH/Info.plist")" = "pocketledger-sandbox"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :PocketLedgerDeveloperProOverrideEnabled' "$APP_PATH/Info.plist")" = "YES"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$WIDGET_PATH/Info.plist")" = "com.josephlteif.pocketledger.sandbox.widget"
           test "$(/usr/libexec/PlistBuddy -c 'Print :PocketLedgerAppGroupIdentifier' "$WIDGET_PATH/Info.plist")" = "group.com.josephlteif.pocketledger.sandbox"
 

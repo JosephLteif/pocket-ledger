@@ -33,18 +33,36 @@ enum ProFeature: String, Identifiable, Equatable {
 final class ProEntitlementStore: ObservableObject {
     static let productIdentifier = "com.josephlteif.pocketledger.pro.lifetime"
     static let shared = ProEntitlementStore()
+    private static let developerOverrideDefaultsKey = "PocketLedger.developerProOverride.enabled"
+    private static let developerOverrideInfoKey = "PocketLedgerDeveloperProOverrideEnabled"
 
     @Published private(set) var product: Product?
-    @Published private(set) var hasProAccess = false
+    @Published private(set) var hasStoreKitProAccess = false
+    @Published private(set) var developerProOverrideEnabled: Bool
     @Published private(set) var hasResolvedEntitlements = false
     @Published private(set) var requestedFeature: ProFeature = .general
     @Published var message: String?
     @Published private(set) var isPurchasing = false
     @Published private(set) var isRestoring = false
 
+    var canUseDeveloperProOverride: Bool {
+        Self.developerOverrideIsAvailable
+    }
+
+    var isDeveloperProOverrideActive: Bool {
+        canUseDeveloperProOverride && developerProOverrideEnabled
+    }
+
+    var hasProAccess: Bool {
+        hasStoreKitProAccess || isDeveloperProOverrideActive
+    }
+
     private var updatesTask: Task<Void, Never>?
 
     private init() {
+        developerProOverrideEnabled = Self.developerOverrideIsAvailable
+            && UserDefaults.standard.bool(forKey: Self.developerOverrideDefaultsKey)
+
         updatesTask = Task { [weak self] in
             for await update in Transaction.updates {
                 if case .verified(let transaction) = update {
@@ -65,6 +83,12 @@ final class ProEntitlementStore: ObservableObject {
         requestedFeature = feature
     }
 
+    func setDeveloperProOverrideEnabled(_ enabled: Bool) {
+        guard canUseDeveloperProOverride else { return }
+        developerProOverrideEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.developerOverrideDefaultsKey)
+    }
+
     func refreshEntitlements() async {
         var ownsPro = false
         for await result in Transaction.currentEntitlements {
@@ -76,8 +100,17 @@ final class ProEntitlementStore: ObservableObject {
             ownsPro = true
         }
 
-        hasProAccess = ownsPro
+        hasStoreKitProAccess = ownsPro
         hasResolvedEntitlements = true
+    }
+
+    private static var developerOverrideIsAvailable: Bool {
+        let value = Bundle.main.object(forInfoDictionaryKey: developerOverrideInfoKey)
+        if let enabled = value as? Bool {
+            return enabled
+        }
+        guard let value = value as? String else { return false }
+        return value.caseInsensitiveCompare("YES") == .orderedSame
     }
 
     func loadProduct() async {
@@ -125,7 +158,7 @@ final class ProEntitlementStore: ObservableObject {
         do {
             try await AppStore.sync()
             await refreshEntitlements()
-            if !hasProAccess {
+            if !hasStoreKitProAccess {
                 message = "No Pocket Ledger Pro purchase was found for this Apple Account."
             }
         } catch {
@@ -272,8 +305,12 @@ struct ProUpgradeView: View {
                     }
                     .font(.subheadline)
 
-                    if access.hasProAccess {
+                    if access.hasStoreKitProAccess {
                         Label("Pro is active on this Apple Account", systemImage: "checkmark.seal.fill")
+                            .font(.headline)
+                            .foregroundStyle(PocketLedgerTheme.positive)
+                    } else if access.isDeveloperProOverrideActive {
+                        Label("Developer Pro access is active", systemImage: "hammer.circle.fill")
                             .font(.headline)
                             .foregroundStyle(PocketLedgerTheme.positive)
                     } else if !access.hasResolvedEntitlements {
@@ -307,6 +344,26 @@ struct ProUpgradeView: View {
                             Task { await access.loadProduct() }
                         }
                         .frame(maxWidth: .infinity)
+                    }
+
+                    if access.canUseDeveloperProOverride {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Toggle(
+                                "Enable developer Pro access",
+                                isOn: Binding(
+                                    get: { access.developerProOverrideEnabled },
+                                    set: { access.setDeveloperProOverrideEnabled($0) }
+                                )
+                            )
+                            .tint(PocketLedgerTheme.accent)
+                            .accessibilityIdentifier("developer-pro-override-toggle")
+
+                            Text("For this sideloaded build only. It does not create an App Store purchase.")
+                                .font(.caption)
+                                .foregroundStyle(PocketLedgerTheme.textTertiary)
+                        }
+                        .padding(14)
+                        .pocketGroupedSurface(cornerRadius: 16)
                     }
 
                     Button {

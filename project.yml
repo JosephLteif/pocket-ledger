@@ -21,6 +21,7 @@ settings:
     POCKET_LEDGER_WIDGET_DISPLAY_NAME: Pocket Ledger Balance
     POCKET_LEDGER_URL_SCHEME: pocketledger
     POCKET_LEDGER_URL_SUFFIX: ""
+    POCKET_LEDGER_DEVELOPER_PRO_OVERRIDE: "NO"
 
 packages:
   ZIPFoundation:
@@ -65,6 +66,7 @@ targets:
             CFBundleURLSchemes:
               - $(POCKET_LEDGER_URL_SCHEME)$(POCKET_LEDGER_URL_SUFFIX)
         PocketLedgerAppGroupIdentifier: $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
+        PocketLedgerDeveloperProOverrideEnabled: $(POCKET_LEDGER_DEVELOPER_PRO_OVERRIDE)
         PocketLedgerURLScheme: $(POCKET_LEDGER_URL_SCHEME)$(POCKET_LEDGER_URL_SUFFIX)
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true

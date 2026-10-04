@@ -62,6 +62,7 @@ jobs:
             -destination "generic/platform=iOS" \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/SourcePackages" \
+            POCKET_LEDGER_DEVELOPER_PRO_OVERRIDE=YES \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -293,6 +294,12 @@ jobs:
           SANDBOX_IPA="sandbox-build/PocketLedger-sandbox-iphone-sideload.ipa"
           test -f "$SANDBOX_IPA" || { echo "Missing sandbox IPA: $SANDBOX_IPA"; exit 1; }
           unzip -t "$SANDBOX_IPA"
+          unzip -p "$SANDBOX_IPA" Payload/PocketLedger.app/Info.plist > "$RUNNER_TEMP/sandbox-app-info.plist"
+          DEVELOPER_PRO_OVERRIDE="$(/usr/libexec/PlistBuddy -c 'Print :PocketLedgerDeveloperProOverrideEnabled' "$RUNNER_TEMP/sandbox-app-info.plist")"
+          test "$DEVELOPER_PRO_OVERRIDE" = "YES" || {
+            echo "Developer Pro override is not enabled in the sandbox sideload app: $DEVELOPER_PRO_OVERRIDE"
+            exit 1
+          }
           unzip -Z1 "$SANDBOX_IPA" | grep -Eq '^Payload/PocketLedger\.app/PlugIns/PocketLedgerWidget\.appex/Info\.plist$' || {
             echo "Sandbox IPA is missing its WidgetKit extension."
             exit 1
@@ -338,6 +345,11 @@ jobs:
           DISPLAY_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$APP_PATH/Info.plist")"
           test "$DISPLAY_NAME" = "Pocket Ledger" || {
             echo "Unexpected app display name: $DISPLAY_NAME"
+            exit 1
+          }
+          DEVELOPER_PRO_OVERRIDE="$(/usr/libexec/PlistBuddy -c 'Print :PocketLedgerDeveloperProOverrideEnabled' "$APP_PATH/Info.plist")"
+          test "$DEVELOPER_PRO_OVERRIDE" = "YES" || {
+            echo "Developer Pro override is not enabled in the sideload app: $DEVELOPER_PRO_OVERRIDE"
             exit 1
           }
           echo "App: $APP_PATH"

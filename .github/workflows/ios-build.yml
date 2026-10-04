@@ -231,6 +231,20 @@ jobs:
               fi
             done
 
+            # Give re-signing tools an existing Mach-O signature to replace.
+            # Sign nested bundles first; these signatures carry no Apple identity or provisioning.
+            for bundle in "$watch_widget_path" "$watch_path" "$widget_path" "$app_path"; do
+              local executable
+              executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle/Info.plist")
+              echo "Preparing $variant signature: $bundle"
+              xcrun lipo -archs "$bundle/$executable"
+              if ! codesign --display "$bundle" 2>&1; then
+                echo "No existing signature in $variant/$executable"
+              fi
+              codesign --force --sign - --timestamp=none "$bundle"
+              codesign --verify --strict "$bundle"
+            done
+
             ditto -c -k --sequesterRsrc --keepParent "$package_root/Payload" "$ipa_path"
             unzip -t "$ipa_path"
             unzip -Z1 "$ipa_path" > "$entries"

@@ -823,6 +823,72 @@ final class FinanceModelTests: XCTestCase {
         XCTAssertEqual(PocketLedgerBackupBundleDocument.readableContentTypes, [contentType])
     }
 
+    func testPhysicalAssetTrackingSurvivesBackupRoundTripsAndRepeatMerge() throws {
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let sale = MetalSale(
+            date: date, enteredAt: date, weightGrams: 5,
+            proceeds: Money(currency: .usd, minorUnits: 40_000),
+            cost: Money(currency: .usd, minorUnits: 25_000)
+        )
+        let purchase = MetalPurchase(
+            metal: .gold, description: "Gold bars", date: date, enteredAt: date,
+            quantity: 2, weightPerItem: 10, unit: .grams, purity: Decimal(string: "0.999")!,
+            totalCost: Money(currency: .usd, minorUnits: 100_000), sales: [sale],
+            previousOpeningBalance: Money(currency: .usd, minorUnits: 0)
+        )
+        let pricing = MetalPriceSetting(metal: .gold, mode: .manual, manualPricePerGram: 80, asOf: date)
+        let tracking = AccountTracking(metalPurchases: [purchase], metalPricing: [pricing])
+        let account = Account(
+            name: "Gold", type: .physicalAsset, currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 0), tracking: tracking
+        )
+        let quote = MetalQuote(
+            metal: .gold, usdPricePerTroyOunce: 2_400, marketDate: date,
+            fetchedAt: date, nextRefreshAt: date.addingTimeInterval(3600)
+        )
+        let ledger = FinanceData(accounts: [account], categories: [], transactions: [], metalQuotes: [quote])
+        XCTAssertNil(FinanceDataValidator.validate(ledger))
+        let json = try LedgerBackupCodec.encode(ledger)
+        XCTAssertEqual(try LedgerBackupCodec.decode(json).data, ledger)
+        let bundle = try LedgerBackupCodec.encodeBundle(ledger, attachmentData: [:])
+        XCTAssertEqual(try LedgerBackupCodec.decodeBundle(bundle).data, ledger)
+
+        var olderPurchase = purchase
+        olderPurchase.sales = []
+        var merged = AccountTracking(metalPurchases: [olderPurchase])
+        merged.merge(tracking)
+        XCTAssertEqual(merged, tracking)
+        merged.merge(tracking)
+        XCTAssertEqual(merged, tracking)
+
+        var invalid = ledger
+        invalid.accounts[0].tracking?.metalPurchases[0].sales.append(sale)
+        XCTAssertEqual(FinanceDataValidator.validate(invalid), .invalidAssetTracking(account.name))
+
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: Any])
+        var legacyData = try XCTUnwrap(legacy["data"] as? [String: Any])
+        var legacyAccount = try XCTUnwrap((legacyData["accounts"] as? [[String: Any]])?.first)
+        legacyAccount.removeValue(forKey: "tracking")
+        legacyData["accounts"] = [legacyAccount]
+        legacyData.removeValue(forKey: "metalQuotes")
+        legacy["data"] = legacyData
+        let decodedLegacy = try LedgerBackupCodec.decode(JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertNil(decodedLegacy.data.accounts.first?.tracking)
+        XCTAssertTrue(decodedLegacy.data.metalQuotes.isEmpty)
+    }
+
+    func testLegacyLoanContactsSurviveBackupRoundTrip() throws {
+        let contact = LoanContact(name: "Saved contact")
+        let loan = Loan(
+            counterparty: contact.name, counterpartyContactID: contact.id,
+            direction: .lent, currency: .usd,
+            startingAmount: Money(currency: .usd, minorUnits: 10_000)
+        )
+        let ledger = FinanceData(accounts: [], categories: [], transactions: [], loans: [loan], loanContacts: [contact])
+        let encoded = try LedgerBackupCodec.encodeBundle(ledger, attachmentData: [:])
+        XCTAssertEqual(try LedgerBackupCodec.decodeBundle(encoded).data, ledger)
+    }
+
     func testProtectedBackupsDecryptBeforeLedgerDecoding() throws {
         let key = SymmetricKey(size: .bits256)
         let ledger = FinanceData(accounts: [], categories: [], transactions: [])

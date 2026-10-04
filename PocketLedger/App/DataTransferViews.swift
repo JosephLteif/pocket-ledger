@@ -171,7 +171,7 @@ struct DataTransferView: View {
             Label("Pocket Ledger backup", systemImage: "externaldrive")
                 .font(.title3.weight(.bold))
 
-            Text("Full backups keep accounts, categories, transactions, schedules, and local receipt attachments so they can be restored later.")
+            Text("Full backups keep accounts, asset purchases and sales, metal prices, categories, transactions, schedules, and local receipt attachments so they can be restored later.")
                 .font(.subheadline)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
 
@@ -598,6 +598,8 @@ private struct BackupRestoreView: View {
                     LabeledContent("Accounts", value: "\(candidate.backup.data.accounts.count)")
                     LabeledContent("Categories", value: "\(candidate.backup.data.categories.count)")
                     LabeledContent("Transactions", value: "\(candidate.backup.data.transactions.count)")
+                    LabeledContent("Metal purchases", value: "\(candidate.backup.data.accounts.reduce(0) { $0 + ($1.tracking?.metalPurchases.count ?? 0) })")
+                    LabeledContent("Metal sales", value: "\(candidate.backup.data.accounts.reduce(0) { $0 + ($1.tracking?.metalPurchases.reduce(0) { $0 + $1.sales.count } ?? 0) })")
                     if !candidate.backup.data.attachments.isEmpty {
                         LabeledContent("Attachments", value: "\(candidate.backup.data.attachments.count)")
                         if candidate.attachmentFiles.count < candidate.backup.data.attachments.count {
@@ -615,7 +617,7 @@ private struct BackupRestoreView: View {
                         isShowingReplaceConfirmation = true
                     }
                 } footer: {
-                    Text("Merge keeps existing records and adds records with new IDs. Replace removes the current ledger and restores this backup exactly.")
+                    Text("Merge keeps existing records and adds records with new IDs, including purchases and sales within existing asset accounts. Replace removes the current ledger and restores this backup exactly.")
                 }
             }
             .pocketListSurface()

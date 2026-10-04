@@ -200,6 +200,7 @@ enum FinanceDataValidationError: LocalizedError, Equatable {
     case invalidBudget(index: Int)
     case invalidExchangeRate(index: Int)
     case invalidLoan(String)
+    case invalidAssetTracking(String)
 
     var errorDescription: String? {
         switch self {
@@ -225,6 +226,8 @@ enum FinanceDataValidationError: LocalizedError, Equatable {
             return "Exchange rate \(index + 1) is invalid."
         case .invalidLoan(let counterparty):
             return "Loan with \(counterparty) has invalid amounts, references, or payment history."
+        case .invalidAssetTracking(let accountName):
+            return "Asset tracking for \"\(accountName)\" has invalid amounts, references, or purchase history."
         }
     }
 }
@@ -242,6 +245,9 @@ enum FinanceDataValidator {
         }
         if hasDuplicateIDs(data.loans.map(\.id)) {
             return .duplicateIDs("loans")
+        }
+        if hasDuplicateIDs(data.loanContacts.map(\.id)) {
+            return .duplicateIDs("loan contacts")
         }
         if hasDuplicateIDs(data.loans.flatMap { $0.payments.map(\.id) }) {
             return .duplicateIDs("loan payments")
@@ -261,6 +267,53 @@ enum FinanceDataValidator {
 
         for account in data.accounts where account.openingBalance.currency != account.currency {
             return .accountCurrencyMismatch(account.name)
+        }
+
+        let transactionIDs = Set(data.transactions.map(\.id))
+        var trackingIDs: Set<UUID> = []
+        for account in data.accounts {
+            guard let tracking = account.tracking else { continue }
+            guard (account.type == .physicalAsset && tracking.investmentEntries.isEmpty)
+                    || (account.type == .investment && tracking.metalPurchases.isEmpty),
+                  tracking.transactionIDs.isSubset(of: transactionIDs),
+                  Set(tracking.metalPricing.map(\.metal)).count == tracking.metalPricing.count else {
+                return .invalidAssetTracking(account.name)
+            }
+            for setting in tracking.metalPricing where setting.mode == .manual {
+                guard let price = setting.manualPricePerGram, !price.isNaN, price > 0,
+                      let date = setting.asOf, date.timeIntervalSince1970.isFinite else {
+                    return .invalidAssetTracking(account.name)
+                }
+            }
+            for purchase in tracking.metalPurchases {
+                guard trackingIDs.insert(purchase.id).inserted,
+                      !purchase.quantity.isNaN, purchase.quantity > 0,
+                      !purchase.weightPerItem.isNaN, purchase.weightPerItem > 0,
+                      !purchase.purity.isNaN, purchase.purity > 0, purchase.purity <= 1,
+                      !purchase.weightGrams.isNaN, purchase.weightGrams <= 1_000_000_000,
+                      purchase.totalCost.currency == account.currency, purchase.totalCost.minorUnits > 0,
+                      purchase.previousOpeningBalance == nil || purchase.previousOpeningBalance?.currency == account.currency else {
+                    return .invalidAssetTracking(account.name)
+                }
+                var remainingWeight = purchase.weightGrams
+                var remainingCost = purchase.totalCost.minorUnits
+                for sale in purchase.sales {
+                    guard trackingIDs.insert(sale.id).inserted,
+                          !sale.weightGrams.isNaN, sale.weightGrams > 0, sale.weightGrams <= remainingWeight,
+                          sale.cost.currency == account.currency, sale.cost.minorUnits >= 0,
+                          sale.cost.minorUnits <= remainingCost,
+                          sale.proceeds.currency == account.currency, sale.proceeds.minorUnits >= 0 else {
+                        return .invalidAssetTracking(account.name)
+                    }
+                    remainingWeight -= sale.weightGrams
+                    remainingCost -= sale.cost.minorUnits
+                }
+            }
+            for entry in tracking.investmentEntries {
+                guard trackingIDs.insert(entry.id).inserted, entry.amount.currency == account.currency else {
+                    return .invalidAssetTracking(account.name)
+                }
+            }
         }
 
         for accountID in data.managedLegacyLoanAccountIDs {

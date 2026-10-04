@@ -803,7 +803,8 @@ struct AccountEditor: View {
             currency: currency,
             openingBalance: balance,
             includeInTotals: includeInTotals,
-            isArchived: account?.isArchived ?? false
+            isArchived: account?.isArchived ?? false,
+            tracking: account?.tracking
         )
         if account?.currency != nil, account?.currency != currency, hasCurrencyImpact {
             pendingAccount = value

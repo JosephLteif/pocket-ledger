@@ -893,6 +893,11 @@ final class LedgerStore: ObservableObject {
             return false
         }
         let original = data.accounts[index]
+        if original.tracking?.hasHistory == true,
+           account.type != original.type || account.currency != original.currency {
+            lastActionStatus = "An account with asset history must keep its original type and currency."
+            return false
+        }
         if account.type != original.type,
            PocketLedgerTierPolicy.accountTypeRequiresPro(account.type),
            !hasProAccess() {
@@ -1383,8 +1388,36 @@ final class LedgerStore: ObservableObject {
         let budgetIDs = Set(updated.budgets.map(\.id))
         let templateIDs = Set(updated.templates.map(\.id))
         let attachmentIDs = Set(updated.attachments.map(\.id))
+        let loanIDs = Set(updated.loans.map(\.id))
+        let contactIDs = Set(updated.loanContacts.map(\.id))
 
+        for account in imported.accounts {
+            guard let tracking = account.tracking,
+                  let index = updated.accounts.firstIndex(where: { $0.id == account.id }) else { continue }
+            guard updated.accounts[index].type == account.type,
+                  updated.accounts[index].currency == account.currency else {
+                lastActionStatus = "Tracked account \"\(account.name)\" has a different type or currency. Use Replace to restore this backup exactly."
+                return false
+            }
+            if updated.accounts[index].tracking == nil {
+                updated.accounts[index].tracking = tracking
+            } else {
+                updated.accounts[index].tracking?.merge(tracking)
+            }
+        }
+        for quote in imported.metalQuotes {
+            if let index = updated.metalQuotes.firstIndex(where: { $0.metal == quote.metal }) {
+                if quote.fetchedAt > updated.metalQuotes[index].fetchedAt {
+                    updated.metalQuotes[index] = quote
+                }
+            } else {
+                updated.metalQuotes.append(quote)
+            }
+        }
         updated.accounts.append(contentsOf: imported.accounts.filter { !accountIDs.contains($0.id) })
+        updated.loans.append(contentsOf: imported.loans.filter { !loanIDs.contains($0.id) })
+        updated.loanContacts.append(contentsOf: imported.loanContacts.filter { !contactIDs.contains($0.id) })
+        updated.managedLegacyLoanAccountIDs.formUnion(imported.managedLegacyLoanAccountIDs)
         updated.categories.append(contentsOf: imported.categories.filter { !categoryIDs.contains($0.id) })
         updated.transactions.append(contentsOf: imported.transactions.filter { !transactionIDs.contains($0.id) })
         updated.scheduledTransactions.append(

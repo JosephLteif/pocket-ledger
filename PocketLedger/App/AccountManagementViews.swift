@@ -679,6 +679,7 @@ struct AccountEditor: View {
     init(
         store: LedgerStore,
         account: Account? = nil,
+        initialType: AccountType = .cash,
         initialCurrency: LedgerCurrency? = nil,
         onSaved: @escaping (Account) -> Void = { _ in }
     ) {
@@ -687,7 +688,7 @@ struct AccountEditor: View {
         self.initialCurrency = initialCurrency
         self.onSaved = onSaved
         _name = State(initialValue: account?.name ?? "")
-        _type = State(initialValue: account?.type ?? .cash)
+        _type = State(initialValue: account?.type ?? initialType)
         _currency = State(initialValue: account?.currency ?? initialCurrency ?? .usd)
         _openingBalance = State(
             initialValue: account.map {

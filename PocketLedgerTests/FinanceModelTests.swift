@@ -932,6 +932,19 @@ final class FinanceModelTests: XCTestCase {
         XCTAssertEqual(LedgerIndex(data: undone).availableBalance(for: .usd).minorUnits, 120_000)
     }
 
+    func testFundedMetalPurchaseMovesPrincipalWithoutRecordingExpense() throws {
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let asset = Account(name: "Gold", type: .physicalAsset, currency: .usd, openingBalance: Money(currency: .usd, minorUnits: 0))
+        let cash = Account(name: "Cash", type: .cash, currency: .usd, openingBalance: Money(currency: .usd, minorUnits: 100_000))
+        let purchase = MetalPurchase(metal: .gold, description: "Purchase", date: date, quantity: 1, weightPerItem: 10, unit: .grams, purity: 1, totalCost: Money(currency: .usd, minorUnits: 40_000))
+        let funded = try FinanceAssetTracking.addPurchase(in: FinanceData(accounts: [asset, cash], categories: [], transactions: []), accountID: asset.id, purchase: purchase, fundingAccountID: cash.id, reconcileOpeningBalance: false)
+        XCTAssertEqual(funded.transactions.map(\.kind), [.transfer])
+        XCTAssertEqual(LedgerIndex(data: funded).balance(for: funded.accounts[0]).minorUnits, 40_000)
+        XCTAssertEqual(LedgerIndex(data: funded).balance(for: funded.accounts[1]).minorUnits, 60_000)
+        XCTAssertEqual(LedgerIndex(data: funded).availableBalance(for: .usd).minorUnits, 100_000)
+        XCTAssertNil(FinanceAssetTracking.validationError(in: funded))
+    }
+
     func testInvestmentTotalGainIncludesRealizedAndUnrealizedAmounts() throws {
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         let account = Account(name: "Investment", type: .investment, currency: .usd, openingBalance: Money(currency: .usd, minorUnits: 100_000))

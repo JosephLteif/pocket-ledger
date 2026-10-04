@@ -299,6 +299,7 @@ struct AccountDetailView: View {
         .listStyle(.insetGrouped)
         .contentMargins(.horizontal, 0, for: .scrollContent)
         .listSectionSpacing(24)
+        .listSectionSeparator(.hidden)
         .textCase(nil)
         .scrollContentBackground(.hidden)
         .pocketScreen()

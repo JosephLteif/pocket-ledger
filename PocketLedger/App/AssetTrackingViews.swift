@@ -1,15 +1,126 @@
 import SwiftUI
 
 @MainActor
+struct AssetPurchaseEditor: View {
+    @ObservedObject var store: LedgerStore
+    let accountType: AccountType
+    var onSave: () -> Void = {}
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedAccountID: UUID?
+    @State private var isCreatingAccount = false
+
+    var body: some View {
+        Group {
+            if let selectedAccountID, let account = store.account(with: selectedAccountID) {
+                if accountType == .physicalAsset {
+                    MetalPurchaseEditor(store: store, account: account, historical: false, onSave: onSave)
+                } else {
+                    InvestmentPurchaseEditor(store: store, account: account, onSave: onSave)
+                }
+            } else {
+                NavigationStack {
+                    List {
+                        Section("Choose an account") {
+                            ForEach(store.activeAccounts.filter { $0.type == accountType }) { account in
+                                Button {
+                                    selectedAccountID = account.id
+                                } label: {
+                                    Label(account.name, systemImage: account.type.systemImage)
+                                }
+                            }
+                            Button("Create account", systemImage: "plus") { isCreatingAccount = true }
+                        } footer: {
+                            Text("A purchase moves money into an asset account. It is a transfer and does not count as spending.")
+                        }
+                    }
+                    .pocketListSurface()
+                    .navigationTitle(accountType == .physicalAsset ? "Physical asset purchase" : "Investment purchase")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $isCreatingAccount) {
+            AccountEditor(store: store, initialType: accountType, onSaved: { account in
+                if account.type == accountType { selectedAccountID = account.id }
+            })
+        }
+    }
+}
+
+@MainActor
+private struct InvestmentPurchaseEditor: View {
+    @ObservedObject var store: LedgerStore
+    let account: Account
+    let onSave: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var fundingID: UUID?
+    @State private var amount = ""
+    @State private var note = ""
+    @State private var date = Date()
+    @State private var errorMessage: String?
+
+    private var fundingAccounts: [Account] {
+        store.activeAccounts.filter { $0.currency == account.currency && ($0.type == .cash || $0.type == .bankAccount) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Investment purchase") {
+                    LabeledContent("Investment account", value: account.name)
+                    CurrencyInputField("Amount invested", text: $amount, currency: account.currency)
+                    DatePicker("Purchase date", selection: $date, in: ...Date(), displayedComponents: .date)
+                    TextField("Note (optional)", text: $note)
+                }
+                Section {
+                    Picker("Paid from", selection: $fundingID) {
+                        Text("Choose account").tag(Optional<UUID>.none)
+                        ForEach(fundingAccounts) { Text($0.name).tag(Optional($0.id)) }
+                    }
+                } header: {
+                    Text("Funding")
+                } footer: {
+                    Text("Moves money from a cash or bank account in \(account.currency.rawValue) into this investment. This is a transfer, not an expense. Update gain/loss separately from the investment account.")
+                }
+            }
+            .pocketListSurface()
+            .navigationTitle("Investment purchase")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
+            }
+            .errorMessageAlert(title: "Purchase not saved", message: $errorMessage)
+        }
+    }
+
+    private func save() {
+        guard let money = Money.parse(amount, currency: account.currency), money.minorUnits > 0,
+              let fundingID, fundingAccounts.contains(where: { $0.id == fundingID }), date <= Date() else {
+            errorMessage = "Enter a positive amount, choose a cash or bank account, and use a purchase date that is not in the future."
+            return
+        }
+        let transaction = LedgerTransaction(date: date, note: note.isEmpty ? "Investment purchase" : note, kind: .transfer, categoryID: nil,
+            outflows: [MoneyMovement(accountID: fundingID, money: money)], inflows: [MoneyMovement(accountID: account.id, money: money)])
+        if store.addTransaction(transaction) {
+            onSave()
+            dismiss()
+        } else {
+            errorMessage = store.lastActionStatus ?? "Purchase could not be saved."
+        }
+    }
+}
+
+@MainActor
 struct AssetTrackingSection: View {
     @ObservedObject var store: LedgerStore
     let account: Account
     let areBalancesRevealed: Bool
 
     @State private var sheet: AssetSheet?
-    @State private var confirmingUndo = false
-    @State private var confirmingDisable = false
-    @State private var errorMessage: String?
 
     private enum AssetSheet: Identifiable {
         case purchase, pricing(PreciousMetal), investment(Bool)
@@ -29,21 +140,6 @@ struct AssetTrackingSection: View {
             } else if account.type == .investment {
                 investment
             }
-            if account.tracking != nil {
-                Section {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Button("Undo latest asset activity", role: .destructive) { confirmingUndo = true }
-                            .disabled(!areBalancesRevealed)
-                        Text("To correct an entry, undo the latest activity and enter it again. Linked ledger movements are reversed together.")
-                            .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
-                        Button("Turn off asset tracking", role: .destructive) { confirmingDisable = true }
-                            .disabled(!areBalancesRevealed)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 14)
-                    .pocketGroupedListRow(index: 0, count: 1)
-                }
-            }
         }
         .sheet(item: $sheet, onDismiss: {
             if account.type == .physicalAsset {
@@ -59,23 +155,6 @@ struct AssetTrackingSection: View {
                 InvestmentEntryEditor(store: store, account: account, realizing: realizing)
             }
         }
-        .confirmationDialog("Undo the latest asset activity?", isPresented: $confirmingUndo, titleVisibility: .visible) {
-            Button("Undo activity", role: .destructive) {
-                if !store.undoLatestAssetActivity(accountID: account.id) {
-                    errorMessage = store.lastActionStatus ?? "Activity could not be undone."
-                }
-            }
-        }
-        .confirmationDialog("Turn off asset tracking?", isPresented: $confirmingDisable, titleVisibility: .visible) {
-            Button("Turn off tracking", role: .destructive) {
-                if !store.disableAssetTracking(accountID: account.id) {
-                    errorMessage = store.lastActionStatus ?? "Undo existing asset history first."
-                }
-            }
-        } message: {
-            Text("Tracking history must be empty. Undo existing activity first; the recorded account balance will remain.")
-        }
-        .errorMessageAlert(title: "Asset activity not saved", message: $errorMessage)
         .onChange(of: areBalancesRevealed) { _, revealed in
             if !revealed { sheet = nil }
         }
@@ -118,6 +197,7 @@ struct AssetTrackingSection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 10)
             .pocketGroupedListRow(index: 0, count: 1)
+            .listRowSeparator(.hidden)
         } header: { Text("Metals") } footer: {
             Text("Estimated metal value excludes jewelry workmanship and retail premiums. Missing prices use purchase cost in totals.")
                 .font(.footnote)
@@ -139,6 +219,7 @@ struct AssetTrackingSection: View {
                     }
                     .buttonStyle(.plain)
                     .pocketGroupedListRow(index: entry.offset, count: purchases.count)
+                    .listRowSeparator(.hidden)
                 }
             }
         }
@@ -164,6 +245,7 @@ struct AssetTrackingSection: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 10)
                     .pocketGroupedListRow(index: entry.offset, count: heldMetals.count + 1)
+                    .listRowSeparator(.hidden)
                 }
                 Button {
                     Task { await store.refreshMetalPrices(force: true) }
@@ -174,6 +256,7 @@ struct AssetTrackingSection: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 10)
                 .pocketGroupedListRow(index: heldMetals.count, count: heldMetals.count + 1)
+                .listRowSeparator(.hidden)
             }
         }
     }
@@ -190,7 +273,6 @@ struct AssetTrackingSection: View {
                 } else {
                     Text("No valuation entered yet.").foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
-                Divider().overlay(PocketLedgerTheme.divider)
                 Text("Update the gain or loss to reflect today’s investment value. Realize it when a gain or loss is confirmed; use a transfer to move money out.")
                     .font(.footnote)
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
@@ -208,6 +290,7 @@ struct AssetTrackingSection: View {
             .padding(.vertical, 14)
             .buttonStyle(.bordered)
             .pocketGroupedListRow(index: 0, count: 1)
+            .listRowSeparator(.hidden)
         }
         if let entries = account.tracking?.investmentEntries, !entries.isEmpty {
             Section("Performance history") {
@@ -228,6 +311,7 @@ struct AssetTrackingSection: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 14)
                 .pocketGroupedListRow(index: 0, count: 1)
+                .listRowSeparator(.hidden)
             }
         }
     }
@@ -406,6 +490,7 @@ private struct MetalPurchaseDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 14)
                 .pocketGroupedListRow(index: 0, count: 1)
+                .listRowSeparator(.hidden)
             }
 
             Section("Purchase details") {
@@ -425,6 +510,7 @@ private struct MetalPurchaseDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 14)
                 .pocketGroupedListRow(index: 0, count: 1)
+                .listRowSeparator(.hidden)
             }
 
             Section("Remaining holding") {
@@ -437,6 +523,7 @@ private struct MetalPurchaseDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 14)
                 .pocketGroupedListRow(index: 0, count: 1)
+                .listRowSeparator(.hidden)
             }
 
             Section("Sales") {
@@ -479,6 +566,7 @@ private struct MetalPurchaseDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 14)
                 .pocketGroupedListRow(index: 0, count: 1)
+                .listRowSeparator(.hidden)
             }
 
             Section {
@@ -501,11 +589,13 @@ private struct MetalPurchaseDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 14)
                 .pocketGroupedListRow(index: 0, count: 1)
+                .listRowSeparator(.hidden)
             }
         }
         .listStyle(.insetGrouped)
         .contentMargins(.horizontal, 0, for: .scrollContent)
         .listSectionSpacing(24)
+        .listSectionSeparator(.hidden)
         .textCase(nil)
         .scrollContentBackground(.hidden)
     }
@@ -561,6 +651,7 @@ private func assetDecimalInput(_ value: Decimal) -> String {
 private struct MetalPurchaseEditor: View {
     @ObservedObject var store: LedgerStore
     let account: Account
+    var onSave: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
     @State private var metal: PreciousMetal = .gold
     @State private var description = ""
@@ -574,6 +665,13 @@ private struct MetalPurchaseEditor: View {
     @State private var fundingID: UUID?
     @State private var reconcile = false
     @State private var errorMessage: String?
+
+    init(store: LedgerStore, account: Account, historical: Bool = true, onSave: @escaping () -> Void = {}) {
+        self.store = store
+        self.account = account
+        self.onSave = onSave
+        _historical = State(initialValue: historical)
+    }
 
     private var fundingAccounts: [Account] {
         store.activeAccounts.filter { $0.id != account.id && $0.currency == account.currency && ($0.type == .cash || $0.type == .bankAccount) }
@@ -662,6 +760,7 @@ private struct MetalPurchaseEditor: View {
         }
         let purchase = MetalPurchase(metal: metal, description: description.trimmingCharacters(in: .whitespacesAndNewlines), date: date, quantity: quantity, weightPerItem: weight, unit: unit, purity: fineness / 1000, totalCost: cost)
         if store.addMetalPurchase(accountID: account.id, purchase: purchase, fundingAccountID: historical ? nil : fundingID, reconcileOpeningBalance: reconcile) {
+            onSave()
             dismiss()
         } else {
             errorMessage = store.lastActionStatus ?? "Purchase could not be saved."

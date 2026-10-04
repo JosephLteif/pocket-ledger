@@ -280,6 +280,10 @@ struct ContentView: View {
                 TransactionEditor(store: store, initialKind: .income)
             case .transfer:
                 TransactionEditor(store: store, initialKind: .transfer)
+            case .physicalAsset:
+                AssetPurchaseEditor(store: store, accountType: .physicalAsset)
+            case .investment:
+                AssetPurchaseEditor(store: store, accountType: .investment)
             case .loan:
                 LoanEditor(store: store)
             case .scheduled:
@@ -333,6 +337,8 @@ enum AddAction: Identifiable {
     case prefilledExpense(id: UUID, amount: Money, note: String)
     case income
     case transfer
+    case physicalAsset
+    case investment
     case loan
     case scheduled
     case template(UUID)
@@ -352,6 +358,10 @@ enum AddAction: Identifiable {
             return "income"
         case .transfer:
             return "transfer"
+        case .physicalAsset:
+            return "physical-asset"
+        case .investment:
+            return "investment"
         case .loan:
             return "loan"
         case .scheduled:
@@ -401,6 +411,8 @@ struct AddTransactionToolbar: ToolbarContent {
                     Button("Income", systemImage: "arrow.down.left") { onAction(.income) }
                     Button("Transfer", systemImage: "arrow.left.arrow.right") { onAction(.transfer) }
                     Button("Loan", systemImage: "banknote") { onAction(.loan) }
+                    Button("Physical asset purchase", systemImage: "shippingbox") { onAction(.physicalAsset) }
+                    Button("Investment purchase", systemImage: "chart.line.uptrend.xyaxis") { onAction(.investment) }
                 }
 
                 Section("Other") {

@@ -145,10 +145,14 @@ private enum TransactionEditorType: String, CaseIterable, Identifiable, Hashable
     case income
     case transfer
     case loan
+    case physicalAsset
+    case investment
 
     var id: String { rawValue }
 
     var displayName: String {
+        if self == .physicalAsset { return "Physical asset" }
+        if self == .investment { return "Investment" }
         guard let transactionKind else { return "Loan" }
         return transactionKind.displayName
     }
@@ -158,7 +162,7 @@ private enum TransactionEditorType: String, CaseIterable, Identifiable, Hashable
         case .expense: return .expense
         case .income: return .income
         case .transfer: return .transfer
-        case .loan: return nil
+        case .loan, .physicalAsset, .investment: return nil
         }
     }
 
@@ -185,6 +189,9 @@ struct TransactionEditor: View {
     @State private var kind: TransactionKind = .expense
     @State private var isPresentingLoanEditor = false
     @State private var dismissAfterLoanSave = false
+    @State private var assetAccountType: AccountType?
+    @State private var dismissAfterAssetSave = false
+    @State private var assetCreatedNotice = false
     @State private var loanCreatedNotice = false
     @State private var timing: TransactionTiming = .now
     @State private var scheduleFrequency: ScheduleFrequency = .once
@@ -413,11 +420,18 @@ struct TransactionEditor: View {
                             Text(editorType.displayName).tag(editorType)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.menu)
                 } header: {
                     Text("Transaction type")
                 }
 
+                if assetCreatedNotice {
+                    Section {
+                        Label("Asset purchase saved. Your transaction draft is still open.", systemImage: "checkmark.circle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(PocketLedgerTheme.positive)
+                    }
+                }
                 if loanCreatedNotice {
                     Section {
                         Label("Loan created. Your transaction draft is still open.", systemImage: "checkmark.circle.fill")
@@ -560,6 +574,20 @@ struct TransactionEditor: View {
                     }
                 })
             }
+            .sheet(item: $assetAccountType, onDismiss: {
+                if dismissAfterAssetSave {
+                    dismissAfterAssetSave = false
+                    dismiss()
+                }
+            }) { accountType in
+                AssetPurchaseEditor(store: store, accountType: accountType, onSave: {
+                    if hasUnsavedChanges {
+                        assetCreatedNotice = true
+                    } else {
+                        dismissAfterAssetSave = true
+                    }
+                })
+            }
             .fileImporter(
                 isPresented: $isShowingAttachmentImporter,
                 allowedContentTypes: [.image, .pdf],
@@ -593,6 +621,8 @@ struct TransactionEditor: View {
             set: { editorType in
                 if editorType == .loan {
                     isPresentingLoanEditor = true
+                } else if editorType == .physicalAsset || editorType == .investment {
+                    assetAccountType = editorType == .physicalAsset ? .physicalAsset : .investment
                 } else if let transactionKind = editorType.transactionKind {
                     kind = transactionKind
                 }
@@ -605,7 +635,7 @@ struct TransactionEditor: View {
               !isEditingScheduledTransaction,
               !isTemplateEditor,
               !hasPrefilledTransactionContent else {
-            return TransactionEditorType.allCases.filter { $0 != .loan }
+            return TransactionEditorType.allCases.filter { $0.transactionKind != nil }
         }
         return TransactionEditorType.allCases
     }

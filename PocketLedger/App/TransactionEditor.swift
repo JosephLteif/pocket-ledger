@@ -82,7 +82,6 @@ private struct TransactionEditorSnapshot: Equatable {
 @MainActor
 private struct MovementLineEditor: View {
     @ObservedObject var store: LedgerStore
-    @ObservedObject private var proAccess = ProEntitlementStore.shared
     @Binding var line: MovementDraft
     let amountPlaceholder: String
     let allowsArchivedAccount: Bool
@@ -178,6 +177,7 @@ struct TransactionEditor: View {
     private static let lastCategoryKey = "pocketLedger.lastExpenseCategory"
 
     @ObservedObject var store: LedgerStore
+    @ObservedObject private var proAccess = ProEntitlementStore.shared
     @Environment(\.dismiss) private var dismiss
     @State private var note = ""
     @State private var templateName = ""
@@ -428,7 +428,10 @@ struct TransactionEditor: View {
 
                 if let saveValidationMessage {
                     Section("Save needs attention") {
-                        Label(saveValidationMessage, systemImage: "info.circle")
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "info.circle")
+                            Text(verbatim: saveValidationMessage)
+                        }
                             .font(.footnote)
                             .foregroundStyle(PocketLedgerTheme.textSecondary)
                     }

@@ -871,7 +871,7 @@ final class LedgerStore: ObservableObject {
                 ? .accountTypes : .accounts
             return denyForPro(
                 feature == .accountTypes
-                    ? "Pro unlocks loan, investment, and physical-asset accounts."
+                    ? "Pro unlocks investment and physical-asset accounts."
                     : "Free includes up to five active accounts.",
                 feature: feature
             )
@@ -897,7 +897,7 @@ final class LedgerStore: ObservableObject {
            PocketLedgerTierPolicy.accountTypeRequiresPro(account.type),
            !hasProAccess() {
             return denyForPro(
-                "Pro unlocks loan, investment, and physical-asset accounts.",
+                "Pro unlocks investment and physical-asset accounts.",
                 feature: .accountTypes
             )
         }
@@ -905,7 +905,7 @@ final class LedgerStore: ObservableObject {
            PocketLedgerTierPolicy.accountTypeRequiresPro(account.type),
            !hasProAccess() {
             return denyForPro(
-                "Pro unlocks loan, investment, and physical-asset accounts.",
+                "Pro unlocks investment and physical-asset accounts.",
                 feature: .accountTypes
             )
         }
@@ -1009,7 +1009,7 @@ final class LedgerStore: ObservableObject {
            PocketLedgerTierPolicy.accountTypeRequiresPro(data.accounts[index].type),
            !hasProAccess() {
             return denyForPro(
-                "Pro unlocks loan, investment, and physical-asset accounts.",
+                "Pro unlocks investment and physical-asset accounts.",
                 feature: .accountTypes
             )
         }

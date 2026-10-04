@@ -376,6 +376,7 @@ struct TransactionsView: View {
                 if store.data.transactions.isEmpty {
                     Button("Add expense", systemImage: "plus", action: onAddExpense)
                         .buttonStyle(.glassProminent)
+                        .frame(maxWidth: .infinity, alignment: .center)
                         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)

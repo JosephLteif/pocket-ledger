@@ -688,9 +688,10 @@ struct AccountEditor: View {
                     TextField("Name", text: $name)
                     Picker("Type", selection: $type) {
                         ForEach(AccountType.allCases.filter {
-                            proAccess.hasProAccess
-                                || !PocketLedgerTierPolicy.accountTypeRequiresPro($0)
-                                || $0 == account?.type
+                            ($0 != .loan || $0 == account?.type)
+                                && (proAccess.hasProAccess
+                                    || !PocketLedgerTierPolicy.accountTypeRequiresPro($0)
+                                    || $0 == account?.type)
                         }) { accountType in
                             Label(accountType.displayName, systemImage: accountType.systemImage)
                                 .tag(accountType)
@@ -700,7 +701,7 @@ struct AccountEditor: View {
                     if !proAccess.hasProAccess {
                         ProUpgradePrompt(
                             title: "Advanced account types",
-                            detail: "Pro adds loan, investment, and physical-asset accounts.",
+                            detail: "Pro adds investment and physical-asset accounts.",
                             feature: .accountTypes
                         )
                     }

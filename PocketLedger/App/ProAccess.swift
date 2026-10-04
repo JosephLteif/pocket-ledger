@@ -140,7 +140,7 @@ enum PocketLedgerTierPolicy {
     static let freeBudgetLimit = 5
 
     static func accountTypeRequiresPro(_ type: AccountType) -> Bool {
-        type == .loan || type == .investment || type == .physicalAsset
+        type == .investment || type == .physicalAsset
     }
 
     static func canCreateAccount(type: AccountType, activeCount: Int, hasPro: Bool) -> Bool {
@@ -266,7 +266,7 @@ struct ProUpgradeView: View {
 
                     VStack(alignment: .leading, spacing: 12) {
                         Label("Unlimited accounts, schedules, and budgets", systemImage: "infinity")
-                        Label("Investment, loan, and physical-asset accounts", systemImage: "chart.pie")
+                        Label("Investment and physical-asset accounts", systemImage: "chart.pie")
                         Label("Net worth, rollover budgets, and older metrics", systemImage: "chart.xyaxis.line")
                         Label("Shareable PDF reports", systemImage: "doc.richtext")
                     }
@@ -323,6 +323,7 @@ struct ProUpgradeView: View {
                 }
                 .padding(20)
             }
+            .scrollBounceBehavior(.basedOnSize)
             .navigationTitle("Pocket Ledger Pro")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -341,14 +342,6 @@ struct ProUpgradeView: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        .task {
-            if !access.hasResolvedEntitlements {
-                await access.refreshEntitlements()
-            }
-            if access.product == nil {
-                await access.loadProduct()
-            }
-        }
     }
 }
 

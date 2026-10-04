@@ -32,7 +32,8 @@ struct SetupWizardView: View {
                     TextField("Account name", text: $accountName)
                     Picker("Type", selection: $accountType) {
                         ForEach(AccountType.allCases.filter {
-                            proAccess.hasProAccess || !PocketLedgerTierPolicy.accountTypeRequiresPro($0)
+                            $0 != .loan
+                                && (proAccess.hasProAccess || !PocketLedgerTierPolicy.accountTypeRequiresPro($0))
                         }) { type in
                             Label(type.displayName, systemImage: type.systemImage).tag(type)
                         }
@@ -40,7 +41,7 @@ struct SetupWizardView: View {
                     if !proAccess.hasProAccess {
                         ProUpgradePrompt(
                             title: "Advanced account types",
-                            detail: "Pro adds loan, investment, and physical-asset accounts.",
+                            detail: "Pro adds investment and physical-asset accounts.",
                             feature: .accountTypes
                         )
                     }

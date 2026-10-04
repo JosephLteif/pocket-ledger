@@ -33,6 +33,10 @@ The **Build unsigned iOS IPA** workflow uses a macOS runner and XcodeGen to crea
 
 For Sideloadly, download **PocketLedger-iphone-sideload** and load `PocketLedger-iphone-sideload.ipa`. It includes the iPhone app and iOS widget, and omits the Watch companion that fails during Sideloadly signing. The **PocketLedger-unsigned** artifact retains the full iPhone and Watch bundle for signing and installation tools that support it.
 
+To test alongside your everyday install, run **Build Pocket Ledger Sandbox IPA** from Actions and sideload the **PocketLedger-sandbox-iphone-sideload** artifact. It installs as **Pocket Ledger Sandbox** with a different app identifier, App Group, database, and deep-link scheme, so test transactions cannot change the main ledger. Start with sample data or a fresh ledger; restoring a backup intentionally copies that backup into the sandbox. If your signing tool cannot grant the sandbox App Group, the app still uses its separate local container, but the widget will not share the sandbox data. The sandbox bundle is separate from the App Store Connect app, so use StoreKit testing in Xcode or a TestFlight sandbox to verify purchases.
+
+The production bundle ID is `com.josephlteif.pocketledger`; the old `com.josephlteif.financedemo` install will remain a separate app with its own data. Export a full backup from the old install and restore it into the new one before removing the old app.
+
 The unsigned artifacts are for development and sideloading; they are not App Store distribution builds. Apple signing, App Store metadata, and on-device behavior require separate Apple-side setup and review.
 
 ## Project layout

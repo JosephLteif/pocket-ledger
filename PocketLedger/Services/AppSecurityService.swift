@@ -80,7 +80,7 @@ enum AppBiometry: Equatable {
 
 @MainActor
 final class AppSecurityService: ObservableObject {
-    private static let keychainService = "com.josephlteif.financedemo.security"
+    private static let keychainService = "com.josephlteif.pocketledger.security"
     private static let keychainAccount = "app-passcode-verifier"
     private static let passcodeConfiguredKey = "appPasscodeConfigured"
     private static let biometricsEnabledKey = "appBiometricsEnabled"

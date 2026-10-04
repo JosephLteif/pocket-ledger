@@ -4,7 +4,7 @@
 <dict>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.com.josephlteif.financedemo</string>
+		<string>group.com.josephlteif.pocketledger</string>
 	</array>
 </dict>
 </plist>

@@ -1,0 +1,98 @@
+name: Build Pocket Ledger Sandbox IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-sandbox:
+    name: Build isolated iPhone sideload IPA
+    runs-on: xcode-27
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Cache Swift package data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/Developer/Xcode/SourcePackages
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('project.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Build sandbox app and widget
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project PocketLedger.xcodeproj \
+            -scheme PocketLedger \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$RUNNER_TEMP/SandboxDerivedData" \
+            -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/SourcePackages" \
+            POCKET_LEDGER_BUNDLE_ID_SUFFIX=.sandbox \
+            POCKET_LEDGER_APP_GROUP_ID_SUFFIX=.sandbox \
+            POCKET_LEDGER_DISPLAY_NAME="Pocket Ledger Sandbox" \
+            POCKET_LEDGER_WIDGET_DISPLAY_NAME="Pocket Ledger Sandbox Balance" \
+            POCKET_LEDGER_URL_SUFFIX=-sandbox \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-sandbox.log"
+
+      - name: Package and verify sandbox iPhone IPA
+        run: |
+          set -euo pipefail
+          APP_PATH="$RUNNER_TEMP/SandboxDerivedData/Build/Products/Release-iphoneos/PocketLedger.app"
+          WIDGET_PATH="$APP_PATH/PlugIns/PocketLedgerWidget.appex"
+          SIDELOAD_ROOT="$RUNNER_TEMP/sandbox-iphone-sideload"
+          SIDELOAD_IPA="$GITHUB_WORKSPACE/PocketLedger-sandbox-iphone-sideload.ipa"
+
+          test -d "$APP_PATH" || { echo "Missing sandbox app: $APP_PATH"; exit 1; }
+          test -d "$WIDGET_PATH" || { echo "Missing sandbox widget: $WIDGET_PATH"; exit 1; }
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$APP_PATH/Info.plist")" = "Pocket Ledger Sandbox"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")" = "com.josephlteif.pocketledger.sandbox"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :PocketLedgerAppGroupIdentifier' "$APP_PATH/Info.plist")" = "group.com.josephlteif.pocketledger.sandbox"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :PocketLedgerURLScheme' "$APP_PATH/Info.plist")" = "pocketledger-sandbox"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$APP_PATH/Info.plist")" = "pocketledger-sandbox"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$WIDGET_PATH/Info.plist")" = "com.josephlteif.pocketledger.sandbox.widget"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :PocketLedgerAppGroupIdentifier' "$WIDGET_PATH/Info.plist")" = "group.com.josephlteif.pocketledger.sandbox"
+
+          rm -rf "$SIDELOAD_ROOT"
+          rm -f "$SIDELOAD_IPA"
+          mkdir -p "$SIDELOAD_ROOT/Payload"
+          ditto "$APP_PATH" "$SIDELOAD_ROOT/Payload/PocketLedger.app"
+          ditto -c -k --sequesterRsrc --keepParent "$SIDELOAD_ROOT/Payload" "$SIDELOAD_IPA"
+          unzip -t "$SIDELOAD_IPA"
+          unzip -Z1 "$SIDELOAD_IPA" | grep -Eq '^Payload/PocketLedger\.app/PlugIns/PocketLedgerWidget\.appex/Info\.plist$'
+
+          {
+            echo "App bundle ID: com.josephlteif.pocketledger.sandbox"
+            echo "App Group: group.com.josephlteif.pocketledger.sandbox"
+            echo "Commit: $GITHUB_SHA"
+          } > "$GITHUB_WORKSPACE/sandbox-build-info.txt"
+
+      - name: Upload sandbox iPhone sideload IPA
+        uses: actions/upload-artifact@v7
+        with:
+          name: PocketLedger-sandbox-iphone-sideload
+          path: |
+            PocketLedger-sandbox-iphone-sideload.ipa
+            sandbox-build-info.txt
+          retention-days: 7

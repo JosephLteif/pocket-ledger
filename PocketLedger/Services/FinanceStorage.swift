@@ -2,7 +2,15 @@ import Foundation
 import SwiftData
 
 final class FinanceStorage {
-    static let appGroupIdentifier = "group.com.josephlteif.financedemo"
+    static var appGroupIdentifier: String {
+        Bundle.main.object(forInfoDictionaryKey: "PocketLedgerAppGroupIdentifier") as? String
+            ?? Bundle.main.bundleIdentifier.map { "group.\($0)" }
+            ?? "group.com.josephlteif.pocketledger"
+    }
+
+    static var urlScheme: String {
+        Bundle.main.object(forInfoDictionaryKey: "PocketLedgerURLScheme") as? String ?? "pocketledger"
+    }
 
     private enum StorageLocation: Equatable {
         case appGroup

@@ -1,7 +1,11 @@
 import Foundation
 
 enum WatchLedgerConstants {
-    static let appGroupIdentifier = "group.com.josephlteif.financedemo"
+    static var appGroupIdentifier: String {
+        Bundle.main.object(forInfoDictionaryKey: "PocketLedgerAppGroupIdentifier") as? String
+            ?? Bundle.main.bundleIdentifier.map { "group.\($0)" }
+            ?? "group.com.josephlteif.pocketledger"
+    }
     static let cacheKey = "watchLedgerCache"
     static let snapshotKey = "snapshot"
     static let expenseCommandKey = "expenseCommand"

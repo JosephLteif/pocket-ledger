@@ -13,6 +13,7 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: 26.0
     WATCHOS_DEPLOYMENT_TARGET: 26.0
     SWIFT_VERSION: 6.0
+    CURRENT_PROJECT_VERSION: 1
     POCKET_LEDGER_BUNDLE_ID_BASE: com.josephlteif.pocketledger
     POCKET_LEDGER_BUNDLE_ID_SUFFIX: ""
     POCKET_LEDGER_APP_GROUP_ID_BASE: group.com.josephlteif.pocketledger
@@ -57,7 +58,7 @@ targets:
         CFBundleDisplayName: $(POCKET_LEDGER_DISPLAY_NAME)
         CFBundleName: $(POCKET_LEDGER_DISPLAY_NAME)
         CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "1"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSCameraUsageDescription: "Pocket Ledger uses the camera to read bill items."
         NSFaceIDUsageDescription: "Pocket Ledger uses Face ID to unlock your financial data."
         NSPhotoLibraryUsageDescription: "Pocket Ledger uses selected bill photos to read bill items."
@@ -120,7 +121,7 @@ targets:
         CFBundleDisplayName: $(POCKET_LEDGER_WIDGET_DISPLAY_NAME)
         CFBundleName: Pocket Ledger Widget
         CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "1"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
         PocketLedgerAppGroupIdentifier: $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
@@ -152,7 +153,7 @@ targets:
         CFBundleDisplayName: $(POCKET_LEDGER_WATCH_DISPLAY_NAME)
         CFBundleName: $(POCKET_LEDGER_WATCH_DISPLAY_NAME)
         CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "1"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         WKCompanionAppBundleIdentifier: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX)
         WKRunsIndependentlyOfCompanionApp: false
         PocketLedgerAppGroupIdentifier: $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
@@ -187,7 +188,7 @@ targets:
         CFBundleDisplayName: $(POCKET_LEDGER_WATCH_WIDGET_DISPLAY_NAME)
         CFBundleName: $(POCKET_LEDGER_WATCH_WIDGET_DISPLAY_NAME)
         CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "1"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
         PocketLedgerAppGroupIdentifier: $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)

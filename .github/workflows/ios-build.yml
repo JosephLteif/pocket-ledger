@@ -69,6 +69,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-normal.log"
 
       - name: Build normal Apple Watch app and complication
@@ -86,6 +87,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-watch-normal.log"
 
       - name: Build sandbox iPhone app and widget
@@ -110,6 +112,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-sandbox.log"
 
       - name: Build sandbox Apple Watch app and complication
@@ -131,6 +134,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-watch-sandbox.log"
 
       - name: Build legacy financedemo iPhone app and widget
@@ -154,6 +158,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-legacy.log"
 
       - name: Build legacy financedemo Apple Watch app and complication
@@ -175,6 +180,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-watch-legacy.log"
 
       - name: Stage all three app variants
@@ -282,6 +288,7 @@ jobs:
             # Give re-signing tools an existing Mach-O signature to replace.
             # Sign nested bundles first; these signatures carry no Apple identity or provisioning.
             for bundle in "$watch_widget_path" "$watch_path" "$widget_path" "$app_path"; do
+              test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$bundle/Info.plist")" = "$GITHUB_RUN_NUMBER"
               local executable
               executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle/Info.plist")
               echo "Preparing $variant signature: $bundle"
@@ -306,20 +313,18 @@ jobs:
             echo "Verified $ipa_name ($app_bundle_id; $watch_bundle_id; iPhone and Watch widgets)"
           }
 
-          package_ipa normal "com.josephlteif.pocketledger" "Pocket Ledger" "Pocket Ledger Balance" "Pocket Ledger" "Pocket Ledger Complication" "PocketLedger-unsigned.ipa"
-          package_ipa sandbox "com.josephlteif.pocketledger.sandbox" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Balance" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Complication" "PocketLedger-sandbox-iphone-sideload.ipa"
-          package_ipa legacy "com.josephlteif.financedemo" "Pocket Ledger Legacy" "Pocket Ledger Legacy Balance" "Pocket Ledger Legacy" "Pocket Ledger Legacy Complication" "PocketLedger-financedemo-iphone-sideload.ipa"
+          package_ipa normal "com.josephlteif.pocketledger" "Pocket Ledger" "Pocket Ledger Balance" "Pocket Ledger" "Pocket Ledger Complication" "PocketLedger-normal-build-$GITHUB_RUN_NUMBER.ipa"
+          package_ipa sandbox "com.josephlteif.pocketledger.sandbox" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Balance" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Complication" "PocketLedger-sandbox-build-$GITHUB_RUN_NUMBER.ipa"
+          package_ipa legacy "com.josephlteif.financedemo" "Pocket Ledger Legacy" "Pocket Ledger Legacy Balance" "Pocket Ledger Legacy" "Pocket Ledger Legacy Complication" "PocketLedger-financedemo-build-$GITHUB_RUN_NUMBER.ipa"
 
           test "$(find "$GITHUB_WORKSPACE" -maxdepth 1 -name '*.ipa' -type f | wc -l | tr -d '[:space:]')" = "3"
 
       - name: Upload the three IPA files
         uses: actions/upload-artifact@v7
         with:
-          name: PocketLedger-unsigned
+          name: PocketLedger-build-${{ github.run_number }}
           path: |
-            PocketLedger-unsigned.ipa
-            PocketLedger-sandbox-iphone-sideload.ipa
-            PocketLedger-financedemo-iphone-sideload.ipa
+            PocketLedger-*-build-*.ipa
           if-no-files-found: error
           retention-days: 7
   test-ios:

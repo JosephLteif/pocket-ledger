@@ -130,6 +130,11 @@ struct MoreView: View {
                 } footer: {
                     Text("Keep advanced tools close without crowding the daily flow")
                 }
+                Section("App version") {
+                    LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown")
+                    LabeledContent("Build", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown")
+                }
+                .listRowBackground(PocketLedgerTheme.surface)
             }
             .navigationTitle("More")
             .navigationBarTitleDisplayMode(.large)

@@ -203,6 +203,7 @@ struct AssetTrackingSection: View {
                 .font(.footnote)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
         }
+        .listSectionSeparator(.hidden)
         if !purchases.isEmpty {
             Section("Purchases") {
                 ForEach(Array(purchases.enumerated()), id: \.element.id) { entry in
@@ -222,6 +223,7 @@ struct AssetTrackingSection: View {
                     .listRowSeparator(.hidden)
                 }
             }
+            .listSectionSeparator(.hidden)
         }
         let heldMetals = PreciousMetal.allCases.filter { metal in
             purchases.contains { $0.metal == metal && $0.remainingWeightGrams > 0 }
@@ -258,6 +260,7 @@ struct AssetTrackingSection: View {
                 .pocketGroupedListRow(index: heldMetals.count, count: heldMetals.count + 1)
                 .listRowSeparator(.hidden)
             }
+            .listSectionSeparator(.hidden)
         }
     }
 
@@ -292,6 +295,7 @@ struct AssetTrackingSection: View {
             .pocketGroupedListRow(index: 0, count: 1)
             .listRowSeparator(.hidden)
         }
+        .listSectionSeparator(.hidden)
         if let entries = account.tracking?.investmentEntries, !entries.isEmpty {
             Section("Performance history") {
                 VStack(alignment: .leading, spacing: 14) {
@@ -313,6 +317,7 @@ struct AssetTrackingSection: View {
                 .pocketGroupedListRow(index: 0, count: 1)
                 .listRowSeparator(.hidden)
             }
+            .listSectionSeparator(.hidden)
         }
     }
 }
@@ -492,6 +497,7 @@ private struct MetalPurchaseDetailView: View {
                 .pocketGroupedListRow(index: 0, count: 1)
                 .listRowSeparator(.hidden)
             }
+            .listSectionSeparator(.hidden)
 
             Section("Purchase details") {
                 VStack(alignment: .leading, spacing: 14) {
@@ -512,6 +518,7 @@ private struct MetalPurchaseDetailView: View {
                 .pocketGroupedListRow(index: 0, count: 1)
                 .listRowSeparator(.hidden)
             }
+            .listSectionSeparator(.hidden)
 
             Section("Remaining holding") {
                 VStack(alignment: .leading, spacing: 14) {
@@ -525,6 +532,7 @@ private struct MetalPurchaseDetailView: View {
                 .pocketGroupedListRow(index: 0, count: 1)
                 .listRowSeparator(.hidden)
             }
+            .listSectionSeparator(.hidden)
 
             Section("Sales") {
                 VStack(alignment: .leading, spacing: 14) {
@@ -568,6 +576,7 @@ private struct MetalPurchaseDetailView: View {
                 .pocketGroupedListRow(index: 0, count: 1)
                 .listRowSeparator(.hidden)
             }
+            .listSectionSeparator(.hidden)
 
             Section {
                 VStack(alignment: .leading, spacing: 14) {
@@ -591,6 +600,7 @@ private struct MetalPurchaseDetailView: View {
                 .pocketGroupedListRow(index: 0, count: 1)
                 .listRowSeparator(.hidden)
             }
+            .listSectionSeparator(.hidden)
         }
         .listStyle(.insetGrouped)
         .contentMargins(.horizontal, 0, for: .scrollContent)

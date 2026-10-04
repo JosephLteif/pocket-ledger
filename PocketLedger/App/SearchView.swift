@@ -114,17 +114,20 @@ struct GlobalSearchView: View {
     @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
     @State private var transactionDeletionError: String?
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
+    @AppStorage("pocketLedger.savedSearches") private var savedSearchesData = Data()
 
-    private var searchExamples: [String] {
-        var examples: [String] = []
-        for value in [
-            store.activeCategories.first?.name,
-            store.activeAccounts.first?.name,
-            store.data.transactions.first(where: { !$0.note.isEmpty })?.note
-        ].compactMap({ $0 }) where !examples.contains(value) {
-            examples.append(value)
+    private var savedSearches: [String] {
+        (try? JSONDecoder().decode([String].self, from: savedSearchesData)) ?? []
+    }
+
+    private var isSearchSaved: Bool {
+        savedSearches.contains { $0.localizedCaseInsensitiveCompare(query) == .orderedSame }
+    }
+
+    private func saveSearches(_ terms: [String]) {
+        if let encoded = try? JSONEncoder().encode(terms) {
+            savedSearchesData = encoded
         }
-        return examples
     }
 
     private var query: String {
@@ -139,6 +142,15 @@ struct GlobalSearchView: View {
         ScrollView(showsIndicators: false) {
             PocketGlassContainer(spacing: 14) {
                 VStack(alignment: .leading, spacing: 16) {
+                    if !query.isEmpty {
+                        Button {
+                            saveSearches(savedSearches + [query])
+                        } label: {
+                            Label(isSearchSaved ? "Search saved" : "Save search", systemImage: isSearchSaved ? "checkmark" : "bookmark")
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(isSearchSaved)
+                    }
                     if query.isEmpty {
                         ContentUnavailableView(
                             "Search your ledger",
@@ -146,22 +158,41 @@ struct GlobalSearchView: View {
                             description: Text("Find accounts, transactions, descriptions, categories, amounts, and currencies.")
                         )
                         .padding(.top, 18)
-                        if !searchExamples.isEmpty {
+                        if !savedSearches.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("Try a search")
-                                    .font(.caption.weight(.semibold))
+                                Text("Saved searches")
+                                    .font(.headline)
                                     .foregroundStyle(PocketLedgerTheme.textSecondary)
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 8) {
-                                        ForEach(searchExamples, id: \.self) { example in
-                                            Button(example) { searchText = example }
-                                                .buttonStyle(.glass)
-                                                .accessibilityLabel("Search for \(example)")
+                                VStack(spacing: 8) {
+                                    ForEach(savedSearches, id: \.self) { term in
+                                        HStack(spacing: 8) {
+                                            Button {
+                                                searchText = term
+                                            } label: {
+                                                Label(term, systemImage: "magnifyingglass")
+                                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                            }
+                                            .accessibilityLabel("Search for \(term)")
+                                            Button {
+                                                saveSearches(savedSearches.filter { $0 != term })
+                                            } label: {
+                                                Image(systemName: "xmark")
+                                                    .frame(minWidth: 44, minHeight: 44)
+                                            }
+                                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                            .accessibilityLabel("Remove saved search \(term)")
                                         }
+                                        .buttonStyle(.plain)
+                                        .padding(.horizontal, 14)
+                                        .pocketGroupedSurface(cornerRadius: 18)
                                     }
                                 }
                             }
                             .padding(.top, 8)
+                        } else {
+                            Text("Enter a search, then tap Save search to reuse it later.")
+                                .font(.footnote)
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
                         }
                     } else if results.isEmpty {
                         ContentUnavailableView(

@@ -211,12 +211,18 @@ jobs:
             check_plist_value "$widget_path/Info.plist" NSExtension:NSExtensionPointIdentifier com.apple.widgetkit-extension
             check_plist_value "$watch_path/Info.plist" CFBundleDisplayName "$watch_display_name"
             check_plist_value "$watch_path/Info.plist" CFBundleIdentifier "$watch_bundle_id"
+            check_plist_value "$watch_path/Info.plist" WKApplication true
             check_plist_value "$watch_path/Info.plist" WKCompanionAppBundleIdentifier "$app_bundle_id"
             check_plist_value "$watch_path/Info.plist" PocketLedgerAppGroupIdentifier "$app_group_id"
             check_plist_value "$watch_widget_path/Info.plist" CFBundleDisplayName "$watch_widget_display_name"
             check_plist_value "$watch_widget_path/Info.plist" CFBundleIdentifier "$watch_bundle_id.widget"
             check_plist_value "$watch_widget_path/Info.plist" PocketLedgerAppGroupIdentifier "$app_group_id"
             check_plist_value "$watch_widget_path/Info.plist" NSExtension:NSExtensionPointIdentifier com.apple.widgetkit-extension
+
+            if /usr/libexec/PlistBuddy -c 'Print :WKWatchKitApp' "$watch_path/Info.plist" >/dev/null 2>&1; then
+              echo "Single-target Watch apps must use WKApplication, not WKWatchKitApp."
+              return 1
+            fi
 
             for extension_plist in "$widget_path/Info.plist" "$watch_widget_path/Info.plist"; do
               if /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPrincipalClass' "$extension_plist" >/dev/null 2>&1; then

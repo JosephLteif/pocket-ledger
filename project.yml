@@ -139,7 +139,7 @@ targets:
     info:
       path: PocketLedgerWatch/Config/Info.plist
       properties:
-        WKWatchKitApp: true
+        WKApplication: true
         CFBundleDisplayName: $(POCKET_LEDGER_WATCH_DISPLAY_NAME)
         CFBundleName: $(POCKET_LEDGER_WATCH_DISPLAY_NAME)
         CFBundleShortVersionString: "1.0"

@@ -185,7 +185,7 @@ jobs:
             local source_watch="$RUNNER_TEMP/sideload/$variant/PocketLedgerWatch.app"
             local package_root="$RUNNER_TEMP/package-$variant"
             local app_path="$package_root/Payload/PocketLedger.app"
-            local watch_path="$app_path/PlugIns/PocketLedgerWatch.app"
+            local watch_path="$app_path/Watch/PocketLedgerWatch.app"
             local ipa_path="$GITHUB_WORKSPACE/$ipa_name"
             local entries="$RUNNER_TEMP/$variant-ipa-entries.txt"
             local widget_path="$app_path/PlugIns/PocketLedgerWidget.appex"
@@ -195,7 +195,7 @@ jobs:
             test -d "$source_watch" || { echo "Missing $variant Watch app"; return 1; }
             mkdir -p "$package_root/Payload"
             ditto "$source_app" "$app_path"
-            mkdir -p "$app_path/PlugIns"
+            mkdir -p "$app_path/Watch"
             ditto "$source_watch" "$watch_path"
 
             test -d "$widget_path" || { echo "Missing $variant iPhone widget"; return 1; }
@@ -229,10 +229,10 @@ jobs:
             unzip -t "$ipa_path"
             unzip -Z1 "$ipa_path" > "$entries"
             require_entry "$entries" Payload/PocketLedger.app/PlugIns/PocketLedgerWidget.appex/Info.plist
-            require_entry "$entries" Payload/PocketLedger.app/PlugIns/PocketLedgerWatch.app/Info.plist
-            require_entry "$entries" Payload/PocketLedger.app/PlugIns/PocketLedgerWatch.app/PlugIns/PocketLedgerWatchWidget.appex/Info.plist
-            if grep -Eq '^Payload/PocketLedger\.app/Watch/PocketLedgerWatch\.app(/|$)' "$entries"; then
-              echo "The legacy Watch/ embedding path must not be packaged."
+            require_entry "$entries" Payload/PocketLedger.app/Watch/PocketLedgerWatch.app/Info.plist
+            require_entry "$entries" Payload/PocketLedger.app/Watch/PocketLedgerWatch.app/PlugIns/PocketLedgerWatchWidget.appex/Info.plist
+            if grep -Eq '^Payload/PocketLedger\.app/PlugIns/PocketLedgerWatch\.app(/|$)' "$entries"; then
+              echo "The Watch app must be embedded under Watch/, not PlugIns/."
               return 1
             fi
             echo "Verified $ipa_name ($app_bundle_id; $watch_bundle_id; iPhone and Watch widgets)"

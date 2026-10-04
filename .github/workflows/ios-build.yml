@@ -82,6 +82,10 @@ jobs:
           path: PocketLedger-app.tar.gz
           retention-days: 1
 
+  build-sandbox:
+    name: Build sandbox iPhone IPA
+    uses: ./.github/workflows/ios-build-sandbox.yml
+
   build-watch:
     name: Build watch app
     runs-on: macos-26
@@ -260,8 +264,8 @@ jobs:
 
   package:
     name: Package unsigned IPA
-    needs: [build-ios, build-watch, test-ios]
-    if: ${{ always() && needs.build-ios.result == 'success' && needs.build-watch.result == 'success' && (needs.test-ios.result == 'success' || needs.test-ios.result == 'skipped') }}
+    needs: [build-ios, build-sandbox, build-watch, test-ios]
+    if: ${{ always() && needs.build-ios.result == 'success' && needs.build-sandbox.result == 'success' && needs.build-watch.result == 'success' && (needs.test-ios.result == 'success' || needs.test-ios.result == 'skipped') }}
     runs-on: xcode-27
 
     steps:
@@ -276,6 +280,25 @@ jobs:
         with:
           name: PocketLedger-watch-build
           path: watch-build
+
+      - name: Download sandbox IPA
+        uses: actions/download-artifact@v7
+        with:
+          name: PocketLedger-sandbox-iphone-sideload
+          path: sandbox-build
+
+      - name: Verify sandbox IPA
+        run: |
+          set -euo pipefail
+          SANDBOX_IPA="sandbox-build/PocketLedger-sandbox-iphone-sideload.ipa"
+          test -f "$SANDBOX_IPA" || { echo "Missing sandbox IPA: $SANDBOX_IPA"; exit 1; }
+          unzip -t "$SANDBOX_IPA"
+          unzip -Z1 "$SANDBOX_IPA" | grep -Eq '^Payload/PocketLedger\.app/PlugIns/PocketLedgerWidget\.appex/Info\.plist$' || {
+            echo "Sandbox IPA is missing its WidgetKit extension."
+            exit 1
+          }
+          cp "$SANDBOX_IPA" "$GITHUB_WORKSPACE/PocketLedger-sandbox-iphone-sideload.ipa"
+          cp "sandbox-build/sandbox-build-info.txt" "$GITHUB_WORKSPACE/sandbox-build-info.txt"
 
       - name: Embed watch app and verify bundle
         run: |
@@ -364,5 +387,7 @@ jobs:
           name: PocketLedger-unsigned
           path: |
             PocketLedger-unsigned.ipa
+            PocketLedger-sandbox-iphone-sideload.ipa
             build-info.txt
+            sandbox-build-info.txt
           retention-days: 7

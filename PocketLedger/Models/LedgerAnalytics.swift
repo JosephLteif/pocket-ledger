@@ -19,9 +19,11 @@ struct LedgerIndex {
     let categoryAncestorsByID: [UUID: [UUID]]
     let sortedTransactions: [LedgerTransaction]
     let balancesByAccountID: [UUID: Int64]
+    let valuationData: FinanceData
     let expenseTotalsByMonthCategoryCurrency: [MonthCategoryCurrencyKey: Int64]
 
     init(data: FinanceData, calendar: Calendar = .current) {
+        valuationData = data
         let accountsByID = Dictionary(uniqueKeysWithValues: data.accounts.map { ($0.id, $0) })
         let loansByID = Dictionary(uniqueKeysWithValues: data.loans.map { ($0.id, $0) })
         let categoriesByID = Dictionary(uniqueKeysWithValues: data.categories.map { ($0.id, $0) })
@@ -195,10 +197,14 @@ struct LedgerIndex {
         )
     }
 
+    func valuation(for account: Account) -> Money {
+        FinanceAssetTracking.valuation(account: account, recordedBalance: balance(for: account), data: valuationData)
+    }
+
     func availableBalance(for currency: LedgerCurrency) -> Money {
         let total = activeAccounts
             .filter { $0.currency == currency && $0.type != .loan && $0.includeInTotals }
-            .reduce(Int64.zero) { $0 + (balancesByAccountID[$1.id] ?? $1.openingBalance.minorUnits) }
+            .reduce(Int64.zero) { $0 + valuation(for: $1).minorUnits }
         return Money(currency: currency, minorUnits: total)
     }
 

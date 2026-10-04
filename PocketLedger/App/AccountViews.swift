@@ -174,110 +174,131 @@ struct AccountDetailView: View {
     }
 
     private func accountContent(_ account: Account, snapshot: AccountDetailSnapshot) -> some View {
-        return ScrollView(showsIndicators: false) {
-            PocketGlassContainer(spacing: 14) {
-                VStack(alignment: .leading, spacing: 18) {
-                    balanceCard(account)
-                    totalsScopeCard(account)
+        let hidesGenericActivity = account.type == .physicalAsset && account.tracking?.metalPurchases.isEmpty == false
+        return List {
+            Section {
+                PocketGlassContainer(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        balanceCard(account)
+                        totalsScopeCard(account)
 
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 10) {
-                            accountActivityMetrics(account: account, snapshot: snapshot)
-                        }
-                        VStack(spacing: 10) {
-                            accountActivityMetrics(account: account, snapshot: snapshot)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Account activity")
-                                .font(.title3.weight(.bold))
-                            Spacer()
-                            Text("All time")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(PocketLedgerTheme.textTertiary)
-                        }
-
-                        if snapshot.transactions.isEmpty {
-                            VStack(spacing: 8) {
-                                Image(systemName: "tray")
-                                    .font(.title2)
-                                    .foregroundStyle(PocketLedgerTheme.textTertiary)
-                                Text("No transactions for this account")
-                                    .font(.headline)
-                                Text("Transactions that use this account will appear here.")
-                                    .font(.subheadline)
-                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-                                    .multilineTextAlignment(.center)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 28)
-                        } else {
-                            LazyVStack(spacing: 0) {
-                                ForEach(snapshot.pageTransactions) { transaction in
-                                    TransactionRow(
-                                        transaction: transaction,
-                                        store: store,
-                                        onEdit: { editingTransaction = transaction },
-                                        onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-                                        onDelete: {
-                                            if store.deleteTransaction(id: transaction.id) {
-                                                deletedTransactionsForUndo.append(transaction)
-                                            } else {
-                                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
-                                            }
-                                        },
-                                        onSaveTemplate: { transactionToTemplate = transaction },
-                                        allowsActions: true,
-                                        usesScrollSwipeActions: true,
-                                        swipeActionHorizontalInset: 14,
-                                        accountContext: account
-                                    )
-                                    Divider().overlay(PocketLedgerTheme.divider)
+                        if !hidesGenericActivity {
+                            ViewThatFits(in: .horizontal) {
+                                HStack(spacing: 10) {
+                                    accountActivityMetrics(account: account, snapshot: snapshot)
                                 }
-                            }
-                            .padding(.horizontal, 14)
-                            .pocketGroupedSurface(cornerRadius: 18)
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 18)
-                                    .stroke(PocketLedgerTheme.divider, lineWidth: 1)
-                            }
-
-                            if snapshot.pageCount > 1 {
-                                HStack(spacing: 16) {
-                                    Button {
-                                        transactionPage = max(0, snapshot.displayedPage - 1)
-                                    } label: {
-                                        Label("Previous", systemImage: "chevron.left")
-                                    }
-                                    .disabled(snapshot.displayedPage == 0)
-
-                                    Text("Page \(snapshot.displayedPage + 1) of \(snapshot.pageCount)")
-                                        .font(.caption.weight(.semibold).monospacedDigit())
-                                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-
-                                    Button {
-                                        transactionPage = min(snapshot.pageCount - 1, snapshot.displayedPage + 1)
-                                    } label: {
-                                        Label("Next", systemImage: "chevron.right")
-                                            .labelStyle(.titleAndIcon)
-                                    }
-                                    .disabled(snapshot.displayedPage == snapshot.pageCount - 1)
+                                VStack(spacing: 10) {
+                                    accountActivityMetrics(account: account, snapshot: snapshot)
                                 }
-                                .font(.caption.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 4)
                             }
                         }
                     }
                 }
+                .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 12)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
-            .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
-            .padding(.top, 12)
-            .padding(.bottom, 24)
+            .listSectionSeparator(.hidden)
+
+            AssetTrackingSection(store: store, account: account, areBalancesRevealed: areBalancesRevealed)
+
+            if !hidesGenericActivity {
+                Section {
+                    if snapshot.transactions.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "tray")
+                                .font(.title2)
+                                .foregroundStyle(PocketLedgerTheme.textTertiary)
+                            Text("No transactions for this account")
+                                .font(.headline)
+                            Text("Transactions that use this account will appear here.")
+                                .font(.subheadline)
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 28)
+                        .listRowInsets(
+                            EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
+                        )
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    } else {
+                        ForEach(Array(snapshot.pageTransactions.enumerated()), id: \.element.id) { entry in
+                            let transaction = entry.element
+                            TransactionRow(
+                                transaction: transaction,
+                                store: store,
+                                onEdit: { editingTransaction = transaction },
+                                onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
+                                onDelete: {
+                                    if store.deleteTransaction(id: transaction.id) {
+                                        deletedTransactionsForUndo.append(transaction)
+                                    } else {
+                                        transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
+                                    }
+                                },
+                                onSaveTemplate: { transactionToTemplate = transaction },
+                                allowsActions: true,
+                                accountContext: account
+                            )
+                            .pocketGroupedListRow(
+                                index: entry.offset,
+                                count: snapshot.pageTransactions.count
+                            )
+                        }
+
+                        if snapshot.pageCount > 1 {
+                            HStack(spacing: 16) {
+                                Button {
+                                    transactionPage = max(0, snapshot.displayedPage - 1)
+                                } label: {
+                                    Label("Previous", systemImage: "chevron.left")
+                                }
+                                .disabled(snapshot.displayedPage == 0)
+
+                                Text("Page \(snapshot.displayedPage + 1) of \(snapshot.pageCount)")
+                                    .font(.caption.weight(.semibold).monospacedDigit())
+                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+
+                                Button {
+                                    transactionPage = min(snapshot.pageCount - 1, snapshot.displayedPage + 1)
+                                } label: {
+                                    Label("Next", systemImage: "chevron.right")
+                                        .labelStyle(.titleAndIcon)
+                                }
+                                .disabled(snapshot.displayedPage == snapshot.pageCount - 1)
+                            }
+                            .font(.caption.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
+                            .listRowInsets(
+                                EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
+                            )
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Account activity")
+                            .font(.title3.weight(.bold))
+                        Spacer()
+                        Text("All time")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(PocketLedgerTheme.textTertiary)
+                    }
+                    .textCase(nil)
+                }
+                .listSectionSeparator(.hidden)
+            }
         }
-        .pocketSwipeActionsContainer()
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .pocketScreen()
         .onChange(of: transactionPage) { _, _ in refreshSnapshotPage() }
     }
 
@@ -368,7 +389,7 @@ struct AccountDetailView: View {
             }
 
             ProtectedAmountText(
-                value: store.balance(for: account).formatted,
+                value: store.valuation(for: account).formatted,
                 isRevealed: areBalancesRevealed
             )
                 .font(.largeTitle.weight(.bold).monospacedDigit())

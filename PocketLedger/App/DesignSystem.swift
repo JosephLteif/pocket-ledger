@@ -604,6 +604,30 @@ extension View {
             .preferredColorScheme(PocketLedgerTheme.appearanceMode.preferredColorScheme)
     }
 
+    func pocketGroupedListRow(
+        index: Int,
+        count: Int,
+        horizontalInset: CGFloat = PocketLedgerTheme.screenHorizontalPadding * 2
+    ) -> some View {
+        self
+            .listRowInsets(EdgeInsets(top: 0, leading: horizontalInset, bottom: 0, trailing: horizontalInset))
+            .listRowBackground(ledgerGroupedRowBackground(isFirst: index == 0, isLast: index == count - 1))
+            .listRowSeparatorTint(PocketLedgerTheme.divider)
+            .listRowSeparator(index == count - 1 ? .hidden : .visible, edges: .bottom)
+    }
+
+    func errorMessageAlert(title: LocalizedStringKey, message: Binding<String?>) -> some View {
+        self
+            .alert(title, isPresented: Binding(
+                get: { message.wrappedValue != nil },
+                set: { if !$0 { message.wrappedValue = nil } }
+            )) {
+                Button("OK", role: .cancel) { message.wrappedValue = nil }
+            } message: {
+                Text(message.wrappedValue ?? "")
+            }
+    }
+
     func pocketListSurface() -> some View {
         self
             .scrollContentBackground(.hidden)

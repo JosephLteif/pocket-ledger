@@ -889,6 +889,44 @@ final class FinanceModelTests: XCTestCase {
         XCTAssertEqual(try LedgerBackupCodec.decodeBundle(encoded).data, ledger)
     }
 
+    func testImportedMetalHoldingsRetainValueAndGainsAfterSale() throws {
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let asset = Account(name: "Gold", type: .physicalAsset, currency: .usd, openingBalance: Money(currency: .usd, minorUnits: 0))
+        let cash = Account(name: "Cash", type: .cash, currency: .usd, openingBalance: Money(currency: .usd, minorUnits: 0))
+        let purchase = MetalPurchase(
+            metal: .gold, description: "Imported gold", date: date,
+            quantity: 2, weightPerItem: 10, unit: .grams, purity: Decimal(string: "0.75")!,
+            totalCost: Money(currency: .usd, minorUnits: 100_000)
+        )
+        var ledger = try FinanceAssetTracking.addPurchase(
+            in: FinanceData(accounts: [asset, cash], categories: [], transactions: []),
+            accountID: asset.id, purchase: purchase, fundingAccountID: nil, reconcileOpeningBalance: false
+        )
+        ledger.accounts[0].tracking?.metalPricing = [
+            MetalPriceSetting(metal: .gold, mode: .manual, manualPricePerGram: 80, asOf: date)
+        ]
+        let restored = try LedgerBackupCodec.decodeBundle(LedgerBackupCodec.encodeBundle(ledger, attachmentData: [:])).data
+        let index = LedgerIndex(data: restored)
+        XCTAssertNil(FinanceAssetTracking.validationError(in: restored))
+        XCTAssertEqual(index.balance(for: restored.accounts[0]).minorUnits, 100_000)
+        XCTAssertEqual(index.valuation(for: restored.accounts[0]).minorUnits, 120_000)
+        XCTAssertEqual(index.availableBalance(for: .usd).minorUnits, 120_000)
+
+        let sold = try FinanceAssetTracking.sell(
+            in: restored, accountID: asset.id, purchaseID: purchase.id, weightGrams: 5,
+            proceeds: Money(currency: .usd, minorUnits: 40_000), date: date, destinationAccountID: cash.id
+        )
+        let holding = try XCTUnwrap(sold.accounts[0].tracking?.metalPurchases.first)
+        XCTAssertEqual(holding.remainingWeightGrams, 15)
+        XCTAssertEqual(holding.remainingCost.minorUnits, 75_000)
+        XCTAssertEqual(holding.sales.first?.gain.minorUnits, 15_000)
+        XCTAssertEqual(LedgerIndex(data: sold).valuation(for: sold.accounts[0]).minorUnits, 90_000)
+        XCTAssertEqual(LedgerIndex(data: sold).availableBalance(for: .usd).minorUnits, 130_000)
+        XCTAssertNil(FinanceAssetTracking.validationError(in: sold))
+        let undone = try FinanceAssetTracking.undoLatest(in: sold, accountID: asset.id)
+        XCTAssertEqual(LedgerIndex(data: undone).availableBalance(for: .usd).minorUnits, 120_000)
+    }
+
     func testProtectedBackupsDecryptBeforeLedgerDecoding() throws {
         let key = SymmetricKey(size: .bits256)
         let ledger = FinanceData(accounts: [], categories: [], transactions: [])

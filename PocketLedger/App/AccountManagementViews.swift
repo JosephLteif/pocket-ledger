@@ -190,7 +190,7 @@ struct AccountsView: View {
                                 }) { currency in
                                     let currencyAccounts = typeAccounts.filter { $0.currency == currency }
                                     let total = currencyAccounts.reduce(Int64.zero) { total, account in
-                                        total + store.balance(for: account).minorUnits
+                                        total + store.valuation(for: account).minorUnits
                                     }
                                     HStack(spacing: 6) {
                                         Text(currency.rawValue)
@@ -310,7 +310,7 @@ struct AccountsView: View {
                 } label: {
                     AccountRow(
                         account: account,
-                        balance: store.balance(for: account),
+                        balance: store.valuation(for: account),
                         areBalancesRevealed: areBalancesRevealed
                     )
                         .contentShape(Rectangle())

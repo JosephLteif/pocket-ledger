@@ -4,11 +4,13 @@ import SwiftUI
 struct BudgetsView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
+    @ObservedObject private var proAccess = ProEntitlementStore.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var editingBudget: LedgerBudget?
     @State private var isPresentingEditor = false
     @State private var budgetToDelete: LedgerBudget?
     @State private var budgetSummaries: [DashboardBudgetSnapshot] = []
+    @State private var isShowingProUpgrade = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -16,6 +18,21 @@ struct BudgetsView: View {
                     Text("Keep monthly spending intentional")
                         .font(.subheadline)
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
+
+                    Text(proAccess.hasProAccess
+                         ? "\(store.data.budgets.count) budgets"
+                         : "\(store.data.budgets.count) of \(PocketLedgerTierPolicy.freeBudgetLimit) budgets")
+                        .font(.caption)
+                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+
+                    if !proAccess.hasProAccess,
+                       store.data.budgets.count >= PocketLedgerTierPolicy.freeBudgetLimit {
+                        ProUpgradePrompt(
+                            title: "Need more budgets?",
+                            detail: "Pro removes the budget limit and adds rollover planning.",
+                            feature: .budgets
+                        )
+                    }
 
                     if budgetSummaries.isEmpty {
                         VStack(spacing: 10) {
@@ -50,16 +67,29 @@ struct BudgetsView: View {
         .toolbar {
             PocketLedgerToolbar(security: security) {
                 ToolbarItem(placement: .primaryAction) {
-                    Button(action: presentNewBudget) {
-                        Image(systemName: "plus")
+                    if !proAccess.hasProAccess,
+                       store.data.budgets.count >= PocketLedgerTierPolicy.freeBudgetLimit {
+                        ProUpgradeButton(feature: .budgets) {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel("Unlock more budgets with Pro")
+                    } else {
+                        Button(action: presentNewBudget) {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel("Add budget")
                     }
-                    .accessibilityLabel("Add budget")
                     .accessibilityHint("Creates a new monthly budget")
                 }
             }
         }
         .sheet(isPresented: $isPresentingEditor, onDismiss: { editingBudget = nil }) {
             BudgetEditor(store: store, budget: editingBudget)
+        }
+        .background {
+            Color.clear.sheet(isPresented: $isShowingProUpgrade) {
+                ProUpgradeView(access: proAccess)
+            }
         }
         .onAppear(perform: refreshBudgetSummaries)
         .onChange(of: store.ledgerRevision) { _, _ in
@@ -151,6 +181,14 @@ struct BudgetsView: View {
     }
 
     private func presentNewBudget() {
+        guard PocketLedgerTierPolicy.canCreateBudget(
+            count: store.data.budgets.count,
+            hasPro: proAccess.hasProAccess
+        ) else {
+            proAccess.requestUpgrade(for: .budgets)
+            isShowingProUpgrade = true
+            return
+        }
         editingBudget = nil
         isPresentingEditor = true
     }
@@ -166,6 +204,7 @@ struct BudgetsView: View {
 @MainActor
 private struct BudgetEditor: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject private var proAccess = ProEntitlementStore.shared
     @Environment(\.dismiss) private var dismiss
     let budget: LedgerBudget?
     @State private var categoryID: UUID?
@@ -175,6 +214,7 @@ private struct BudgetEditor: View {
     @State private var errorMessage: String?
     @State private var isSelectingCategory = false
     @State private var isConfirmingDiscard = false
+    @State private var isShowingProUpgrade = false
 
     init(store: LedgerStore, budget: LedgerBudget?) {
         _store = ObservedObject(wrappedValue: store)
@@ -215,6 +255,14 @@ private struct BudgetEditor: View {
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                     }
                     Toggle("Rollover unused amount", isOn: $rollover)
+                        .disabled(!proAccess.hasProAccess && !rollover)
+                    if !proAccess.hasProAccess && !rollover {
+                        ProUpgradePrompt(
+                            title: "Budget rollover",
+                            detail: "Carry unused amounts forward with Pro.",
+                            feature: .budgetRollover
+                        )
+                    }
                 }
             }
             .pocketListSurface()
@@ -237,6 +285,11 @@ private struct BudgetEditor: View {
             .confirmationDialog("Discard budget changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
                 Button("Discard changes", role: .destructive) { dismiss() }
                 Button("Keep editing", role: .cancel) {}
+            }
+            .background {
+                Color.clear.sheet(isPresented: $isShowingProUpgrade) {
+                    ProUpgradeView(access: proAccess)
+                }
             }
         }
     }
@@ -287,6 +340,9 @@ private struct BudgetEditor: View {
         )
         if saved {
             dismiss()
+        } else if let feature = store.proAccessRequired {
+            proAccess.requestUpgrade(for: feature)
+            isShowingProUpgrade = true
         } else {
             errorMessage = store.lastActionStatus ?? "The budget could not be saved."
         }

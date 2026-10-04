@@ -22,6 +22,7 @@ private enum ScheduledEditorRoute: Identifiable {
 @MainActor
 struct ScheduledTransactionsView: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject private var proAccess = ProEntitlementStore.shared
 
     @State private var editorRoute: ScheduledEditorRoute?
     @State private var scheduleToDelete: ScheduledTransaction?
@@ -30,6 +31,7 @@ struct ScheduledTransactionsView: View {
     @State private var recordStatus: String?
     @State private var recordUndoReceipt: ScheduleRecordUndoReceipt?
     @State private var isRequestingReminderPermission = false
+    @State private var isShowingProUpgrade = false
     @AppStorage(NotificationService.globalReminderKey)
     private var globalReminderRawValue = ScheduledReminderTiming.oneDayBefore.rawValue
 
@@ -46,6 +48,25 @@ struct ScheduledTransactionsView: View {
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
+
+            Text(proAccess.hasProAccess
+                 ? "\(enabledScheduleCount) enabled schedules"
+                 : "\(enabledScheduleCount) of \(PocketLedgerTierPolicy.freeEnabledScheduleLimit) enabled schedules")
+                .font(.caption)
+                .foregroundStyle(PocketLedgerTheme.textTertiary)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+            if !proAccess.hasProAccess,
+               enabledScheduleCount >= PocketLedgerTierPolicy.freeEnabledScheduleLimit {
+                ProUpgradePrompt(
+                    title: "Need more schedules?",
+                    detail: "Pro removes the limit on enabled scheduled transactions.",
+                    feature: .schedules
+                )
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
 
             globalReminderSettings
                 .listRowBackground(Color.clear)
@@ -119,6 +140,11 @@ struct ScheduledTransactionsView: View {
                 .accessibilityLabel("Add scheduled transaction")
             }
         }
+        .background {
+            Color.clear.sheet(isPresented: $isShowingProUpgrade) {
+                ProUpgradeView(access: proAccess)
+            }
+        }
         .sheet(item: $editorRoute) { route in
             TransactionEditor(
                 store: store,
@@ -156,6 +182,10 @@ struct ScheduledTransactionsView: View {
 
     private var globalReminderTiming: ScheduledReminderTiming {
         ScheduledReminderTiming(rawValue: globalReminderRawValue) ?? .oneDayBefore
+    }
+
+    private var enabledScheduleCount: Int {
+        store.data.scheduledTransactions.filter(\.isEnabled).count
     }
 
     private var globalReminderSettings: some View {
@@ -359,10 +389,7 @@ struct ScheduledTransactionsView: View {
                         schedule.isEnabled ? "Pause schedule" : "Enable schedule",
                         systemImage: schedule.isEnabled ? "pause.circle" : "play.circle"
                     ) {
-                        _ = store.setScheduledTransactionEnabled(
-                            id: schedule.id,
-                            isEnabled: !schedule.isEnabled
-                        )
+                        setScheduleEnabled(id: schedule.id, isEnabled: !schedule.isEnabled)
                     }
                     .disabled(isCompletedOneTime(schedule))
 
@@ -441,7 +468,7 @@ struct ScheduledTransactionsView: View {
                     systemImage: "play.circle",
                     tint: PocketLedgerTheme.positive
                 ) {
-                    _ = store.setScheduledTransactionEnabled(id: schedule.id, isEnabled: true)
+                    setScheduleEnabled(id: schedule.id, isEnabled: true)
                 }
             }
         }
@@ -542,5 +569,14 @@ struct ScheduledTransactionsView: View {
 
     private func presentNewSchedule() {
         editorRoute = .new
+    }
+
+    private func setScheduleEnabled(id: UUID, isEnabled: Bool) {
+        guard !store.setScheduledTransactionEnabled(id: id, isEnabled: isEnabled),
+              let feature = store.proAccessRequired else {
+            return
+        }
+        proAccess.requestUpgrade(for: feature)
+        isShowingProUpgrade = true
     }
 }

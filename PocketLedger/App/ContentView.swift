@@ -5,6 +5,7 @@ import UIKit
 @MainActor
 struct ContentView: View {
     @StateObject private var store = LedgerStore()
+    @StateObject private var proAccess = ProEntitlementStore.shared
     @StateObject private var security = AppSecurityService()
     @StateObject private var intentSearchRouter = FinanceIntentSearchRouter.shared
     @StateObject private var visualBillScanRouter = VisualBillScanRouter.shared
@@ -37,6 +38,7 @@ struct ContentView: View {
             if phase == .active {
                 security.refresh()
                 store.reload()
+                Task { await proAccess.refreshEntitlements() }
                 openPendingQuickExpense()
                 store.processDueScheduledTransactions()
                 let schedules = store.data.scheduledTransactions
@@ -71,6 +73,7 @@ struct ContentView: View {
             openPendingVisualBillScan()
         }
         .task {
+            await proAccess.refreshEntitlements()
             areBalancesRevealed = false
             openPendingIntentSearch()
             if ProcessInfo.processInfo.arguments.contains("-ImportWizardUITest") {

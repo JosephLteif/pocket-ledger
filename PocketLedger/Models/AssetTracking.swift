@@ -51,6 +51,25 @@ enum FinanceAssetTracking {
         return (try? money(amount, currency: account.currency)) ?? recordedBalance
     }
 
+    static func gainLoss(account: Account, recordedBalance: Money, data: FinanceData) -> Money? {
+        guard let tracking = account.tracking else { return nil }
+        let realized: Decimal
+        switch account.type {
+        case .physicalAsset:
+            guard !tracking.metalPurchases.isEmpty,
+                  tracking.metalPurchases.allSatisfy({ $0.remainingWeightGrams == 0 || pricePerGram(account: account, metal: $0.metal, data: data) != nil }) else { return nil }
+            realized = tracking.metalPurchases.reduce(Decimal.zero) { total, purchase in
+                total + purchase.sales.reduce(Decimal.zero) { $0 + Decimal($1.gain.minorUnits) }
+            }
+        case .investment:
+            realized = tracking.investmentEntries.filter { $0.kind == .realization }.reduce(Decimal.zero) { $0 + Decimal($1.amount.minorUnits) }
+        default:
+            return nil
+        }
+        let value = valuation(account: account, recordedBalance: recordedBalance, data: data)
+        return try? money((Decimal(value.minorUnits) - Decimal(recordedBalance.minorUnits) + realized) / Decimal(account.currency.minorUnitScale), currency: account.currency)
+    }
+
     private static func accountIndex(_ id: UUID, type: AccountType, in data: FinanceData) throws -> Int {
         guard let index = data.accounts.firstIndex(where: { $0.id == id && $0.type == type && !$0.isArchived }) else {
             throw AssetTrackingError(message: "Choose an active \(type.displayName.lowercased()) account.")

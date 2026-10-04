@@ -911,6 +911,7 @@ final class FinanceModelTests: XCTestCase {
         XCTAssertEqual(index.balance(for: restored.accounts[0]).minorUnits, 100_000)
         XCTAssertEqual(index.valuation(for: restored.accounts[0]).minorUnits, 120_000)
         XCTAssertEqual(index.availableBalance(for: .usd).minorUnits, 120_000)
+        XCTAssertEqual(FinanceAssetTracking.gainLoss(account: restored.accounts[0], recordedBalance: index.balance(for: restored.accounts[0]), data: restored)?.minorUnits, 20_000)
 
         let sold = try FinanceAssetTracking.sell(
             in: restored, accountID: asset.id, purchaseID: purchase.id, weightGrams: 5,
@@ -923,8 +924,21 @@ final class FinanceModelTests: XCTestCase {
         XCTAssertEqual(LedgerIndex(data: sold).valuation(for: sold.accounts[0]).minorUnits, 90_000)
         XCTAssertEqual(LedgerIndex(data: sold).availableBalance(for: .usd).minorUnits, 130_000)
         XCTAssertNil(FinanceAssetTracking.validationError(in: sold))
+        XCTAssertEqual(FinanceAssetTracking.gainLoss(account: sold.accounts[0], recordedBalance: LedgerIndex(data: sold).balance(for: sold.accounts[0]), data: sold)?.minorUnits, 30_000)
+        var unpriced = sold
+        unpriced.accounts[0].tracking?.metalPricing = []
+        XCTAssertNil(FinanceAssetTracking.gainLoss(account: unpriced.accounts[0], recordedBalance: LedgerIndex(data: unpriced).balance(for: unpriced.accounts[0]), data: unpriced))
         let undone = try FinanceAssetTracking.undoLatest(in: sold, accountID: asset.id)
         XCTAssertEqual(LedgerIndex(data: undone).availableBalance(for: .usd).minorUnits, 120_000)
+    }
+
+    func testInvestmentTotalGainIncludesRealizedAndUnrealizedAmounts() throws {
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let account = Account(name: "Investment", type: .investment, currency: .usd, openingBalance: Money(currency: .usd, minorUnits: 100_000))
+        let valued = try FinanceAssetTracking.updateInvestment(in: FinanceData(accounts: [account], categories: [], transactions: []), accountID: account.id, amount: Money(currency: .usd, minorUnits: 20_000), date: date, confirmRecordedBalance: true)
+        let realized = try FinanceAssetTracking.realizeInvestment(in: valued, accountID: account.id, amount: Money(currency: .usd, minorUnits: 5_000), date: date)
+        XCTAssertEqual(realized.accounts[0].tracking?.unrealizedMinorUnits, 15_000)
+        XCTAssertEqual(FinanceAssetTracking.gainLoss(account: realized.accounts[0], recordedBalance: LedgerIndex(data: realized).balance(for: realized.accounts[0]), data: realized)?.minorUnits, 20_000)
     }
 
     func testProtectedBackupsDecryptBeforeLedgerDecoding() throws {

@@ -311,6 +311,7 @@ struct AccountsView: View {
                     AccountRow(
                         account: account,
                         balance: store.valuation(for: account),
+                        gainLoss: store.gainLoss(for: account),
                         areBalancesRevealed: areBalancesRevealed
                     )
                         .contentShape(Rectangle())
@@ -597,6 +598,7 @@ func ledgerGroupedRowBackground(isFirst: Bool, isLast: Bool) -> some View {
 private struct AccountRow: View {
     let account: Account
     let balance: Money
+    let gainLoss: Money?
     let areBalancesRevealed: Bool
 
     var body: some View {
@@ -629,11 +631,27 @@ private struct AccountRow: View {
 
             Spacer()
 
-            ProtectedAmountText(value: balance.formatted, isRevealed: areBalancesRevealed)
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-                .foregroundStyle(account.type == .loan || !account.includeInTotals
-                    ? PocketLedgerTheme.warning
-                    : PocketLedgerTheme.textPrimary)
+            VStack(alignment: .trailing, spacing: 6) {
+                ProtectedAmountText(value: balance.formatted, isRevealed: areBalancesRevealed)
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(account.type == .loan || !account.includeInTotals
+                        ? PocketLedgerTheme.warning
+                        : PocketLedgerTheme.textPrimary)
+                if let gainLoss {
+                    HStack(spacing: 4) {
+                        Text("Gain/loss")
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        ProtectedAmountText(value: gainLoss.minorUnits > 0 ? "+\(gainLoss.formatted)" : gainLoss.formatted, isRevealed: areBalancesRevealed)
+                            .foregroundStyle(gainLoss.minorUnits >= 0 ? PocketLedgerTheme.positive : .red)
+                            .accessibilityLabel(areBalancesRevealed ? "Total gain or loss, \(gainLoss.formatted)" : "Hidden gain or loss")
+                    }
+                    .font(.caption.weight(.semibold))
+                } else if account.type == .physicalAsset || account.type == .investment {
+                    Text("Gain/loss unavailable")
+                        .font(.caption)
+                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+                }
+            }
         }
         .frame(minHeight: 68)
     }

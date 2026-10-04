@@ -296,7 +296,10 @@ struct AccountDetailView: View {
                 .listSectionSeparator(.hidden)
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
+        .contentMargins(.horizontal, 0, for: .scrollContent)
+        .listSectionSpacing(24)
+        .textCase(nil)
         .scrollContentBackground(.hidden)
         .pocketScreen()
         .onChange(of: transactionPage) { _, _ in refreshSnapshotPage() }
@@ -395,6 +398,22 @@ struct AccountDetailView: View {
                 .font(.largeTitle.weight(.bold).monospacedDigit())
                 .monospacedDigit()
                 .lineLimit(2)
+
+            if account.type == .physicalAsset || account.type == .investment {
+                HStack {
+                    Text("Total gain/loss")
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    Spacer()
+                    if let gain = store.gainLoss(for: account) {
+                        ProtectedAmountText(value: gain.minorUnits > 0 ? "+\(gain.formatted)" : gain.formatted, isRevealed: areBalancesRevealed)
+                            .foregroundStyle(gain.minorUnits >= 0 ? PocketLedgerTheme.positive : .red)
+                    } else {
+                        Text("Not available")
+                            .foregroundStyle(PocketLedgerTheme.textTertiary)
+                    }
+                }
+                .font(.subheadline.weight(.semibold))
+            }
 
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle")

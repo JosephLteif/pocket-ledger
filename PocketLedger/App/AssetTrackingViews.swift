@@ -86,7 +86,7 @@ struct AssetTrackingSection: View {
 
     private func valueRow(_ title: String, _ value: String) -> some View {
         LabeledContent(title) {
-            Text(areBalancesRevealed ? value : "••••")
+            ProtectedAmountText(value: value, isRevealed: areBalancesRevealed)
                 .foregroundStyle(PocketLedgerTheme.textPrimary)
                 .monospacedDigit().privacySensitive()
                 .accessibilityLabel(areBalancesRevealed ? value : "Hidden value")
@@ -98,7 +98,7 @@ struct AssetTrackingSection: View {
         let purchases = account.tracking?.metalPurchases ?? []
 
         Section {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 16) {
                 if purchases.isEmpty {
                     Text("Track gold and silver by purchase, weight and purity.")
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
@@ -107,7 +107,8 @@ struct AssetTrackingSection: View {
                     valueRow("Estimated metal value", store.valuation(for: account).formatted)
                 }
                 Button("Add metal purchase") { sheet = .purchase }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.bordered)
+                    .tint(PocketLedgerTheme.accent)
                     .disabled(!areBalancesRevealed || account.isArchived)
                 if !areBalancesRevealed {
                     Text("Reveal balances to view or update holdings.")
@@ -119,6 +120,8 @@ struct AssetTrackingSection: View {
             .pocketGroupedListRow(index: 0, count: 1)
         } header: { Text("Metals") } footer: {
             Text("Estimated metal value excludes jewelry workmanship and retail premiums. Missing prices use purchase cost in totals.")
+                .font(.footnote)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
         }
         if !purchases.isEmpty {
             Section("Purchases") {
@@ -146,7 +149,7 @@ struct AssetTrackingSection: View {
             Section("Metal prices") {
                 ForEach(Array(heldMetals.enumerated()), id: \.element.id) { entry in
                     let metal = entry.element
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 10) {
                         Button("\(metal.displayName) pricing") { sheet = .pricing(metal) }
                             .buttonStyle(.plain)
                             .disabled(!areBalancesRevealed || account.isArchived)
@@ -249,7 +252,7 @@ private struct MetalPurchaseRow: View {
                     size: 36
                 )
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(purchase.description.isEmpty ? "\(purchase.metal.displayName) purchase" : purchase.description)
+                    ProtectedAmountText(value: purchase.description.isEmpty ? "\(purchase.metal.displayName) purchase" : purchase.description, isRevealed: areBalancesRevealed)
                         .font(.headline)
                         .lineLimit(1)
                     Text("\(purchase.metal.displayName) · \(purchase.date.formatted(date: .abbreviated, time: .omitted))")
@@ -257,22 +260,18 @@ private struct MetalPurchaseRow: View {
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(PocketLedgerTheme.textTertiary)
-                    .accessibilityHidden(true)
             }
 
             HStack(alignment: .top, spacing: 12) {
                 valueMetric(
                     title: "Current value",
-                    value: valuation.map { protected($0.formatted) } ?? "Price needed",
+                    value: valuation?.formatted ?? "Price needed",
                     isProtected: valuation != nil
                 )
                 Spacer(minLength: 8)
                 valueMetric(
                     title: purchase.sales.isEmpty ? "Purchase cost" : "Cost remaining",
-                    value: protected(purchase.remainingCost.formatted),
+                    value: purchase.remainingCost.formatted,
                     trailing: true
                 )
             }
@@ -280,15 +279,13 @@ private struct MetalPurchaseRow: View {
             HStack(spacing: 6) {
                 Image(systemName: "scalemass")
                     .accessibilityHidden(true)
-                Text(areBalancesRevealed
-                     ? "\(assetNumber(purchase.remainingQuantity)) of \(assetNumber(purchase.quantity)) remaining · \(assetNumber(purchase.remainingWeightGrams)) g"
-                     : "••••")
+                ProtectedAmountText(value: "\(assetNumber(purchase.remainingQuantity)) of \(assetNumber(purchase.quantity)) remaining · \(assetNumber(purchase.remainingWeightGrams)) g", isRevealed: areBalancesRevealed)
                     .accessibilityLabel(areBalancesRevealed
                         ? "\(assetNumber(purchase.remainingQuantity)) of \(assetNumber(purchase.quantity)) remaining, \(assetNumber(purchase.remainingWeightGrams)) grams"
                         : "Hidden holding quantities")
                 Spacer(minLength: 0)
                 if let gain {
-                    Text(areBalancesRevealed ? signedMetalGain(gain) : "••••")
+                    ProtectedAmountText(value: signedMetalGain(gain), isRevealed: areBalancesRevealed)
                         .fontWeight(.semibold)
                         .foregroundStyle(gain.minorUnits >= 0 ? PocketLedgerTheme.positive : .red)
                         .accessibilityLabel(areBalancesRevealed ? signedMetalGain(gain) : "Hidden gain or loss")
@@ -316,7 +313,7 @@ private struct MetalPurchaseRow: View {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
-            Text(value)
+            ProtectedAmountText(value: value, isRevealed: areBalancesRevealed || !isProtected)
                 .font(.subheadline.weight(.semibold).monospacedDigit())
                 .lineLimit(2)
                 .privacySensitive()
@@ -325,9 +322,6 @@ private struct MetalPurchaseRow: View {
         .frame(maxWidth: .infinity, alignment: trailing ? .trailing : .leading)
     }
 
-    private func protected(_ value: String) -> String {
-        areBalancesRevealed ? value : "••••"
-    }
 }
 
 @MainActor
@@ -418,7 +412,7 @@ private struct MetalPurchaseDetailView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     LabeledContent("Metal", value: purchase.metal.displayName)
                     if !purchase.description.isEmpty {
-                        LabeledContent("Description", value: purchase.description)
+                        protectedRow("Description", purchase.description)
                     }
                     LabeledContent("Purchase date", value: purchase.date.formatted(date: .long, time: .omitted))
                     protectedRow("Quantity purchased", assetNumber(purchase.quantity))
@@ -456,20 +450,20 @@ private struct MetalPurchaseDetailView: View {
                                 HStack {
                                     Text(sale.date.formatted(date: .abbreviated, time: .omitted))
                                     Spacer()
-                                    Text(sensitive(sale.proceeds.formatted))
+                                    ProtectedAmountText(value: sale.proceeds.formatted, isRevealed: areBalancesRevealed)
                                         .fontWeight(.semibold)
                                         .monospacedDigit()
                                         .privacySensitive()
                                         .accessibilityLabel(areBalancesRevealed ? sale.proceeds.formatted : "Hidden value")
                                 }
                                 HStack {
-                                    Text(sensitive("\(assetNumber(sale.weightGrams)) g sold"))
+                                    ProtectedAmountText(value: "\(assetNumber(sale.weightGrams)) g sold", isRevealed: areBalancesRevealed)
                                         .privacySensitive()
                                         .accessibilityLabel(areBalancesRevealed
                                             ? "\(assetNumber(sale.weightGrams)) grams sold"
                                             : "Hidden sale weight")
                                     Spacer()
-                                    Text("Realized \(sensitive(signedMetalGain(sale.gain)))")
+                                    ProtectedAmountText(value: "Realized \(signedMetalGain(sale.gain))", isRevealed: areBalancesRevealed)
                                         .privacySensitive()
                                         .accessibilityLabel(areBalancesRevealed
                                             ? "Realized \(signedMetalGain(sale.gain))"
@@ -509,14 +503,16 @@ private struct MetalPurchaseDetailView: View {
                 .pocketGroupedListRow(index: 0, count: 1)
             }
         }
-        .listStyle(.plain)
-        .listSectionSpacing(20)
+        .listStyle(.insetGrouped)
+        .contentMargins(.horizontal, 0, for: .scrollContent)
+        .listSectionSpacing(24)
+        .textCase(nil)
         .scrollContentBackground(.hidden)
     }
 
     private func protectedRow(_ title: String, _ value: String) -> some View {
         LabeledContent(title) {
-            Text(sensitive(value))
+            ProtectedAmountText(value: value, isRevealed: areBalancesRevealed)
                 .foregroundStyle(PocketLedgerTheme.textPrimary)
                 .monospacedDigit()
                 .privacySensitive()
@@ -525,9 +521,6 @@ private struct MetalPurchaseDetailView: View {
         .foregroundStyle(PocketLedgerTheme.textSecondary)
     }
 
-    private func sensitive(_ value: String) -> String {
-        areBalancesRevealed ? value : "••••"
-    }
 }
 
 private func metalPurchaseGain(value: Money, cost: Money) -> Money? {

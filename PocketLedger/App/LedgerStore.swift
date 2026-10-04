@@ -1585,6 +1585,10 @@ final class LedgerStore: ObservableObject {
 
     func valuation(for account: Account) -> Money { ledgerIndex.valuation(for: account) }
 
+    func gainLoss(for account: Account) -> Money? {
+        FinanceAssetTracking.gainLoss(account: account, recordedBalance: balance(for: account), data: data)
+    }
+
     func metalPricePerGram(account: Account, metal: PreciousMetal) -> Decimal? {
         FinanceAssetTracking.pricePerGram(account: account, metal: metal, data: data)
     }
@@ -1997,6 +2001,8 @@ final class LedgerStore: ObservableObject {
             || data.categories != updated.categories
             || data.transactions != updated.transactions
             || data.loans != updated.loans
+            || data.metalQuotes != updated.metalQuotes
+            || data.exchangeRates != updated.exchangeRates
         data = updated
         if indexInputsChanged {
             ledgerIndex = LedgerIndex(data: updated)

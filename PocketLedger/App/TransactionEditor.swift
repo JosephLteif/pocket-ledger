@@ -195,6 +195,7 @@ struct TransactionEditor: View {
     private static let lastCategoryKey = "pocketLedger.lastExpenseCategory"
 
     @ObservedObject var store: LedgerStore
+    @ObservedObject private var proAccess = ProEntitlementStore.shared
     @Environment(\.dismiss) private var dismiss
     @State private var note = ""
     @State private var templateName = ""
@@ -227,6 +228,7 @@ struct TransactionEditor: View {
     @State private var attachmentReplacements: [UUID: PendingAttachmentReplacement] = [:]
     @State private var originalEditorSnapshot: TransactionEditorSnapshot?
     @State private var isShowingDiscardConfirmation = false
+    @State private var isShowingProUpgrade = false
     @State private var errorMessage: String?
     @State private var isShowingMoreDetails = false
     @State private var saveFeedbackTrigger = 0
@@ -583,6 +585,11 @@ struct TransactionEditor: View {
                     selectedCategoryID: categorySelectionBinding,
                     includeUncategorized: true
                 )
+            }
+            .background {
+                Color.clear.sheet(isPresented: $isShowingProUpgrade) {
+                    ProUpgradeView(access: proAccess)
+                }
             }
             .fileImporter(
                 isPresented: $isShowingAttachmentImporter,
@@ -1931,7 +1938,12 @@ struct TransactionEditor: View {
                 ? store.updateScheduledTransaction(scheduledTransaction)
                 : store.addScheduledTransaction(scheduledTransaction)
             guard saved else {
-                errorMessage = store.lastActionStatus ?? "The schedule could not be saved."
+                if let feature = store.proAccessRequired {
+                    proAccess.requestUpgrade(for: feature)
+                    isShowingProUpgrade = true
+                } else {
+                    errorMessage = store.lastActionStatus ?? "The schedule could not be saved."
+                }
                 return
             }
         } else {

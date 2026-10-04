@@ -57,14 +57,20 @@ final class LedgerStore: ObservableObject {
 
     @Published private(set) var data: FinanceData
     @Published private(set) var lastActionStatus: String?
+    @Published private(set) var proAccessRequired: ProFeature?
     @Published private(set) var ledgerRevision = 0
     @Published private(set) var metalPriceFailures: Set<PreciousMetal> = []
 
     private let storage: FinanceStorage
+    private let hasProAccess: () -> Bool
     private(set) var ledgerIndex: LedgerIndex
 
-    init(storage: FinanceStorage = FinanceStorage(context: "main-app")) {
+    init(
+        storage: FinanceStorage = FinanceStorage(context: "main-app"),
+        hasProAccess: @escaping () -> Bool = { ProEntitlementStore.shared.hasProAccess }
+    ) {
         self.storage = storage
+        self.hasProAccess = hasProAccess
         let loadedData = storage.load()
         data = loadedData
         ledgerIndex = LedgerIndex(data: loadedData)
@@ -210,6 +216,13 @@ final class LedgerStore: ObservableObject {
 
     var activeAccounts: [Account] {
         ledgerIndex.activeAccounts
+    }
+
+    private func denyForPro(_ status: String, feature: ProFeature) -> Bool {
+        lastActionStatus = status
+        proAccessRequired = feature
+        ProEntitlementStore.shared.requestUpgrade(for: feature)
+        return false
     }
 
     var activeCategories: [LedgerCategory] {
@@ -440,7 +453,17 @@ final class LedgerStore: ObservableObject {
 
     @discardableResult
     func addScheduledTransaction(_ scheduledTransaction: ScheduledTransaction) -> Bool {
+        proAccessRequired = nil
         guard validate(scheduledTransaction.transactionTemplate) else { return false }
+        if scheduledTransaction.isEnabled,
+           !PocketLedgerTierPolicy.canActivateSchedule(
+            isEnabled: scheduledTransaction.isEnabled,
+            isAlreadyEnabled: false,
+            enabledCount: data.scheduledTransactions.filter(\.isEnabled).count,
+            hasPro: hasProAccess()
+           ) {
+            return denyForPro("Free includes up to ten enabled schedules.", feature: .schedules)
+        }
         var updated = data
         updated.scheduledTransactions.append(scheduledTransaction)
 
@@ -454,9 +477,19 @@ final class LedgerStore: ObservableObject {
 
     @discardableResult
     func updateScheduledTransaction(_ scheduledTransaction: ScheduledTransaction) -> Bool {
+        proAccessRequired = nil
         guard let index = data.scheduledTransactions.firstIndex(where: { $0.id == scheduledTransaction.id }) else {
             lastActionStatus = "Scheduled transaction not found"
             return false
+        }
+        if scheduledTransaction.isEnabled,
+           !PocketLedgerTierPolicy.canActivateSchedule(
+            isEnabled: scheduledTransaction.isEnabled,
+            isAlreadyEnabled: data.scheduledTransactions[index].isEnabled,
+            enabledCount: data.scheduledTransactions.filter(\.isEnabled).count,
+            hasPro: hasProAccess()
+           ) {
+            return denyForPro("Free includes up to ten enabled schedules.", feature: .schedules)
         }
         guard validate(scheduledTransaction.transactionTemplate, allowArchivedReferences: true) else { return false }
 
@@ -473,6 +506,7 @@ final class LedgerStore: ObservableObject {
 
     @discardableResult
     func setScheduledTransactionEnabled(id: UUID, isEnabled: Bool) -> Bool {
+        proAccessRequired = nil
         guard let index = data.scheduledTransactions.firstIndex(where: { $0.id == id }) else {
             lastActionStatus = "Scheduled transaction not found"
             return false
@@ -482,6 +516,14 @@ final class LedgerStore: ObservableObject {
         guard !(isEnabled && scheduledTransaction.frequency == .once && scheduledTransaction.lastRunDate != nil) else {
             lastActionStatus = "Completed one-time transactions cannot be re-enabled"
             return false
+        }
+        if !PocketLedgerTierPolicy.canActivateSchedule(
+            isEnabled: isEnabled,
+            isAlreadyEnabled: scheduledTransaction.isEnabled,
+            enabledCount: data.scheduledTransactions.filter(\.isEnabled).count,
+            hasPro: hasProAccess()
+        ) {
+            return denyForPro("Free includes up to ten enabled schedules.", feature: .schedules)
         }
         scheduledTransaction.isEnabled = isEnabled
         var updated = data
@@ -868,9 +910,24 @@ final class LedgerStore: ObservableObject {
 
     @discardableResult
     func addAccount(_ account: Account) -> Bool {
+        proAccessRequired = nil
         guard !account.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             lastActionStatus = "Enter an account name"
             return false
+        }
+        guard PocketLedgerTierPolicy.canCreateAccount(
+            type: account.type,
+            activeCount: data.accounts.filter { !$0.isArchived }.count,
+            hasPro: hasProAccess()
+        ) else {
+            let feature: ProFeature = PocketLedgerTierPolicy.accountTypeRequiresPro(account.type)
+                ? .accountTypes : .accounts
+            return denyForPro(
+                feature == .accountTypes
+                    ? "Pro unlocks loan, investment, and physical-asset accounts."
+                    : "Free includes up to five active accounts.",
+                feature: feature
+            )
         }
         var updated = data
         updated.accounts.append(account)
@@ -879,6 +936,7 @@ final class LedgerStore: ObservableObject {
 
     @discardableResult
     func updateAccount(_ account: Account) -> Bool {
+        proAccessRequired = nil
         guard let index = data.accounts.firstIndex(where: { $0.id == account.id }) else {
             lastActionStatus = "Account not found"
             return false
@@ -888,6 +946,27 @@ final class LedgerStore: ObservableObject {
             return false
         }
         let original = data.accounts[index]
+        if account.type != original.type,
+           PocketLedgerTierPolicy.accountTypeRequiresPro(account.type),
+           !hasProAccess() {
+            return denyForPro(
+                "Pro unlocks loan, investment, and physical-asset accounts.",
+                feature: .accountTypes
+            )
+        }
+        if original.isArchived, !account.isArchived,
+           PocketLedgerTierPolicy.accountTypeRequiresPro(account.type),
+           !hasProAccess() {
+            return denyForPro(
+                "Pro unlocks loan, investment, and physical-asset accounts.",
+                feature: .accountTypes
+            )
+        }
+        if original.isArchived, !account.isArchived,
+           !hasProAccess(),
+           data.accounts.filter({ !$0.isArchived }).count >= PocketLedgerTierPolicy.freeAccountLimit {
+            return denyForPro("Free includes up to five active accounts.", feature: .accounts)
+        }
         var accountToSave = account
         if let tracking = original.tracking {
             guard account.currency == original.currency, account.type == original.type,
@@ -978,6 +1057,7 @@ final class LedgerStore: ObservableObject {
 
     @discardableResult
     func setAccountArchived(accountID: UUID, isArchived: Bool) -> Bool {
+        proAccessRequired = nil
         guard let index = data.accounts.firstIndex(where: { $0.id == accountID }) else {
             lastActionStatus = "Account not found"
             return false
@@ -985,6 +1065,19 @@ final class LedgerStore: ObservableObject {
         if isManagedLegacyLoanAccount(accountID), !isArchived {
             lastActionStatus = "This archived account is retained as the history for managed loans."
             return false
+        }
+        if !isArchived,
+           PocketLedgerTierPolicy.accountTypeRequiresPro(data.accounts[index].type),
+           !hasProAccess() {
+            return denyForPro(
+                "Pro unlocks loan, investment, and physical-asset accounts.",
+                feature: .accountTypes
+            )
+        }
+        if !isArchived,
+           !hasProAccess(),
+           data.accounts.filter({ !$0.isArchived }).count >= PocketLedgerTierPolicy.freeAccountLimit {
+            return denyForPro("Free includes up to five active accounts.", feature: .accounts)
         }
         var updated = data
         updated.accounts[index].isArchived = isArchived
@@ -1123,11 +1216,28 @@ final class LedgerStore: ObservableObject {
 
     @discardableResult
     func upsertBudget(_ budget: LedgerBudget) -> Bool {
+        proAccessRequired = nil
         guard budget.monthlyLimit.minorUnits > 0,
               data.categories.contains(where: { $0.id == budget.categoryID }),
               budget.monthlyLimit.currency == budget.currency else {
             lastActionStatus = "Enter a valid budget"
             return false
+        }
+
+        let existing = data.budgets.first(where: { $0.id == budget.id })
+        if existing == nil,
+           !PocketLedgerTierPolicy.canCreateBudget(
+            count: data.budgets.count,
+            hasPro: hasProAccess()
+           ) {
+            return denyForPro("Free includes up to five budgets.", feature: .budgets)
+        }
+        if budget.rollover,
+           !PocketLedgerTierPolicy.canUseRollover(
+            isAlreadyEnabled: existing?.rollover == true,
+            hasPro: hasProAccess()
+           ) {
+            return denyForPro("Budget rollover is included with Pro.", feature: .budgetRollover)
         }
 
         var updated = data

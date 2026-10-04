@@ -5,6 +5,7 @@ struct SetupWizardView: View {
     static let completedKey = "pocketLedger.setupCompleted"
 
     @ObservedObject var store: LedgerStore
+    @ObservedObject private var proAccess = ProEntitlementStore.shared
     @Environment(\.dismiss) private var dismiss
     @AppStorage(Self.completedKey) private var setupCompleted = false
     @State private var accountName = "Cash"
@@ -30,9 +31,18 @@ struct SetupWizardView: View {
                 Section("Start fresh") {
                     TextField("Account name", text: $accountName)
                     Picker("Type", selection: $accountType) {
-                        ForEach(AccountType.allCases) { type in
+                        ForEach(AccountType.allCases.filter {
+                            proAccess.hasProAccess || !PocketLedgerTierPolicy.accountTypeRequiresPro($0)
+                        }) { type in
                             Label(type.displayName, systemImage: type.systemImage).tag(type)
                         }
+                    }
+                    if !proAccess.hasProAccess {
+                        ProUpgradePrompt(
+                            title: "Advanced account types",
+                            detail: "Pro adds loan, investment, and physical-asset accounts.",
+                            feature: .accountTypes
+                        )
                     }
                     CurrencyInputField("Opening balance", text: $openingBalance, currency: $currency)
                 }

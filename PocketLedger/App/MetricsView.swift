@@ -47,6 +47,7 @@ private struct CategoryMetricsDetailSnapshot {
         )
     }
 
+    @MainActor
     static func make(
         index: LedgerIndex,
         categoryID: UUID?,
@@ -59,6 +60,13 @@ private struct CategoryMetricsDetailSnapshot {
         let monthStarts = (0..<7).compactMap {
             calendar.date(byAdding: .month, value: $0 - 6, to: currentMonth)
                 .flatMap { calendar.dateInterval(of: .month, for: $0)?.start }
+        }.filter {
+            ProEntitlementStore.shared.hasProAccess
+                || PocketLedgerTierPolicy.canViewHistoricalPeriod(
+                    start: $0,
+                    isCalendarYear: false,
+                    calendar: calendar
+                )
         }
         guard let firstMonth = monthStarts.first,
               let lastMonth = monthStarts.last,
@@ -128,6 +136,7 @@ private struct CategoryMetricsDetailSnapshot {
 struct MetricsView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
+    @ObservedObject private var proAccess = ProEntitlementStore.shared
     let onAddAction: (AddAction) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
@@ -190,13 +199,20 @@ struct MetricsView: View {
         .toolbar {
             PocketLedgerToolbar(security: security) {
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        isExportOptionsPresented = true
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
+                    if proAccess.hasProAccess {
+                        Button {
+                            isExportOptionsPresented = true
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        .accessibilityLabel("Share metrics PDF report")
+                        .accessibilityHint("Creates a shareable PDF report")
+                    } else {
+                        ProUpgradeButton(feature: .pdfReports) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        .accessibilityLabel("Unlock PDF reports with Pro")
                     }
-                    .accessibilityLabel("Share metrics PDF report")
-                    .accessibilityHint("Creates a shareable PDF report")
                 }
             }
         }
@@ -208,6 +224,15 @@ struct MetricsView: View {
         .onChange(of: customEnd) { _, _ in refreshSnapshot() }
         .onChange(of: selectedCategoryID) { _, _ in refreshSnapshot() }
         .onChange(of: store.ledgerRevision) { _, _ in refreshSnapshot() }
+        .onChange(of: proAccess.hasProAccess) { _, hasProAccess in
+            guard !hasProAccess else { return }
+            if period == .custom {
+                period = .month
+            }
+            if !canViewSelectedPeriodAsFree {
+                anchorDate = .now
+            }
+        }
         .sheet(item: $reportToShare) { report in
             MetricsReportShareSheet(url: report.url)
         }
@@ -255,7 +280,7 @@ struct MetricsView: View {
         VStack(spacing: 8) {
             HStack(spacing: 10) {
                 Picker("Period", selection: $period) {
-                    ForEach(MetricsPeriod.allCases) { option in
+                    ForEach(MetricsPeriod.allCases.filter { proAccess.hasProAccess || $0 != .custom }) { option in
                         Text(option.rawValue).tag(option)
                     }
                 }
@@ -271,6 +296,15 @@ struct MetricsView: View {
                 .tint(PocketLedgerTheme.textPrimary)
                 .padding(.horizontal, 8)
                 .pocketGlassSurface(cornerRadius: 10, tint: PocketLedgerTheme.surfaceElevated.opacity(0.22))
+            }
+
+            if !proAccess.hasProAccess {
+                ProUpgradeButton(feature: .historicalMetrics) {
+                    Label("Custom date ranges · Pro", systemImage: "lock")
+                        .font(.footnote.weight(.semibold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
             }
 
             Button {
@@ -351,15 +385,24 @@ struct MetricsView: View {
                 DatePicker("To", selection: $customEnd, displayedComponents: .date)
             } else {
                 HStack {
-                    Button {
-                        movePeriod(by: -1)
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.headline.weight(.semibold))
-                            .frame(minWidth: 44, minHeight: 44)
+                    if proAccess.hasProAccess || canMoveBackAsFree {
+                        Button {
+                            movePeriod(by: -1)
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.headline.weight(.semibold))
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Previous period")
+                    } else {
+                        ProUpgradeButton(feature: .historicalMetrics) {
+                            Image(systemName: "chevron.left")
+                                .font(.headline.weight(.semibold))
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .accessibilityLabel("Unlock older metrics with Pro")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Previous period")
 
                     Spacer()
 
@@ -717,7 +760,31 @@ struct MetricsView: View {
 
     private func movePeriod(by value: Int) {
         let component: Calendar.Component = period == .year ? .year : .month
-        anchorDate = Calendar.current.date(byAdding: component, value: value, to: anchorDate) ?? anchorDate
+        let nextDate = Calendar.current.date(byAdding: component, value: value, to: anchorDate) ?? anchorDate
+        if !proAccess.hasProAccess,
+           !PocketLedgerTierPolicy.canViewHistoricalPeriod(
+            start: nextDate,
+            isCalendarYear: period == .year
+           ) {
+            return
+        }
+        anchorDate = nextDate
+    }
+
+    private var canMoveBackAsFree: Bool {
+        let component: Calendar.Component = period == .year ? .year : .month
+        let previousDate = Calendar.current.date(byAdding: component, value: -1, to: anchorDate) ?? anchorDate
+        return PocketLedgerTierPolicy.canViewHistoricalPeriod(
+            start: previousDate,
+            isCalendarYear: period == .year
+        )
+    }
+
+    private var canViewSelectedPeriodAsFree: Bool {
+        period != .custom && PocketLedgerTierPolicy.canViewHistoricalPeriod(
+            start: interval.start,
+            isCalendarYear: period == .year
+        )
     }
 
     private var periodTitle: String {
@@ -757,6 +824,7 @@ struct MetricsView: View {
     }
 
     private func generateReport(transactionLimit: Int?) {
+        guard proAccess.hasProAccess else { return }
         let currentSnapshot = snapshot
 
         var spendingByCurrency: [LedgerCurrency: Int64] = [:]
@@ -869,12 +937,13 @@ struct MetricsView: View {
 struct CategoryMetricsDetailView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
+    @ObservedObject private var proAccess = ProEntitlementStore.shared
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     let categoryID: UUID?
     let categoryTitle: String
     let currency: LedgerCurrency
-    let selectedInterval: DateInterval
+    @State private var selectedInterval: DateInterval
 
     @State private var anchorDate: Date
     @State private var snapshot = CategoryMetricsDetailSnapshot.empty
@@ -900,7 +969,7 @@ struct CategoryMetricsDetailView: View {
         self.categoryID = categoryID
         self.categoryTitle = categoryTitle
         self.currency = currency
-        self.selectedInterval = selectedInterval
+        _selectedInterval = State(initialValue: selectedInterval)
         _anchorDate = State(initialValue: anchorDate)
     }
 
@@ -1010,18 +1079,34 @@ struct CategoryMetricsDetailView: View {
         .onAppear(perform: refreshSnapshot)
         .onChange(of: anchorDate) { _, _ in refreshSnapshot() }
         .onChange(of: store.ledgerRevision) { _, _ in refreshSnapshot() }
+        .onChange(of: proAccess.hasProAccess) { _, hasProAccess in
+            if !hasProAccess {
+                anchorDate = .now
+                selectedInterval = Calendar.current.dateInterval(of: .month, for: .now) ?? selectedInterval
+            }
+            refreshSnapshot()
+        }
     }
     private var detailHeader: some View {
         VStack(spacing: 10) {
             HStack {
-                Button {
-                    moveMonth(by: -1)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .frame(minWidth: 44, minHeight: 44)
+                if proAccess.hasProAccess || canMoveBackAsFree {
+                    Button {
+                        moveMonth(by: -1)
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Previous month")
+                } else {
+                    ProUpgradeButton(feature: .historicalMetrics) {
+                        Image(systemName: "chevron.left")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Unlock older metrics with Pro")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Previous month")
 
                 Spacer()
 
@@ -1213,7 +1298,17 @@ struct CategoryMetricsDetailView: View {
     }
 
     private func moveMonth(by value: Int) {
-        anchorDate = Calendar.current.date(byAdding: .month, value: value, to: anchorDate) ?? anchorDate
+        let nextDate = Calendar.current.date(byAdding: .month, value: value, to: anchorDate) ?? anchorDate
+        if !proAccess.hasProAccess,
+           !PocketLedgerTierPolicy.canViewHistoricalPeriod(start: nextDate, isCalendarYear: false) {
+            return
+        }
+        anchorDate = nextDate
+    }
+
+    private var canMoveBackAsFree: Bool {
+        let previousMonth = Calendar.current.date(byAdding: .month, value: -1, to: anchorDate) ?? anchorDate
+        return PocketLedgerTierPolicy.canViewHistoricalPeriod(start: previousMonth, isCalendarYear: false)
     }
 }
 

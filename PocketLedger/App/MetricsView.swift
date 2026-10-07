@@ -136,11 +136,6 @@ private struct CategoryMetricsDetailSnapshot {
     }
 }
 
-private struct MetricsCategoryDestination: Hashable {
-    let categoryID: UUID?
-    let title: String
-}
-
 @MainActor
 struct MetricsView: View {
     @ObservedObject var store: LedgerStore
@@ -160,7 +155,6 @@ struct MetricsView: View {
     @State private var reportToShare: MetricsReportShareItem?
     @State private var reportError: String?
     @State private var snapshot = MetricsSnapshot.empty
-    @State private var categoryPath: [MetricsCategoryDestination] = []
 
     private var interval: DateInterval {
         let calendar = Calendar.current
@@ -183,7 +177,7 @@ struct MetricsView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $categoryPath) {
+        NavigationStack {
             ScrollView(showsIndicators: false) {
                 PocketGlassContainer(spacing: 14) {
                     VStack(alignment: .leading, spacing: 0) {
@@ -203,18 +197,6 @@ struct MetricsView: View {
             .pocketScreen()
             .navigationTitle("Metrics")
             .navigationBarTitleDisplayMode(.large)
-            .navigationDestination(for: MetricsCategoryDestination.self) { destination in
-                CategoryMetricsDetailView(
-                    store: store,
-                    security: security,
-                    categoryPath: $categoryPath,
-                    categoryID: destination.categoryID,
-                    categoryTitle: destination.title,
-                    currency: selectedCurrency,
-                    anchorDate: anchorDate,
-                    selectedInterval: interval
-                )
-            }
             .toolbar(.visible, for: .navigationBar)
             .toolbar {
                 PocketLedgerToolbar(security: security) {
@@ -595,9 +577,17 @@ struct MetricsView: View {
         return VStack(spacing: 0) {
             if breakdown == .category {
                 ForEach(snapshot.categories) { metric in
-                    NavigationLink(
-                        value: MetricsCategoryDestination(categoryID: metric.categoryID, title: metric.title)
-                    ) {
+                    NavigationLink {
+                        CategoryMetricsDetailView(
+                            store: store,
+                            security: security,
+                            categoryID: metric.categoryID,
+                            categoryTitle: metric.title,
+                            currency: metric.currency,
+                            anchorDate: anchorDate,
+                            selectedInterval: interval
+                        )
+                    } label: {
                         breakdownRow(
                             title: metric.title,
                             icon: categoryIcon(for: metric.categoryID),
@@ -928,9 +918,8 @@ private struct CategoryMetricsDetailView: View {
     @ObservedObject var security: AppSecurityService
     @ObservedObject private var proAccess = ProEntitlementStore.shared
 
-    @Binding private var categoryPath: [MetricsCategoryDestination]
-    let categoryID: UUID?
-    let categoryTitle: String
+    @State private var categoryID: UUID?
+    @State private var categoryTitle: String
     let currency: LedgerCurrency
     @State private var selectedInterval: DateInterval
 
@@ -946,7 +935,6 @@ private struct CategoryMetricsDetailView: View {
     init(
         store: LedgerStore,
         security: AppSecurityService,
-        categoryPath: Binding<[MetricsCategoryDestination]>,
         categoryID: UUID?,
         categoryTitle: String,
         currency: LedgerCurrency,
@@ -955,9 +943,8 @@ private struct CategoryMetricsDetailView: View {
     ) {
         self.store = store
         self.security = security
-        _categoryPath = categoryPath
-        self.categoryID = categoryID
-        self.categoryTitle = categoryTitle
+        _categoryID = State(initialValue: categoryID)
+        _categoryTitle = State(initialValue: categoryTitle)
         self.currency = currency
         _selectedInterval = State(initialValue: selectedInterval)
         _anchorDate = State(initialValue: anchorDate)
@@ -1220,9 +1207,15 @@ private struct CategoryMetricsDetailView: View {
                 VStack(spacing: 0) {
                     ForEach(snapshot.subcategories) { metric in
                         Button {
-                            categoryPath = [
-                                MetricsCategoryDestination(categoryID: metric.categoryID, title: metric.title)
-                            ]
+                            categoryID = metric.categoryID
+                            categoryTitle = metric.title
+                            snapshot = CategoryMetricsDetailSnapshot.make(
+                                index: store.ledgerIndex,
+                                categoryID: metric.categoryID,
+                                currency: currency,
+                                anchorDate: anchorDate,
+                                selectedInterval: selectedInterval
+                            )
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: store.ledgerIndex.categorySystemImage(for: metric.categoryID))

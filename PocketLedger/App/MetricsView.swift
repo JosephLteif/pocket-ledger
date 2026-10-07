@@ -923,6 +923,8 @@ private struct CategoryMetricsDetailView: View {
 
     @State private var anchorDate: Date
     @State private var snapshot = CategoryMetricsDetailSnapshot.empty
+    @State private var subcategoryToOpen: CategoryMetric?
+    @State private var isShowingSubcategoryDetail = false
     @State private var editingTransaction: LedgerTransaction?
     @State private var transactionToTemplate: LedgerTransaction?
     @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
@@ -956,7 +958,6 @@ private struct CategoryMetricsDetailView: View {
                         detailHeader
                         lineChart(snapshot)
                         detailCategoryRow(snapshot)
-                        subcategoryRows(snapshot)
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
@@ -967,6 +968,8 @@ private struct CategoryMetricsDetailView: View {
                 .listRowSeparator(.hidden)
             }
             .listSectionSeparator(.hidden)
+
+            subcategoryRows(snapshot)
 
             Section {
                 if snapshot.selectedMonthTransactions.isEmpty {
@@ -1049,6 +1052,19 @@ private struct CategoryMetricsDetailView: View {
                     store: store,
                     security: security,
                     transactionID: transactionToOpenID
+                )
+            }
+        }
+        .navigationDestination(isPresented: $isShowingSubcategoryDetail) {
+            if let subcategoryToOpen {
+                CategoryMetricsDetailView(
+                    store: store,
+                    security: security,
+                    categoryID: subcategoryToOpen.categoryID,
+                    categoryTitle: subcategoryToOpen.title,
+                    currency: currency,
+                    anchorDate: anchorDate,
+                    selectedInterval: selectedInterval
                 )
             }
         }
@@ -1196,54 +1212,40 @@ private struct CategoryMetricsDetailView: View {
     @ViewBuilder
     private func subcategoryRows(_ currentSnapshot: CategoryMetricsDetailSnapshot) -> some View {
         if !currentSnapshot.subcategories.isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
+            Section {
+                ForEach(Array(currentSnapshot.subcategories.enumerated()), id: \.element.id) { index, metric in
+                    Button {
+                        subcategoryToOpen = metric
+                        isShowingSubcategoryDetail = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: store.ledgerIndex.categorySystemImage(for: metric.categoryID))
+                                .foregroundStyle(PocketLedgerTheme.accent)
+                                .frame(width: 24)
+
+                            Text(metric.title)
+                                .font(.subheadline.weight(.medium))
+                                .lineLimit(1)
+
+                            Spacer(minLength: 8)
+
+                            Text(Money(currency: currency, minorUnits: metric.amount).formatted)
+                                .font(.subheadline.weight(.semibold).monospacedDigit())
+                        }
+                        .contentShape(Rectangle())
+                        .padding(.vertical, 13)
+                    }
+                    .buttonStyle(.plain)
+                    .pocketGroupedListRow(index: index, count: currentSnapshot.subcategories.count)
+                }
+            } header: {
                 Text("Subcategories")
                     .font(.title3.weight(.bold))
                     .padding(.top, 20)
                     .padding(.bottom, 8)
-
-                VStack(spacing: 0) {
-                    ForEach(currentSnapshot.subcategories) { metric in
-                        NavigationLink {
-                            CategoryMetricsDetailView(
-                                store: store,
-                                security: security,
-                                categoryID: metric.categoryID,
-                                categoryTitle: metric.title,
-                                currency: currency,
-                                anchorDate: anchorDate,
-                                selectedInterval: selectedInterval
-                            )
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: store.ledgerIndex.categorySystemImage(for: metric.categoryID))
-                                    .foregroundStyle(PocketLedgerTheme.accent)
-                                    .frame(width: 24)
-
-                                Text(metric.title)
-                                    .font(.subheadline.weight(.medium))
-                                    .lineLimit(1)
-
-                                Spacer(minLength: 8)
-
-                                Text(Money(currency: currency, minorUnits: metric.amount).formatted)
-                                    .font(.subheadline.weight(.semibold).monospacedDigit())
-                            }
-                            .contentShape(Rectangle())
-                            .padding(.vertical, 13)
-                        }
-                        if metric.id != currentSnapshot.subcategories.last?.id {
-                            Divider().overlay(PocketLedgerTheme.divider)
-                        }
-                    }
-                }
-                .padding(.horizontal, 14)
-                .pocketGroupedSurface(cornerRadius: 18)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18)
-                        .stroke(PocketLedgerTheme.divider, lineWidth: 1)
-                }
+                    .textCase(nil)
             }
+            .listSectionSeparator(.hidden)
         }
     }
 

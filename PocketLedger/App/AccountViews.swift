@@ -177,7 +177,8 @@ struct AccountDetailView: View {
     }
 
     private func accountContent(_ account: Account, snapshot: AccountDetailSnapshot) -> some View {
-        let hidesGenericActivity = account.type == .physicalAsset && account.tracking?.metalPurchases.isEmpty == false
+        let hidesGenericActivity = account.type == .physicalAsset
+            && (account.tracking?.metalPurchases.isEmpty == false || account.tracking?.physicalAssetSubtype == .other)
         return List {
             Section {
                 PocketGlassContainer(spacing: 14) {
@@ -394,7 +395,12 @@ struct AccountDetailView: View {
     private func balanceCard(_ account: Account) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label(account.type.displayName, systemImage: account.type.systemImage)
+                Label(
+                    account.type == .physicalAsset
+                        ? "\(account.type.displayName)\(account.tracking?.physicalAssetSubtype.map { " · \($0.displayName)" } ?? "")"
+                        : account.type.displayName,
+                    systemImage: account.type.systemImage
+                )
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
                 Spacer()

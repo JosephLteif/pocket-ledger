@@ -440,7 +440,9 @@ struct DashboardView: View {
 
     private var physicalAssetGainAccounts: [Account] {
         store.activeAccounts.filter {
-            $0.type == .physicalAsset && !($0.tracking?.metalPurchases.isEmpty ?? true)
+            $0.type == .physicalAsset
+                && ($0.tracking?.metalPurchases.isEmpty == false
+                    || ($0.tracking?.physicalAssetSubtype == .other && $0.tracking?.investmentEntries.isEmpty == false))
         }
     }
 

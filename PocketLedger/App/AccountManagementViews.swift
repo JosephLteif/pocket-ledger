@@ -614,7 +614,9 @@ private struct AccountRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(account.name)
                     .font(.subheadline.weight(.semibold))
-                Text(account.type.displayName)
+                Text(account.type == .physicalAsset
+                     ? "\(account.type.displayName)\(account.tracking?.physicalAssetSubtype.map { " · \($0.displayName)" } ?? "")"
+                     : account.type.displayName)
                     .font(.caption)
                     .foregroundStyle(PocketLedgerTheme.textTertiary)
                 if !account.includeInTotals {
@@ -667,6 +669,8 @@ struct AccountEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var type: AccountType = .cash
+    @State private var physicalAssetSubtype: PhysicalAssetSubtype?
+    private let initialPhysicalAssetSubtype: PhysicalAssetSubtype?
     @State private var currency: LedgerCurrency = .usd
     @State private var openingBalance = "0"
     @State private var includeInTotals = true
@@ -687,6 +691,10 @@ struct AccountEditor: View {
         self.account = account
         self.initialCurrency = initialCurrency
         self.onSaved = onSaved
+        let initialSubtype = account?.tracking?.physicalAssetSubtype ?? Self.inferredPhysicalAssetSubtype(for: account)
+        let selectedSubtype = account == nil ? PhysicalAssetSubtype.gold : initialSubtype
+        _physicalAssetSubtype = State(initialValue: selectedSubtype)
+        self.initialPhysicalAssetSubtype = selectedSubtype
         _name = State(initialValue: account?.name ?? "")
         _type = State(initialValue: account?.type ?? initialType)
         _currency = State(initialValue: account?.currency ?? initialCurrency ?? .usd)
@@ -704,7 +712,7 @@ struct AccountEditor: View {
         NavigationStack {
             Form {
                 Section("Account") {
-                    TextField("Name", text: $name)
+                    TextField(type == .physicalAsset && physicalAssetSubtype == .other ? "Asset name" : "Name", text: $name)
                     Picker("Type", selection: $type) {
                         ForEach(AccountType.allCases.filter {
                             ($0 != .loan || $0 == account?.type)
@@ -716,7 +724,25 @@ struct AccountEditor: View {
                                 .tag(accountType)
                         }
                     }
-                    .disabled(isManagedLegacyLoan)
+                    .disabled(isManagedLegacyLoan || account?.tracking?.hasHistory == true)
+                    if type == .physicalAsset {
+                        Picker("Subtype", selection: $physicalAssetSubtype) {
+                            Text("Choose subtype").tag(nil as PhysicalAssetSubtype?)
+                            ForEach(physicalAssetSubtypeOptions) { subtype in
+                                Text(subtype.displayName).tag(Optional(subtype))
+                            }
+                        }
+                        .disabled(account?.type == .physicalAsset && account?.tracking?.hasHistory == true)
+                        if physicalAssetSubtype == .other {
+                            Text("Name this asset and enter its starting recorded value. You can update its estimated value and record partial sales later.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else if physicalAssetSubtype?.metal != nil {
+                            Text("Track purchases by weight and purity. Current value uses market quotes when available.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     if !proAccess.hasProAccess {
                         ProUpgradePrompt(
                             title: "Advanced account types",
@@ -738,12 +764,19 @@ struct AccountEditor: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Opening balance") {
-                    CurrencyInputField("Amount", text: $openingBalance, currency: $currency)
-                        .disabled(isManagedLegacyLoan)
-                    Text("The amount is stored in the account's own currency.")
+                Section(type == .physicalAsset && physicalAssetSubtype == .other ? "Starting value" : "Opening balance") {
+                    CurrencyInputField(type == .physicalAsset && physicalAssetSubtype == .other ? "Value" : "Amount", text: $openingBalance, currency: $currency)
+                        .disabled(isManagedLegacyLoan || isOtherAssetCostLocked)
+                    Text(type == .physicalAsset && physicalAssetSubtype == .other
+                         ? "This becomes the asset's starting cost basis. Current estimates and gains or losses are tracked separately."
+                         : "The amount is stored in the account's own currency.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    if isOtherAssetCostLocked {
+                        Text("Starting value is locked after tracking begins. Update the estimated value from the asset account.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .pocketListSurface()
@@ -760,6 +793,11 @@ struct AccountEditor: View {
                     decimal: Decimal(migratedBalance.minorUnits)
                         / Decimal(newCurrency.minorUnitScale)
                 ).stringValue
+            }
+            .onChange(of: type) { _, newType in
+                if newType == .physicalAsset, physicalAssetSubtype == nil, account?.type != .physicalAsset {
+                    physicalAssetSubtype = .gold
+                }
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -804,6 +842,29 @@ struct AccountEditor: View {
         return store.isManagedLegacyLoanAccount(account.id)
     }
 
+    private var isOtherAssetCostLocked: Bool {
+        account?.type == .physicalAsset
+            && account?.tracking?.physicalAssetSubtype == .other
+            && account?.tracking?.hasHistory == true
+    }
+
+    private var physicalAssetSubtypeOptions: [PhysicalAssetSubtype] {
+        guard let initialPhysicalAssetSubtype, !PhysicalAssetSubtype.selectable.contains(initialPhysicalAssetSubtype) else {
+            return PhysicalAssetSubtype.selectable
+        }
+        return PhysicalAssetSubtype.selectable + [initialPhysicalAssetSubtype]
+    }
+
+    private static func inferredPhysicalAssetSubtype(for account: Account?) -> PhysicalAssetSubtype? {
+        guard account?.type == .physicalAsset,
+              let purchases = account?.tracking?.metalPurchases,
+              !purchases.isEmpty else { return nil }
+        let metals = Set(purchases.map(\.metal))
+        guard metals.count == 1 else { return .mixed }
+        guard let metal = metals.first else { return nil }
+        return PhysicalAssetSubtype(rawValue: metal.rawValue)
+    }
+
     private func save() {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
@@ -814,6 +875,24 @@ struct AccountEditor: View {
             errorMessage = "Enter a valid opening balance."
             return
         }
+        guard type != .physicalAsset || physicalAssetSubtype != nil
+                || (account?.type == .physicalAsset && account?.tracking?.physicalAssetSubtype == nil) else {
+            errorMessage = "Choose a physical asset subtype."
+            return
+        }
+        guard type != .physicalAsset || physicalAssetSubtype != .other || balance.minorUnits >= 0 else {
+            errorMessage = "An other asset's starting value cannot be negative."
+            return
+        }
+
+        var tracking = account?.tracking
+        if type == .physicalAsset {
+            if tracking == nil { tracking = AccountTracking() }
+            tracking?.physicalAssetSubtype = physicalAssetSubtype
+            if physicalAssetSubtype == .other { tracking?.metalPricing = [] }
+        } else {
+            tracking?.physicalAssetSubtype = nil
+        }
 
         let value = Account(
             id: account?.id ?? UUID(),
@@ -823,7 +902,7 @@ struct AccountEditor: View {
             openingBalance: balance,
             includeInTotals: includeInTotals,
             isArchived: account?.isArchived ?? false,
-            tracking: account?.tracking
+            tracking: tracking
         )
         if account?.currency != nil, account?.currency != currency, hasCurrencyImpact {
             pendingAccount = value
@@ -867,6 +946,7 @@ struct AccountEditor: View {
         let baselineBalance = account?.openingBalance ?? Money(currency: baselineCurrency, minorUnits: 0)
         return name != (account?.name ?? "")
             || type != (account?.type ?? .cash)
+            || (type == .physicalAsset && physicalAssetSubtype != initialPhysicalAssetSubtype)
             || currency != baselineCurrency
             || Money.parse(openingBalance, currency: currency) != baselineBalance.recast(to: currency)
             || includeInTotals != (account?.includeInTotals ?? true)

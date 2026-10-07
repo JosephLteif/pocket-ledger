@@ -1615,9 +1615,13 @@ final class LedgerStore: ObservableObject {
 
     func refreshMetalPrices(force: Bool = false) async {
         let metals = Set(data.accounts.filter { !$0.isArchived && $0.type == .physicalAsset }.flatMap { account in
-            (account.tracking?.metalPurchases ?? []).filter { purchase in
-                purchase.remainingWeightGrams > 0 && account.tracking?.metalPricing.first(where: { $0.metal == purchase.metal })?.mode != .manual
-            }.map(\.metal)
+            let selectedMetal = account.tracking?.physicalAssetSubtype?.metal.map { [$0] } ?? []
+            let heldMetals = (account.tracking?.metalPurchases ?? [])
+                .filter { $0.remainingWeightGrams > 0 }
+                .map(\.metal)
+            return (selectedMetal + heldMetals).filter { metal in
+                account.tracking?.metalPricing.first(where: { $0.metal == metal })?.mode != .manual
+            }
         })
         for metal in metals {
             do {
@@ -1648,6 +1652,11 @@ final class LedgerStore: ObservableObject {
     @discardableResult
     func sellMetal(accountID: UUID, purchaseID: UUID, weightGrams: Decimal, proceeds: Money, date: Date, destinationAccountID: UUID) -> Bool {
         saveAssetActivity({ try FinanceAssetTracking.sell(in: data, accountID: accountID, purchaseID: purchaseID, weightGrams: weightGrams, proceeds: proceeds, date: date, destinationAccountID: destinationAccountID) }, message: "Metal sale saved")
+    }
+
+    @discardableResult
+    func sellOtherAsset(accountID: UUID, sharePercent: Decimal, proceeds: Money, date: Date, destinationAccountID: UUID) -> Bool {
+        saveAssetActivity({ try FinanceAssetTracking.sellOtherAsset(in: data, accountID: accountID, sharePercent: sharePercent, proceeds: proceeds, date: date, destinationAccountID: destinationAccountID) }, message: "Asset sale saved")
     }
 
     @discardableResult

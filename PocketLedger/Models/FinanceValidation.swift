@@ -273,8 +273,15 @@ enum FinanceDataValidator {
         var trackingIDs: Set<UUID> = []
         for account in data.accounts {
             guard let tracking = account.tracking else { continue }
-            guard (account.type == .physicalAsset && tracking.investmentEntries.isEmpty)
-                    || (account.type == .investment && tracking.metalPurchases.isEmpty),
+            let isOtherPhysicalAsset = account.type == .physicalAsset && tracking.physicalAssetSubtype == .other
+            let subtypeMatchesPurchases = tracking.physicalAssetSubtype?.metal.map { metal in
+                tracking.metalPurchases.allSatisfy { $0.metal == metal }
+            } ?? true
+            guard (isOtherPhysicalAsset && tracking.metalPurchases.isEmpty && tracking.metalPricing.isEmpty
+                    || account.type == .physicalAsset && !isOtherPhysicalAsset
+                        && tracking.investmentEntries.isEmpty && subtypeMatchesPurchases
+                    || account.type == .investment && tracking.physicalAssetSubtype == nil
+                        && tracking.metalPurchases.isEmpty),
                   tracking.transactionIDs.isSubset(of: transactionIDs),
                   Set(tracking.metalPricing.map(\.metal)).count == tracking.metalPricing.count else {
                 return .invalidAssetTracking(account.name)

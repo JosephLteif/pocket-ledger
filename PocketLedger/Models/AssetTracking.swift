@@ -38,7 +38,8 @@ enum FinanceAssetTracking {
 
     static func valuation(account: Account, recordedBalance: Money, data: FinanceData) -> Money {
         guard let tracking = account.tracking else { return recordedBalance }
-        if account.type == .investment {
+        if account.type == .investment
+            || (account.type == .physicalAsset && tracking.physicalAssetSubtype == .other) {
             return (try? money((Decimal(recordedBalance.minorUnits) + Decimal(tracking.unrealizedMinorUnits)) / Decimal(account.currency.minorUnitScale), currency: account.currency)) ?? recordedBalance
         }
         guard account.type == .physicalAsset, !tracking.metalPurchases.isEmpty else { return recordedBalance }
@@ -56,10 +57,15 @@ enum FinanceAssetTracking {
         let realized: Decimal
         switch account.type {
         case .physicalAsset:
-            guard !tracking.metalPurchases.isEmpty,
-                  tracking.metalPurchases.allSatisfy({ $0.remainingWeightGrams == 0 || pricePerGram(account: account, metal: $0.metal, data: data) != nil }) else { return nil }
-            realized = tracking.metalPurchases.reduce(Decimal.zero) { total, purchase in
-                total + purchase.sales.reduce(Decimal.zero) { $0 + Decimal($1.gain.minorUnits) }
+            if tracking.physicalAssetSubtype == .other {
+                guard tracking.metalPurchases.isEmpty, !tracking.investmentEntries.isEmpty else { return nil }
+                realized = tracking.investmentEntries.filter { $0.kind == .sale }.reduce(Decimal.zero) { $0 + Decimal($1.amount.minorUnits) }
+            } else {
+                guard !tracking.metalPurchases.isEmpty,
+                      tracking.metalPurchases.allSatisfy({ $0.remainingWeightGrams == 0 || pricePerGram(account: account, metal: $0.metal, data: data) != nil }) else { return nil }
+                realized = tracking.metalPurchases.reduce(Decimal.zero) { total, purchase in
+                    total + purchase.sales.reduce(Decimal.zero) { $0 + Decimal($1.gain.minorUnits) }
+                }
             }
         case .investment:
             realized = tracking.investmentEntries.filter { $0.kind == .realization }.reduce(Decimal.zero) { $0 + Decimal($1.amount.minorUnits) }
@@ -141,6 +147,11 @@ enum FinanceAssetTracking {
               !data.accounts.flatMap({ $0.tracking?.metalPurchases ?? [] }).contains(where: { $0.id == purchase.id }) else {
             throw AssetTrackingError(message: "Enter positive quantity, weight, cost, and a purity up to 100%.")
         }
+        if let subtype = account.tracking?.physicalAssetSubtype {
+            guard subtype == .mixed || subtype.metal == purchase.metal else {
+                throw AssetTrackingError(message: "This account tracks \(subtype.displayName.lowercased()) assets.")
+            }
+        }
         let balance = LedgerIndex(data: data).balance(for: account)
         let isFirstPurchase = account.tracking?.metalPurchases.isEmpty != false
         if isFirstPurchase && balance.minorUnits != 0 && !reconcileOpeningBalance {
@@ -197,18 +208,102 @@ enum FinanceAssetTracking {
         return updated
     }
 
+    static func sellOtherAsset(in data: FinanceData, accountID: UUID, sharePercent: Decimal, proceeds: Money, date: Date, destinationAccountID: UUID) throws -> FinanceData {
+        let index = try accountIndex(accountID, type: .physicalAsset, in: data)
+        let account = data.accounts[index]
+        let tracking = account.tracking
+        let balance = LedgerIndex(data: data).balance(for: account)
+        let previousUnrealized = tracking?.unrealizedMinorUnits ?? 0
+        let latestEntryDate = tracking?.investmentEntries.last?.date ?? .distantPast
+
+        try checkDate(date)
+        guard tracking?.physicalAssetSubtype == .other, tracking?.metalPurchases.isEmpty == true,
+              !sharePercent.isNaN, sharePercent > 0, sharePercent <= 100,
+              proceeds.currency == account.currency, proceeds.minorUnits > 0,
+              Calendar.current.startOfDay(for: date) >= Calendar.current.startOfDay(for: latestEntryDate),
+              balance.minorUnits >= 0,
+              Decimal(balance.minorUnits) + Decimal(previousUnrealized) > 0 else {
+            throw AssetTrackingError(message: "Enter a valid share, sale amount, and date for this other asset.")
+        }
+        _ = try cashAccount(destinationAccountID, currency: account.currency, data: data)
+
+        let scale = Decimal(account.currency.minorUnitScale)
+        let cost: Money
+        if sharePercent == 100 {
+            cost = balance
+        } else {
+            cost = try money(Decimal(balance.minorUnits) / scale * sharePercent / 100, currency: account.currency)
+        }
+        guard cost.minorUnits >= 0, cost.minorUnits <= balance.minorUnits else {
+            throw AssetTrackingError(message: "The selected share is smaller than the account currency can track.")
+        }
+        let unrealizedReduction: Int64
+        if sharePercent == 100 {
+            unrealizedReduction = previousUnrealized
+        } else {
+            unrealizedReduction = try money(Decimal(previousUnrealized) / scale * sharePercent / 100, currency: account.currency).minorUnits
+        }
+        let gain = proceeds.minorUnits.subtractingReportingOverflow(cost.minorUnits)
+        guard !gain.overflow else { throw AssetTrackingError(message: "Sale amount is too large.") }
+        let remainingValue = try money(
+            (Decimal(balance.minorUnits) - Decimal(cost.minorUnits)
+                + Decimal(previousUnrealized) - Decimal(unrealizedReduction)) / scale,
+            currency: account.currency
+        )
+        guard remainingValue.minorUnits >= 0 else {
+            throw AssetTrackingError(message: "The selected sale share would leave a negative estimated value.")
+        }
+
+        var updated = data
+        var transactionIDs: [UUID] = []
+        let realizedGain = Money(currency: account.currency, minorUnits: gain.partialValue)
+        if realizedGain.minorUnits != 0 {
+            let transaction = realization(accountID: accountID, amount: realizedGain, date: date, data: &updated)
+            transactionIDs.append(transaction.id)
+            updated.transactions.append(transaction)
+        }
+        let transaction = transfer(from: accountID, to: destinationAccountID, amount: proceeds, date: date, note: "Asset sale: \(account.name)")
+        transactionIDs.append(transaction.id)
+        updated.transactions.append(transaction)
+        updated.accounts[index].tracking?.investmentEntries.append(InvestmentEntry(
+            date: date,
+            kind: .sale,
+            amount: realizedGain,
+            previousUnrealizedMinorUnits: previousUnrealized,
+            transactionIDs: transactionIDs,
+            unrealizedReductionMinorUnits: unrealizedReduction,
+            saleCostBasis: cost,
+            saleProceeds: proceeds,
+            saleDestinationAccountID: destinationAccountID
+        ))
+        return updated
+    }
+
     static func updateInvestment(in data: FinanceData, accountID: UUID, amount: Money, date: Date, confirmRecordedBalance: Bool) throws -> FinanceData {
-        let index = try accountIndex(accountID, type: .investment, in: data)
+        guard let index = data.accounts.firstIndex(where: {
+            $0.id == accountID && !$0.isArchived
+                && ($0.type == .investment || ($0.type == .physicalAsset && $0.tracking?.physicalAssetSubtype == .other))
+        }) else {
+            throw AssetTrackingError(message: "Choose an active investment or other physical asset account.")
+        }
         let account = data.accounts[index]
         try checkDate(date)
         guard amount.currency == account.currency, amount.minorUnits != Int64.min else { throw AssetTrackingError(message: "Currency mismatch or invalid amount.") }
-        guard account.tracking?.lastValuation != nil || confirmRecordedBalance else {
+        if account.type == .physicalAsset,
+           Calendar.current.startOfDay(for: date) < Calendar.current.startOfDay(for: account.tracking?.investmentEntries.last?.date ?? .distantPast) {
+            throw AssetTrackingError(message: "Update the asset value on or after its latest tracking entry.")
+        }
+        let hasTrackedOtherAssetActivity = account.type == .physicalAsset && account.tracking?.investmentEntries.isEmpty == false
+        guard account.tracking?.lastValuation != nil || hasTrackedOtherAssetActivity || confirmRecordedBalance else {
             throw AssetTrackingError(message: "Confirm that the recorded balance excludes this unrealized gain or loss.")
         }
         var updated = data
         if updated.accounts[index].tracking == nil { updated.accounts[index].tracking = AccountTracking() }
         let previous = account.tracking?.unrealizedMinorUnits ?? 0
-        _ = try money((Decimal(LedgerIndex(data: data).balance(for: account).minorUnits) + Decimal(amount.minorUnits)) / Decimal(account.currency.minorUnitScale), currency: account.currency)
+        let estimatedValue = try money((Decimal(LedgerIndex(data: data).balance(for: account).minorUnits) + Decimal(amount.minorUnits)) / Decimal(account.currency.minorUnitScale), currency: account.currency)
+        if account.type == .physicalAsset, estimatedValue.minorUnits < 0 {
+            throw AssetTrackingError(message: "An other asset cannot have a negative estimated value.")
+        }
         updated.accounts[index].tracking?.investmentEntries.append(InvestmentEntry(date: date, kind: .valuation, amount: amount, previousUnrealizedMinorUnits: previous))
         return updated
     }
@@ -284,8 +379,16 @@ enum FinanceAssetTracking {
         var linkedIDs: Set<UUID> = []
         for account in data.accounts {
             guard let tracking = account.tracking else { continue }
-            guard account.type == .physicalAsset || account.type == .investment,
-                  account.type == .physicalAsset ? tracking.investmentEntries.isEmpty : tracking.metalPurchases.isEmpty else {
+            let isOtherPhysicalAsset = account.type == .physicalAsset && tracking.physicalAssetSubtype == .other
+            let subtypeMatchesPurchases = tracking.physicalAssetSubtype?.metal.map { metal in
+                tracking.metalPurchases.allSatisfy { $0.metal == metal }
+            } ?? true
+            guard ((account.type == .physicalAsset && isOtherPhysicalAsset
+                    && tracking.metalPurchases.isEmpty && tracking.metalPricing.isEmpty)
+                    || (account.type == .physicalAsset && !isOtherPhysicalAsset
+                        && tracking.investmentEntries.isEmpty && subtypeMatchesPurchases)
+                    || (account.type == .investment && tracking.physicalAssetSubtype == nil
+                        && tracking.metalPurchases.isEmpty)) else {
                 return "Tracking does not match the account type."
             }
             let gainHistory = tracking.physicalAssetGainHistory ?? []
@@ -363,19 +466,59 @@ enum FinanceAssetTracking {
                       entry.date.timeIntervalSince1970.isFinite, entry.enteredAt.timeIntervalSince1970.isFinite else {
                     return "Invalid investment history."
                 }
-                if entry.kind == .valuation {
-                    guard entry.transactionIDs.isEmpty else { return "Unrealized valuations cannot move money." }
+                switch entry.kind {
+                case .valuation:
+                    guard entry.transactionIDs.isEmpty, entry.unrealizedReductionMinorUnits == nil,
+                          entry.saleCostBasis == nil, entry.saleProceeds == nil,
+                          entry.saleDestinationAccountID == nil else { return "Unrealized valuations cannot move money." }
                     unrealized = entry.amount.minorUnits
-                } else {
+                case .realization:
                     let amount = entry.amount.minorUnits
-                    guard (amount > 0 && unrealized > 0 && amount <= unrealized)
+                    guard account.type == .investment,
+                          (amount > 0 && unrealized > 0 && amount <= unrealized)
                         || (amount < 0 && unrealized < 0 && amount >= unrealized),
+                          entry.unrealizedReductionMinorUnits == nil, entry.saleCostBasis == nil,
+                          entry.saleProceeds == nil, entry.saleDestinationAccountID == nil,
                           entry.transactionIDs.count == 1,
                           let transaction = transactions[entry.transactionIDs[0]],
                           matchesRealization(transaction, accountID: account.id, amount: entry.amount) else {
                         return "Realization does not match its linked ledger entry."
                     }
                     unrealized -= amount
+                case .sale:
+                    guard isOtherPhysicalAsset,
+                          let reduction = entry.unrealizedReductionMinorUnits,
+                          let cost = entry.saleCostBasis, cost.currency == account.currency, cost.minorUnits >= 0,
+                          let proceeds = entry.saleProceeds, proceeds.currency == account.currency, proceeds.minorUnits > 0,
+                          let destinationID = entry.saleDestinationAccountID,
+                          let destination = data.accounts.first(where: { $0.id == destinationID }),
+                          destination.currency == account.currency,
+                          destination.type == .cash || destination.type == .bankAccount,
+                          (unrealized > 0 && reduction >= 0 && reduction <= unrealized)
+                            || (unrealized < 0 && reduction <= 0 && reduction >= unrealized)
+                            || (unrealized == 0 && reduction == 0) else {
+                        return "Invalid other asset sale."
+                    }
+                    let expectedGain = proceeds.minorUnits.subtractingReportingOverflow(cost.minorUnits)
+                    let remainingUnrealized = unrealized.subtractingReportingOverflow(reduction)
+                    guard !expectedGain.overflow, expectedGain.partialValue == entry.amount.minorUnits,
+                          !remainingUnrealized.overflow,
+                          entry.transactionIDs.count == (entry.amount.minorUnits == 0 ? 1 : 2) else {
+                        return "Other asset sale amounts do not reconcile."
+                    }
+                    var transactionIndex = 0
+                    if entry.amount.minorUnits != 0 {
+                        guard let transaction = transactions[entry.transactionIDs[transactionIndex]],
+                              matchesRealization(transaction, accountID: account.id, amount: entry.amount) else {
+                            return "Other asset sale gain or loss does not match its ledger entry."
+                        }
+                        transactionIndex += 1
+                    }
+                    guard let transaction = transactions[entry.transactionIDs[transactionIndex]],
+                          matchesTransfer(transaction, from: account.id, to: destinationID, amount: proceeds) else {
+                        return "Other asset sale proceeds do not match their transfer."
+                    }
+                    unrealized = remainingUnrealized.partialValue
                 }
             }
             let references = tracking.metalPurchases.flatMap { $0.transactionIDs + $0.sales.flatMap(\.transactionIDs) }

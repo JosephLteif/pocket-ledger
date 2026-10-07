@@ -7,6 +7,22 @@ enum PreciousMetal: String, Codable, CaseIterable, Identifiable, Sendable {
     var apiSymbol: String { self == .gold ? "XAU" : "XAG" }
 }
 
+enum PhysicalAssetSubtype: String, Codable, CaseIterable, Identifiable, Sendable {
+    case gold, silver, other, mixed
+
+    var id: String { rawValue }
+    var displayName: String { self == .mixed ? "Mixed metals" : rawValue.capitalized }
+    var metal: PreciousMetal? {
+        switch self {
+        case .gold: return .gold
+        case .silver: return .silver
+        case .other, .mixed: return nil
+        }
+    }
+
+    static let selectable: [PhysicalAssetSubtype] = [.gold, .silver, .other]
+}
+
 enum MetalWeightUnit: String, Codable, CaseIterable, Identifiable, Sendable {
     case grams, troyOunces
     var id: String { rawValue }
@@ -68,7 +84,7 @@ struct MetalPurchase: Identifiable, Codable, Equatable {
     }
 }
 
-enum InvestmentEntryKind: String, Codable { case valuation, realization }
+enum InvestmentEntryKind: String, Codable { case valuation, realization, sale }
 
 struct InvestmentEntry: Identifiable, Codable, Equatable {
     var id = UUID()
@@ -78,6 +94,10 @@ struct InvestmentEntry: Identifiable, Codable, Equatable {
     var amount: Money
     var previousUnrealizedMinorUnits: Int64
     var transactionIDs: [UUID] = []
+    var unrealizedReductionMinorUnits: Int64? = nil
+    var saleCostBasis: Money? = nil
+    var saleProceeds: Money? = nil
+    var saleDestinationAccountID: UUID? = nil
 }
 
 struct PhysicalAssetGainSnapshot: Codable, Equatable {
@@ -90,10 +110,15 @@ struct AccountTracking: Codable, Equatable {
     var metalPurchases: [MetalPurchase] = []
     var metalPricing: [MetalPriceSetting] = []
     var investmentEntries: [InvestmentEntry] = []
+    var physicalAssetSubtype: PhysicalAssetSubtype? = nil
     var physicalAssetGainHistory: [PhysicalAssetGainSnapshot]? = nil
     var unrealizedMinorUnits: Int64 {
         guard let last = investmentEntries.last else { return 0 }
-        return last.kind == .valuation ? last.amount.minorUnits : last.previousUnrealizedMinorUnits - last.amount.minorUnits
+        switch last.kind {
+        case .valuation: return last.amount.minorUnits
+        case .realization: return last.previousUnrealizedMinorUnits - last.amount.minorUnits
+        case .sale: return last.previousUnrealizedMinorUnits - (last.unrealizedReductionMinorUnits ?? 0)
+        }
     }
     var lastValuation: InvestmentEntry? { investmentEntries.last { $0.kind == .valuation } }
     var transactionIDs: Set<UUID> {
@@ -103,6 +128,7 @@ struct AccountTracking: Codable, Equatable {
     var hasHistory: Bool { !metalPurchases.isEmpty || !investmentEntries.isEmpty }
 
     mutating func merge(_ imported: AccountTracking) {
+        if physicalAssetSubtype == nil { physicalAssetSubtype = imported.physicalAssetSubtype }
         for purchase in imported.metalPurchases {
             if let index = metalPurchases.firstIndex(where: { $0.id == purchase.id }) {
                 let saleIDs = Set(metalPurchases[index].sales.map(\.id))

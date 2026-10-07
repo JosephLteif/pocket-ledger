@@ -189,9 +189,21 @@ struct AssetPurchaseEditor: View {
     @State private var selectedAccountID: UUID?
     @State private var isCreatingAccount = false
 
+    private var purchaseAccounts: [Account] {
+        store.activeAccounts.filter {
+            $0.type == accountType && (accountType != .physicalAsset || $0.tracking?.physicalAssetSubtype != .other)
+        }
+    }
+
+    private var selectedAccount: Account? {
+        guard let selectedAccountID, let account = store.account(with: selectedAccountID),
+              accountType != .physicalAsset || account.tracking?.physicalAssetSubtype != .other else { return nil }
+        return account
+    }
+
     var body: some View {
         Group {
-            if let selectedAccountID, let account = store.account(with: selectedAccountID) {
+            if let account = selectedAccount {
                 if accountType == .physicalAsset {
                     MetalPurchaseEditor(store: store, account: account, historical: false, onSave: onSave)
                 } else {
@@ -201,7 +213,7 @@ struct AssetPurchaseEditor: View {
                 NavigationStack {
                     List {
                         Section {
-                            ForEach(store.activeAccounts.filter { $0.type == accountType }) { account in
+                            ForEach(purchaseAccounts) { account in
                                 Button {
                                     selectedAccountID = account.id
                                 } label: {
@@ -212,7 +224,9 @@ struct AssetPurchaseEditor: View {
                         } header: {
                             Text("Choose an account")
                         } footer: {
-                            Text("A purchase moves money into an asset account. It is a transfer and does not count as spending.")
+                            Text(accountType == .physicalAsset
+                                 ? "Gold and silver purchases move money into the asset account as a transfer. Other assets use manual valuations and sale tracking."
+                                 : "A purchase moves money into an investment account. It is a transfer and does not count as spending.")
                         }
                     }
                     .pocketListSurface()
@@ -226,7 +240,10 @@ struct AssetPurchaseEditor: View {
         }
         .sheet(isPresented: $isCreatingAccount) {
             AccountEditor(store: store, initialType: accountType, onSaved: { account in
-                if account.type == accountType { selectedAccountID = account.id }
+                if account.type == accountType,
+                   accountType != .physicalAsset || account.tracking?.physicalAssetSubtype != .other {
+                    selectedAccountID = account.id
+                }
             })
         }
     }
@@ -305,12 +322,13 @@ struct AssetTrackingSection: View {
     @State private var sheet: AssetSheet?
 
     private enum AssetSheet: Identifiable {
-        case purchase, pricing(PreciousMetal), investment(Bool)
+        case purchase, pricing(PreciousMetal), investment(Bool), sale
         var id: String {
             switch self {
             case .purchase: "purchase"
             case .pricing(let metal): "price-\(metal.rawValue)"
             case .investment(let realizing): "investment-\(realizing)"
+            case .sale: "sale"
             }
         }
     }
@@ -318,13 +336,17 @@ struct AssetTrackingSection: View {
     var body: some View {
         Group {
             if account.type == .physicalAsset {
-                metals
+                if account.tracking?.physicalAssetSubtype == .other {
+                    investment
+                } else {
+                    metals
+                }
             } else if account.type == .investment {
                 investment
             }
         }
         .sheet(item: $sheet, onDismiss: {
-            if account.type == .physicalAsset {
+            if account.type == .physicalAsset && account.tracking?.physicalAssetSubtype != .other {
                 Task { await store.refreshMetalPrices() }
             }
         }) { item in
@@ -335,13 +357,17 @@ struct AssetTrackingSection: View {
                 MetalPricingEditor(store: store, account: account, metal: metal)
             case .investment(let realizing):
                 InvestmentEntryEditor(store: store, account: account, realizing: realizing)
+            case .sale:
+                OtherAssetSaleEditor(store: store, account: account)
             }
         }
         .onChange(of: areBalancesRevealed) { _, revealed in
             if !revealed { sheet = nil }
         }
         .task {
-            if account.type == .physicalAsset { await store.refreshMetalPrices() }
+            if account.type == .physicalAsset && account.tracking?.physicalAssetSubtype != .other {
+                await store.refreshMetalPrices()
+            }
         }
     }
 
@@ -357,17 +383,22 @@ struct AssetTrackingSection: View {
 
     @ViewBuilder private var metals: some View {
         let purchases = account.tracking?.metalPurchases ?? []
+        let metalName = account.tracking?.physicalAssetSubtype?.metal?.displayName ?? "Gold and silver"
+        let heldMetals = PreciousMetal.allCases.filter { metal in
+            purchases.contains { $0.metal == metal && $0.remainingWeightGrams > 0 }
+        }
+        let displayedMetals = account.tracking?.physicalAssetSubtype?.metal.map { [$0] } ?? heldMetals
 
         Section {
             VStack(alignment: .leading, spacing: 16) {
                 if purchases.isEmpty {
-                    Text("Track gold and silver by purchase, weight and purity.")
+                    Text("Track \(metalName.lowercased()) by purchase, weight and purity.")
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                 } else {
                     valueRow("Recorded balance", store.balance(for: account).formatted)
                     valueRow("Estimated metal value", store.valuation(for: account).formatted)
                 }
-                Button("Add metal purchase") { sheet = .purchase }
+                Button(account.tracking?.physicalAssetSubtype?.metal.map { "Add \($0.displayName.lowercased()) purchase" } ?? "Add metal purchase") { sheet = .purchase }
                     .buttonStyle(.bordered)
                     .tint(PocketLedgerTheme.accent)
                     .disabled(!areBalancesRevealed || account.isArchived)
@@ -380,8 +411,10 @@ struct AssetTrackingSection: View {
             .padding(.vertical, 10)
             .pocketGroupedListRow(index: 0, count: 1)
             .listRowSeparator(.hidden)
-        } header: { Text("Metals") } footer: {
-            Text("Estimated metal value excludes jewelry workmanship and retail premiums. Missing prices use purchase cost in totals.")
+        } header: { Text(account.tracking?.physicalAssetSubtype?.metal?.displayName ?? "Metals") } footer: {
+            Text(purchases.isEmpty
+                 ? "Market price is shown per gram. Add a purchase to track weight and estimate the account's total value."
+                 : "Estimated metal value excludes jewelry workmanship and retail premiums. Missing prices use purchase cost in totals.")
                 .font(.footnote)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
         }
@@ -407,12 +440,9 @@ struct AssetTrackingSection: View {
             }
             .listSectionSeparator(.hidden)
         }
-        let heldMetals = PreciousMetal.allCases.filter { metal in
-            purchases.contains { $0.metal == metal && $0.remainingWeightGrams > 0 }
-        }
-        if !heldMetals.isEmpty {
+        if !displayedMetals.isEmpty {
             Section("Metal prices") {
-                ForEach(Array(heldMetals.enumerated()), id: \.element.id) { entry in
+                ForEach(Array(displayedMetals.enumerated()), id: \.element.id) { entry in
                     let metal = entry.element
                     VStack(alignment: .leading, spacing: 10) {
                         Button("\(metal.displayName) pricing") { sheet = .pricing(metal) }
@@ -428,7 +458,7 @@ struct AssetTrackingSection: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 10)
-                    .pocketGroupedListRow(index: entry.offset, count: heldMetals.count + 1)
+                    .pocketGroupedListRow(index: entry.offset, count: displayedMetals.count + 1)
                     .listRowSeparator(.hidden)
                 }
                 Button {
@@ -439,7 +469,7 @@ struct AssetTrackingSection: View {
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 10)
-                .pocketGroupedListRow(index: heldMetals.count, count: heldMetals.count + 1)
+                .pocketGroupedListRow(index: displayedMetals.count, count: displayedMetals.count + 1)
                 .listRowSeparator(.hidden)
             }
             .listSectionSeparator(.hidden)
@@ -447,26 +477,36 @@ struct AssetTrackingSection: View {
     }
 
     @ViewBuilder private var investment: some View {
-        Section("Investment performance") {
+        let isOtherAsset = account.type == .physicalAsset && account.tracking?.physicalAssetSubtype == .other
+
+        Section(isOtherAsset ? "Other asset value" : "Investment performance") {
             VStack(alignment: .leading, spacing: 14) {
-                valueRow("Recorded balance", store.balance(for: account).formatted)
+                valueRow(isOtherAsset ? "Remaining cost basis" : "Recorded balance", store.balance(for: account).formatted)
                 valueRow("Unrealized gain/loss", Money(currency: account.currency, minorUnits: account.tracking?.unrealizedMinorUnits ?? 0).formatted)
                 valueRow("Estimated total value", store.valuation(for: account).formatted)
                 if let entry = account.tracking?.lastValuation {
                     LabeledContent("Last valuation", value: entry.date.formatted(date: .abbreviated, time: .omitted))
                     LabeledContent("Entered", value: entry.enteredAt.formatted(date: .abbreviated, time: .shortened))
                 } else {
-                    Text("No valuation entered yet.").foregroundStyle(PocketLedgerTheme.textSecondary)
+                    Text(isOtherAsset ? "Starting value is the current estimate. Update it as the asset changes." : "No valuation entered yet.")
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
-                Text("Update the gain or loss to reflect today’s investment value. Realize it when a gain or loss is confirmed; use a transfer to move money out.")
+                Text(isOtherAsset
+                     ? "Update the estimated value as the asset changes. Selling all or part transfers the proceeds and records the realized gain or loss."
+                     : "Update the gain or loss to reflect today’s investment value. Realize it when a gain or loss is confirmed; use a transfer to move money out.")
                     .font(.footnote)
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
-                Button("Update unrealized gain/loss") { sheet = .investment(false) }
+                Button(isOtherAsset ? "Update estimated value" : "Update unrealized gain/loss") { sheet = .investment(false) }
                     .disabled(!areBalancesRevealed || account.isArchived)
-                Button("Realize gain/loss") { sheet = .investment(true) }
-                    .disabled(!areBalancesRevealed || (account.tracking?.unrealizedMinorUnits ?? 0) == 0 || account.isArchived)
-                Text("Realizing a gain or loss preserves estimated total value.")
-                    .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
+                if isOtherAsset {
+                    Button("Sell all or part") { sheet = .sale }
+                        .disabled(!areBalancesRevealed || store.valuation(for: account).minorUnits <= 0 || account.isArchived)
+                } else {
+                    Button("Realize gain/loss") { sheet = .investment(true) }
+                        .disabled(!areBalancesRevealed || (account.tracking?.unrealizedMinorUnits ?? 0) == 0 || account.isArchived)
+                    Text("Realizing a gain or loss preserves estimated total value.")
+                        .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
+                }
                 if !areBalancesRevealed {
                     Text("Reveal balances to update investment performance.").font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
@@ -483,7 +523,21 @@ struct AssetTrackingSection: View {
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(Array(entries.suffix(20).reversed())) { entry in
                         VStack(alignment: .leading, spacing: 4) {
-                            valueRow(entry.kind == .valuation ? "Unrealized valuation" : "Realized gain/loss", entry.amount.formatted)
+                            valueRow(
+                                entry.kind == .valuation
+                                    ? (isOtherAsset ? "Unrealized gain/loss" : "Unrealized valuation")
+                                    : entry.kind == .sale ? "Sale gain/loss" : "Realized gain/loss",
+                                entry.amount.formatted
+                            )
+                            if entry.kind == .sale {
+                                if let cost = entry.saleCostBasis { valueRow("Cost basis sold", cost.formatted) }
+                                if let proceeds = entry.saleProceeds { valueRow("Sale proceeds", proceeds.formatted) }
+                                if let destinationID = entry.saleDestinationAccountID,
+                                   let destination = store.account(with: destinationID) {
+                                    Text("Received in \(destination.name)")
+                                        .font(.caption).foregroundStyle(PocketLedgerTheme.textSecondary)
+                                }
+                            }
                             Text(entry.date.formatted(date: .abbreviated, time: .omitted))
                                 .font(.caption).foregroundStyle(PocketLedgerTheme.textSecondary)
                             Text("Entered \(entry.enteredAt.formatted(date: .abbreviated, time: .shortened))")
@@ -863,6 +917,7 @@ private struct MetalPurchaseEditor: View {
         self.account = account
         self.onSave = onSave
         _historical = State(initialValue: historical)
+        _metal = State(initialValue: account.tracking?.physicalAssetSubtype?.metal ?? .gold)
     }
 
     private var fundingAccounts: [Account] {
@@ -873,8 +928,12 @@ private struct MetalPurchaseEditor: View {
         NavigationStack {
             Form {
                 Section("Purchase") {
-                    Picker("Metal", selection: $metal) {
-                        ForEach(PreciousMetal.allCases) { Text($0.displayName).tag($0) }
+                    if account.tracking?.physicalAssetSubtype?.metal == nil {
+                        Picker("Metal", selection: $metal) {
+                            ForEach(PreciousMetal.allCases) { Text($0.displayName).tag($0) }
+                        }
+                    } else {
+                        LabeledContent("Metal", value: metal.displayName)
                     }
                     TextField("Description (optional)", text: $description)
                     DatePicker("Purchase date", selection: $date, in: ...Date(), displayedComponents: .date)
@@ -928,7 +987,7 @@ private struct MetalPurchaseEditor: View {
                 }
             }
             .pocketListSurface()
-            .navigationTitle("Add metal purchase").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Add \(metal.displayName.lowercased()) purchase").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
@@ -1098,6 +1157,103 @@ private struct MetalPricingEditor: View {
 }
 
 @MainActor
+private struct OtherAssetSaleEditor: View {
+    @ObservedObject var store: LedgerStore
+    let account: Account
+    @Environment(\.dismiss) private var dismiss
+    @State private var sharePercent = "100"
+    @State private var proceeds = ""
+    @State private var date = Date()
+    @State private var destinationID: UUID?
+    @State private var errorMessage: String?
+
+    private var share: Decimal? {
+        guard let value = assetDecimal(sharePercent), value > 0, value <= 100 else { return nil }
+        return value
+    }
+
+    private var costBasis: Money? {
+        guard let share else { return nil }
+        let balance = store.balance(for: account)
+        if share == 100 { return balance }
+        return try? FinanceAssetTracking.money(
+            Decimal(balance.minorUnits) * share / 100 / Decimal(account.currency.minorUnitScale),
+            currency: account.currency
+        )
+    }
+
+    private var estimatedGainLoss: Money? {
+        guard let proceeds = Money.parse(proceeds, currency: account.currency),
+              let costBasis else { return nil }
+        let difference = proceeds.minorUnits.subtractingReportingOverflow(costBasis.minorUnits)
+        guard !difference.overflow else { return nil }
+        return Money(currency: account.currency, minorUnits: difference.partialValue)
+    }
+
+    private var receiveAccounts: [Account] {
+        store.activeAccounts.filter {
+            $0.id != account.id && $0.currency == account.currency && ($0.type == .cash || $0.type == .bankAccount)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Sale") {
+                    LabeledContent("Current estimated value") {
+                        ProtectedAmountText(value: store.valuation(for: account).formatted, isRevealed: true)
+                            .monospacedDigit()
+                    }
+                    TextField("Percent of remaining asset", text: $sharePercent)
+                        .keyboardType(.decimalPad)
+                    if let costBasis {
+                        LabeledContent("Allocated cost basis", value: costBasis.formatted)
+                    }
+                    CurrencyInputField("Actual net proceeds", text: $proceeds, currency: account.currency)
+                    if let estimatedGainLoss {
+                        LabeledContent(
+                            "Realized gain/loss",
+                            value: estimatedGainLoss.minorUnits > 0 ? "+\(estimatedGainLoss.formatted)" : estimatedGainLoss.formatted
+                        )
+                    }
+                    if let latestEntryDate = account.tracking?.investmentEntries.last?.date {
+                        DatePicker("Sale date", selection: $date, in: latestEntryDate...Date(), displayedComponents: .date)
+                    } else {
+                        DatePicker("Sale date", selection: $date, in: ...Date(), displayedComponents: .date)
+                    }
+                    Picker("Receive in", selection: $destinationID) {
+                        Text("Choose account").tag(Optional<UUID>.none)
+                        ForEach(receiveAccounts) { Text($0.name).tag(Optional($0.id)) }
+                    }
+                    Text("The percentage applies to the remaining holding. Its share of recorded cost and unrealized gain or loss is removed. Proceeds transfer to the selected account, and proceeds minus allocated cost becomes realized gain or loss.")
+                        .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
+                }
+            }
+            .pocketListSurface()
+            .navigationTitle("Sell other asset").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
+            }
+            .errorMessageAlert(title: "Sale not saved", message: $errorMessage)
+        }
+    }
+
+    private func save() {
+        guard let share, let proceeds = Money.parse(proceeds, currency: account.currency),
+              proceeds.minorUnits > 0, let destinationID, date <= Date() else {
+            errorMessage = "Enter a valid share and net proceeds, choose a receiving account, and use a sale date that is not in the future."
+            return
+        }
+        if store.sellOtherAsset(accountID: account.id, sharePercent: share, proceeds: proceeds, date: date, destinationAccountID: destinationID) {
+            dismiss()
+        } else {
+            errorMessage = store.lastActionStatus ?? "Sale could not be saved."
+        }
+    }
+}
+
+@MainActor
 private struct InvestmentEntryEditor: View {
     @ObservedObject var store: LedgerStore
     let account: Account
@@ -1109,45 +1265,86 @@ private struct InvestmentEntryEditor: View {
     @State private var confirmedBalance = false
     @State private var errorMessage: String?
 
+    init(store: LedgerStore, account: Account, realizing: Bool) {
+        _store = ObservedObject(wrappedValue: store)
+        self.account = account
+        self.realizing = realizing
+        if !realizing, account.type == .physicalAsset, account.tracking?.physicalAssetSubtype == .other {
+            _amount = State(initialValue: account.currency.formattedInput(minorUnits: store.valuation(for: account).minorUnits))
+        }
+    }
+
     private var unrealized: Int64 { account.tracking?.unrealizedMinorUnits ?? 0 }
+    private var isOtherAsset: Bool { account.type == .physicalAsset && account.tracking?.physicalAssetSubtype == .other }
+    private var recordedBalance: Money { store.balance(for: account) }
+    private var proposedUnrealized: Money? {
+        guard isOtherAsset, let value = Money.parse(amount, currency: account.currency), value.minorUnits >= 0 else { return nil }
+        let difference = value.minorUnits.subtractingReportingOverflow(recordedBalance.minorUnits)
+        guard !difference.overflow else { return nil }
+        return Money(currency: account.currency, minorUnits: difference.partialValue)
+    }
+    private var needsBalanceConfirmation: Bool {
+        guard !realizing else { return false }
+        return isOtherAsset
+            ? account.tracking?.investmentEntries.isEmpty != false
+            : account.tracking?.lastValuation == nil
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section(realizing ? "Realize gain or loss" : "Replace unrealized valuation") {
-                    if !realizing {
+                Section(realizing ? "Realize gain or loss" : isOtherAsset ? "Set estimated value" : "Replace unrealized valuation") {
+                    if !realizing && !isOtherAsset {
                         Picker("Result", selection: $loss) {
                             Text("Gain").tag(false)
                             Text("Loss").tag(true)
                         }
-                    } else {
+                    } else if realizing {
                         LabeledContent("Unrealized gain/loss", value: Money(currency: account.currency, minorUnits: unrealized).formatted)
                         Button("Realize all") {
                             amount = account.currency.formattedInput(minorUnits: abs(unrealized))
                         }
                     }
-                    CurrencyInputField(realizing ? "Amount to realize" : "New unrealized amount", text: $amount, currency: account.currency)
-                    DatePicker("Effective date", selection: $date, in: ...Date(), displayedComponents: .date)
+                    if isOtherAsset {
+                        LabeledContent("Recorded cost", value: recordedBalance.formatted)
+                        if let proposedUnrealized {
+                            LabeledContent("Unrealized gain/loss", value: proposedUnrealized.formatted)
+                        }
+                    }
+                    CurrencyInputField(
+                        realizing ? "Amount to realize" : isOtherAsset ? "Current estimated value" : "New unrealized amount",
+                        text: $amount,
+                        currency: account.currency
+                    )
+                    if isOtherAsset, let latestEntryDate = account.tracking?.investmentEntries.last?.date {
+                        DatePicker("Effective date", selection: $date, in: latestEntryDate...Date(), displayedComponents: .date)
+                    } else {
+                        DatePicker("Effective date", selection: $date, in: ...Date(), displayedComponents: .date)
+                    }
                     Text(realizing
                          ? "Moves this amount from unrealized performance into the recorded balance. Total value stays the same; the last valuation date stays unchanged."
-                         : "Replaces the previous unrealized amount. Enter zero to clear it. This does not change the recorded balance.")
+                         : isOtherAsset
+                            ? "Enter the asset's total estimated value. Unrealized gain or loss is calculated against its remaining recorded cost."
+                            : "Replaces the previous unrealized amount. Enter zero to clear it. This does not change the recorded balance.")
                         .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
-                    if !realizing && account.tracking?.lastValuation == nil {
-                        LabeledContent("Recorded balance", value: store.balance(for: account).formatted)
-                        Toggle("Recorded balance excludes this unrealized amount", isOn: $confirmedBalance)
-                        Text("If your recorded balance already contains this gain or loss, correct it before adding unrealized performance to avoid double counting.")
+                    if needsBalanceConfirmation {
+                        if !isOtherAsset { LabeledContent("Recorded balance", value: recordedBalance.formatted) }
+                        Toggle(isOtherAsset ? "Recorded value is cost basis only" : "Recorded balance excludes this unrealized amount", isOn: $confirmedBalance)
+                        Text(isOtherAsset
+                             ? "Confirm this amount is the original cost, not a current market estimate. That keeps unrealized gains and losses from being counted twice."
+                             : "If your recorded balance already contains this gain or loss, correct it before adding unrealized performance to avoid double counting.")
                             .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                     }
                 }
             }
             .pocketListSurface()
-            .navigationTitle(realizing ? (unrealized < 0 ? "Realize loss" : "Realize gain") : "Update unrealized gain")
+            .navigationTitle(realizing ? (unrealized < 0 ? "Realize loss" : "Realize gain") : isOtherAsset ? "Update asset value" : "Update unrealized gain")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
             }
-            .errorMessageAlert(title: "Investment activity not saved", message: $errorMessage)
+            .errorMessageAlert(title: isOtherAsset ? "Asset value not saved" : "Investment activity not saved", message: $errorMessage)
         }
     }
 
@@ -1156,8 +1353,18 @@ private struct InvestmentEntryEditor: View {
             errorMessage = "Enter a valid nonnegative amount and a date that is not in the future."
             return
         }
-        let negative = realizing ? unrealized < 0 : loss
-        let money = Money(currency: account.currency, minorUnits: negative ? -parsed.minorUnits : parsed.minorUnits)
+        let money: Money
+        if isOtherAsset && !realizing {
+            let difference = parsed.minorUnits.subtractingReportingOverflow(recordedBalance.minorUnits)
+            guard !difference.overflow else {
+                errorMessage = "The estimated value is too large."
+                return
+            }
+            money = Money(currency: account.currency, minorUnits: difference.partialValue)
+        } else {
+            let negative = realizing ? unrealized < 0 : loss
+            money = Money(currency: account.currency, minorUnits: negative ? -parsed.minorUnits : parsed.minorUnits)
+        }
         let saved = realizing
             ? store.realizeInvestment(accountID: account.id, amount: money, date: date)
             : store.updateInvestmentValuation(accountID: account.id, amount: money, date: date, confirmRecordedBalance: confirmedBalance)

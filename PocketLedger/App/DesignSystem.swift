@@ -590,7 +590,7 @@ struct PocketSwipeActionButton: View {
                 titleColor: .white
             )
         }
-        .tint(.clear)
+        .tint(tint)
         .accessibilityLabel(title)
     }
 }

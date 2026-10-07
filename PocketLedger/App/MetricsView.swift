@@ -1196,8 +1196,8 @@ private struct CategoryMetricsDetailView: View {
     }
 
     @ViewBuilder
-    private func subcategoryRows(_ snapshot: CategoryMetricsDetailSnapshot) -> some View {
-        if !snapshot.subcategories.isEmpty {
+    private func subcategoryRows(_ currentSnapshot: CategoryMetricsDetailSnapshot) -> some View {
+        if !currentSnapshot.subcategories.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Subcategories")
                     .font(.title3.weight(.bold))
@@ -1205,7 +1205,7 @@ private struct CategoryMetricsDetailView: View {
                     .padding(.bottom, 8)
 
                 VStack(spacing: 0) {
-                    ForEach(snapshot.subcategories) { metric in
+                    ForEach(currentSnapshot.subcategories) { metric in
                         Button {
                             categoryID = metric.categoryID
                             categoryTitle = metric.title
@@ -1236,7 +1236,7 @@ private struct CategoryMetricsDetailView: View {
                         }
                         .buttonStyle(.plain)
 
-                        if metric.id != snapshot.subcategories.last?.id {
+                        if metric.id != currentSnapshot.subcategories.last?.id {
                             Divider().overlay(PocketLedgerTheme.divider)
                         }
                     }

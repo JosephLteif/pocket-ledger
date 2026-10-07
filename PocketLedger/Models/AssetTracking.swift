@@ -267,6 +267,15 @@ enum FinanceAssetTracking {
                   account.type == .physicalAsset ? tracking.investmentEntries.isEmpty : tracking.metalPurchases.isEmpty else {
                 return "Tracking does not match the account type."
             }
+            let gainHistory = tracking.physicalAssetGainHistory ?? []
+            let historyDays = Set(gainHistory.map { Calendar.current.startOfDay(for: $0.date) })
+            guard (account.type == .physicalAsset || gainHistory.isEmpty),
+                  historyDays.count == gainHistory.count,
+                  gainHistory.allSatisfy({
+                      $0.gainLoss.currency == account.currency && $0.date.timeIntervalSince1970.isFinite
+                  }) else {
+                return "Invalid physical asset gain history."
+            }
             for setting in tracking.metalPricing where setting.mode == .manual {
                 guard let price = setting.manualPricePerGram, !price.isNaN, price > 0, price < 1_000_000_000,
                       let date = setting.asOf, date.timeIntervalSince1970.isFinite else { return "Invalid manual metal price." }

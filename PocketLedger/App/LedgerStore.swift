@@ -1589,6 +1589,10 @@ final class LedgerStore: ObservableObject {
         FinanceAssetTracking.gainLoss(account: account, recordedBalance: balance(for: account), data: data)
     }
 
+    func captureDailyPhysicalAssetGainHistory() {
+        _ = persist(data, successMessage: nil, allowingAssetActivity: true)
+    }
+
     func metalPricePerGram(account: Account, metal: PreciousMetal) -> Decimal? {
         FinanceAssetTracking.pricePerGram(account: account, metal: metal, data: data)
     }
@@ -1917,11 +1921,12 @@ final class LedgerStore: ObservableObject {
 
     @discardableResult
     private func persist(
-        _ updated: FinanceData,
-        successMessage: String,
+        _ proposed: FinanceData,
+        successMessage: String?,
         allowingCorruptedReplacement: Bool = false,
         allowingAssetActivity: Bool = false
     ) -> Bool {
+        var updated = proposed
         if let error = FinanceAssetTracking.validationError(in: updated) {
             lastActionStatus = error
             return false
@@ -1936,8 +1941,13 @@ final class LedgerStore: ObservableObject {
                 return false
             }
         }
+        if allowingAssetActivity
+            || data.metalQuotes != updated.metalQuotes
+            || data.exchangeRates != updated.exchangeRates {
+            recordDailyPhysicalAssetGainHistory(in: &updated)
+        }
         guard data != updated else {
-            lastActionStatus = successMessage
+            if let successMessage { lastActionStatus = successMessage }
             return true
         }
 
@@ -1957,13 +1967,15 @@ final class LedgerStore: ObservableObject {
         guard persisted else {
             if storage.saveConflict {
                 replaceData(storage.load())
-                lastActionStatus = "\(successMessage) was not saved because the ledger changed in another surface. Reloaded the latest data."
+                let action = successMessage ?? "Daily physical asset history"
+                lastActionStatus = "\(action) was not saved because the ledger changed in another surface. Reloaded the latest data."
                 return false
             }
             let reason = storage.isCorrupted
                 ? "the persistent database could not be decoded; restore or reset it"
                 : "the persistent database is unavailable"
-            lastActionStatus = "\(successMessage) was not saved because \(reason)."
+            let action = successMessage ?? "Daily physical asset history"
+            lastActionStatus = "\(action) was not saved because \(reason)."
             return false
         }
 
@@ -1991,8 +2003,40 @@ final class LedgerStore: ObservableObject {
                 await NotificationService.refreshLoanNotifications(loans: loans)
             }
         }
-        lastActionStatus = successMessage
+        if let successMessage { lastActionStatus = successMessage }
         return true
+    }
+
+    private func recordDailyPhysicalAssetGainHistory(in updated: inout FinanceData) {
+        let date = Calendar.current.startOfDay(for: .now)
+        let index = LedgerIndex(data: updated)
+
+        for accountIndex in updated.accounts.indices {
+            var account = updated.accounts[accountIndex]
+            guard !account.isArchived,
+                  account.type == .physicalAsset,
+                  var tracking = account.tracking,
+                  let gainLoss = FinanceAssetTracking.gainLoss(
+                    account: account,
+                    recordedBalance: index.balance(for: account),
+                    data: updated
+                  ) else { continue }
+
+            var history = tracking.physicalAssetGainHistory ?? []
+            let snapshot = PhysicalAssetGainSnapshot(date: date, gainLoss: gainLoss)
+            if let snapshotIndex = history.firstIndex(where: {
+                Calendar.current.isDate($0.date, inSameDayAs: date)
+            }) {
+                history[snapshotIndex] = snapshot
+            } else {
+                history.append(snapshot)
+            }
+            history.sort { $0.date < $1.date }
+            guard tracking.physicalAssetGainHistory != history else { continue }
+            tracking.physicalAssetGainHistory = history
+            account.tracking = tracking
+            updated.accounts[accountIndex] = account
+        }
     }
 
     private func replaceData(_ updated: FinanceData) {

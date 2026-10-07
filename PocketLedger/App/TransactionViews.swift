@@ -1089,42 +1089,45 @@ struct TransactionRow: View {
         renderedRow
             .padding(.horizontal, swipeActionHorizontalInset)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.clear)
             .contentShape(Rectangle())
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 if canEditTransaction {
-                    PocketCircularSwipeAction(
-                        title: "Delete",
-                        systemImage: "trash",
-                        tint: .red,
-                        titleColor: .white,
-                        role: .destructive
-                    ) {
+                    Button(role: .destructive) {
                         isShowingDeleteConfirmation = true
+                    } label: {
+                        PocketSwipeActionLabel(title: "Delete", systemImage: "trash", tint: .red)
                     }
-                    PocketCircularSwipeAction(
-                        title: "Edit",
-                        systemImage: "pencil",
-                        tint: .yellow,
-                        iconColor: .black,
-                        titleColor: .black
-                    ) { onEdit() }
+                    .tint(.red)
+
+                    Button(action: onEdit) {
+                        PocketSwipeActionLabel(
+                            title: "Edit",
+                            systemImage: "pencil",
+                            tint: PocketLedgerTheme.warning
+                        )
+                    }
+                    .tint(PocketLedgerTheme.warning)
                 }
             }
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                 if canEditTransaction {
-                    PocketCircularSwipeAction(
-                        title: "Duplicate",
-                        systemImage: "plus.square.on.square",
-                        tint: PocketLedgerTheme.accent,
-                        titleColor: .white
-                    ) { onDuplicate() }
-                    PocketCircularSwipeAction(
-                        title: "Template",
-                        systemImage: "rectangle.stack.badge.plus",
-                        tint: PocketLedgerTheme.positive,
-                        titleColor: .white
-                    ) { onSaveTemplate() }
+                    Button(action: onDuplicate) {
+                        PocketSwipeActionLabel(
+                            title: "Duplicate",
+                            systemImage: "plus.square.on.square",
+                            tint: PocketLedgerTheme.accent
+                        )
+                    }
+                    .tint(PocketLedgerTheme.accent)
+
+                    Button(action: onSaveTemplate) {
+                        PocketSwipeActionLabel(
+                            title: "Template",
+                            systemImage: "rectangle.stack.badge.plus",
+                            tint: PocketLedgerTheme.positive
+                        )
+                    }
+                    .tint(PocketLedgerTheme.positive)
                 }
             }
             .padding(.horizontal, -swipeActionHorizontalInset)
@@ -1163,6 +1166,8 @@ struct TransactionRow: View {
     private var rowButton: some View {
         Button(action: activateRow) {
             rowContent
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(usesCustomScrollSwipeFallback ? PocketLedgerTheme.surface : .clear)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .offset(x: usesCustomScrollSwipeFallback ? swipeOffset : 0)
@@ -1217,8 +1222,7 @@ struct TransactionRow: View {
                 scrollSwipeAction(
                     "Edit",
                     systemImage: "pencil",
-                    tint: .yellow,
-                    iconColor: .black,
+                    tint: PocketLedgerTheme.warning,
                     action: onEdit
                 )
             }
@@ -1246,11 +1250,14 @@ struct TransactionRow: View {
             title: title,
             systemImage: systemImage,
             tint: tint,
-            iconColor: iconColor
+            iconColor: iconColor,
+            titleColor: .white
         ) {
             closeSwipeActions()
             action()
         }
+        .frame(maxHeight: .infinity)
+        .background(tint)
     }
 
     private var customSwipeGesture: some Gesture {

@@ -80,10 +80,16 @@ struct InvestmentEntry: Identifiable, Codable, Equatable {
     var transactionIDs: [UUID] = []
 }
 
+struct PhysicalAssetGainSnapshot: Codable, Equatable {
+    var date: Date
+    var gainLoss: Money
+}
+
 struct AccountTracking: Codable, Equatable {
     var metalPurchases: [MetalPurchase] = []
     var metalPricing: [MetalPriceSetting] = []
     var investmentEntries: [InvestmentEntry] = []
+    var physicalAssetGainHistory: [PhysicalAssetGainSnapshot]? = nil
     var unrealizedMinorUnits: Int64 {
         guard let last = investmentEntries.last else { return 0 }
         return last.kind == .valuation ? last.amount.minorUnits : last.previousUnrealizedMinorUnits - last.amount.minorUnits
@@ -110,5 +116,17 @@ struct AccountTracking: Codable, Equatable {
         let entryIDs = Set(investmentEntries.map(\.id))
         investmentEntries.append(contentsOf: imported.investmentEntries.filter { !entryIDs.contains($0.id) })
         investmentEntries.sort { $0.enteredAt < $1.enteredAt }
+
+        var gainHistory = physicalAssetGainHistory ?? []
+        for snapshot in imported.physicalAssetGainHistory ?? [] {
+            guard let index = gainHistory.firstIndex(where: {
+                Calendar.current.isDate($0.date, inSameDayAs: snapshot.date)
+            }) else {
+                gainHistory.append(snapshot)
+                continue
+            }
+            if snapshot.date > gainHistory[index].date { gainHistory[index] = snapshot }
+        }
+        physicalAssetGainHistory = gainHistory.sorted { $0.date < $1.date }
     }
 }

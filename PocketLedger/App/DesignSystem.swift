@@ -527,7 +527,7 @@ struct PocketSwipeActionLabel: View {
     let systemImage: String
     let tint: Color
     var iconColor: Color = .white
-    var titleColor: Color = .white
+    var titleColor: Color = PocketLedgerTheme.textSecondary
 
     var body: some View {
         VStack(spacing: 4) {
@@ -554,7 +554,7 @@ struct PocketCircularSwipeAction: View {
     let systemImage: String
     let tint: Color
     var iconColor: Color = .white
-    var titleColor: Color = PocketLedgerTheme.textSecondary
+    var titleColor: Color = .white
     var role: ButtonRole? = nil
     let action: () -> Void
 
@@ -569,7 +569,7 @@ struct PocketCircularSwipeAction: View {
             )
         }
         .buttonStyle(.plain)
-        .tint(.clear)
+        .tint(tint)
         .accessibilityLabel(title)
     }
 }

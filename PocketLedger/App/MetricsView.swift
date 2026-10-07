@@ -177,97 +177,95 @@ struct MetricsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView(showsIndicators: false) {
-                PocketGlassContainer(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        screenSubtitle
-                        periodControls
-                        periodNavigator
-                        totalsHeader(snapshot)
-                        spendingChart(snapshot)
-                        categoryRows(snapshot)
-                        activityMix(snapshot)
-                    }
-                    .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
-                    .padding(.top, 12)
-                    .padding(.bottom, 24)
+        ScrollView(showsIndicators: false) {
+            PocketGlassContainer(spacing: 14) {
+                VStack(alignment: .leading, spacing: 0) {
+                    screenSubtitle
+                    periodControls
+                    periodNavigator
+                    totalsHeader(snapshot)
+                    spendingChart(snapshot)
+                    categoryRows(snapshot)
+                    activityMix(snapshot)
                 }
+                .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
-            .pocketScreen()
-            .navigationTitle("Metrics")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar(.visible, for: .navigationBar)
-            .toolbar {
-                PocketLedgerToolbar(security: security) {
-                    ToolbarItem(placement: .primaryAction) {
-                        if proAccess.hasProAccess {
-                            Button {
-                                isExportOptionsPresented = true
-                            } label: {
-                                Image(systemName: "square.and.arrow.up")
-                            }
-                            .accessibilityLabel("Share metrics PDF report")
-                            .accessibilityHint("Creates a shareable PDF report")
-                        } else {
-                            ProUpgradeButton(feature: .pdfReports) {
-                                Image(systemName: "square.and.arrow.up")
-                            }
-                            .accessibilityLabel("Unlock PDF reports with Pro")
+        }
+        .pocketScreen()
+        .navigationTitle("Metrics")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar(.visible, for: .navigationBar)
+        .toolbar {
+            PocketLedgerToolbar(security: security) {
+                ToolbarItem(placement: .primaryAction) {
+                    if proAccess.hasProAccess {
+                        Button {
+                            isExportOptionsPresented = true
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
                         }
+                        .accessibilityLabel("Share metrics PDF report")
+                        .accessibilityHint("Creates a shareable PDF report")
+                    } else {
+                        ProUpgradeButton(feature: .pdfReports) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        .accessibilityLabel("Unlock PDF reports with Pro")
                     }
                 }
             }
-            .onAppear(perform: refreshSnapshot)
-            .onChange(of: period) { _, _ in refreshSnapshot() }
-            .onChange(of: selectedCurrency) { _, _ in refreshSnapshot() }
-            .onChange(of: anchorDate) { _, _ in refreshSnapshot() }
-            .onChange(of: customStart) { _, _ in refreshSnapshot() }
-            .onChange(of: customEnd) { _, _ in refreshSnapshot() }
-            .onChange(of: selectedCategoryID) { _, _ in refreshSnapshot() }
-            .onChange(of: store.ledgerRevision) { _, _ in refreshSnapshot() }
-            .onChange(of: proAccess.hasProAccess) { _, hasProAccess in
-                guard !hasProAccess else { return }
-                if period == .custom {
-                    period = .month
-                }
-                if !canViewSelectedPeriodAsFree {
-                    anchorDate = .now
+        }
+        .onAppear(perform: refreshSnapshot)
+        .onChange(of: period) { _, _ in refreshSnapshot() }
+        .onChange(of: selectedCurrency) { _, _ in refreshSnapshot() }
+        .onChange(of: anchorDate) { _, _ in refreshSnapshot() }
+        .onChange(of: customStart) { _, _ in refreshSnapshot() }
+        .onChange(of: customEnd) { _, _ in refreshSnapshot() }
+        .onChange(of: selectedCategoryID) { _, _ in refreshSnapshot() }
+        .onChange(of: store.ledgerRevision) { _, _ in refreshSnapshot() }
+        .onChange(of: proAccess.hasProAccess) { _, hasProAccess in
+            guard !hasProAccess else { return }
+            if period == .custom {
+                period = .month
+            }
+            if !canViewSelectedPeriodAsFree {
+                anchorDate = .now
+            }
+        }
+        .sheet(item: $reportToShare) { report in
+            MetricsReportShareSheet(url: report.url)
+        }
+        .confirmationDialog(
+            "Export Metrics PDF",
+            isPresented: $isExportOptionsPresented,
+            titleVisibility: .visible
+        ) {
+            Button("All \(snapshot.filteredTransactions.count) transactions") {
+                generateReport(transactionLimit: nil)
+            }
+            if snapshot.filteredTransactions.count > 500 {
+                Button("Latest 500 transactions") {
+                    generateReport(transactionLimit: 500)
                 }
             }
-            .sheet(item: $reportToShare) { report in
-                MetricsReportShareSheet(url: report.url)
+            if snapshot.filteredTransactions.count > 100 {
+                Button("Latest 100 transactions") {
+                    generateReport(transactionLimit: 100)
+                }
             }
-            .confirmationDialog(
-                "Export Metrics PDF",
-                isPresented: $isExportOptionsPresented,
-                titleVisibility: .visible
-            ) {
-                Button("All \(snapshot.filteredTransactions.count) transactions") {
-                    generateReport(transactionLimit: nil)
-                }
-                if snapshot.filteredTransactions.count > 500 {
-                    Button("Latest 500 transactions") {
-                        generateReport(transactionLimit: 500)
-                    }
-                }
-                if snapshot.filteredTransactions.count > 100 {
-                    Button("Latest 100 transactions") {
-                        generateReport(transactionLimit: 100)
-                    }
-                }
-                Button("Summary only") {
-                    generateReport(transactionLimit: 0)
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("The report uses the current period and filters. Transaction details are listed newest first.")
+            Button("Summary only") {
+                generateReport(transactionLimit: 0)
             }
-            .alert("Report not created", isPresented: reportErrorPresented) {
-                Button("OK") { reportError = nil }
-            } message: {
-                Text(reportError ?? "")
-            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The report uses the current period and filters. Transaction details are listed newest first.")
+        }
+        .alert("Report not created", isPresented: reportErrorPresented) {
+            Button("OK") { reportError = nil }
+        } message: {
+            Text(reportError ?? "")
         }
     }
 
@@ -918,8 +916,8 @@ private struct CategoryMetricsDetailView: View {
     @ObservedObject var security: AppSecurityService
     @ObservedObject private var proAccess = ProEntitlementStore.shared
 
-    @State private var categoryID: UUID?
-    @State private var categoryTitle: String
+    let categoryID: UUID?
+    let categoryTitle: String
     let currency: LedgerCurrency
     @State private var selectedInterval: DateInterval
 
@@ -943,8 +941,8 @@ private struct CategoryMetricsDetailView: View {
     ) {
         self.store = store
         self.security = security
-        _categoryID = State(initialValue: categoryID)
-        _categoryTitle = State(initialValue: categoryTitle)
+        self.categoryID = categoryID
+        self.categoryTitle = categoryTitle
         self.currency = currency
         _selectedInterval = State(initialValue: selectedInterval)
         _anchorDate = State(initialValue: anchorDate)
@@ -1206,12 +1204,12 @@ private struct CategoryMetricsDetailView: View {
 
                 VStack(spacing: 0) {
                     ForEach(currentSnapshot.subcategories) { metric in
-                        Button {
-                            categoryID = metric.categoryID
-                            categoryTitle = metric.title
-                            snapshot = CategoryMetricsDetailSnapshot.make(
-                                index: store.ledgerIndex,
+                        NavigationLink {
+                            CategoryMetricsDetailView(
+                                store: store,
+                                security: security,
                                 categoryID: metric.categoryID,
+                                categoryTitle: metric.title,
                                 currency: currency,
                                 anchorDate: anchorDate,
                                 selectedInterval: selectedInterval
@@ -1234,8 +1232,6 @@ private struct CategoryMetricsDetailView: View {
                             .contentShape(Rectangle())
                             .padding(.vertical, 13)
                         }
-                        .buttonStyle(.plain)
-
                         if metric.id != currentSnapshot.subcategories.last?.id {
                             Divider().overlay(PocketLedgerTheme.divider)
                         }

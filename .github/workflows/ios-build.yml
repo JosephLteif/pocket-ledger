@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build-and-package:
-    name: Build three complete sideload IPAs
+    name: Build two complete sideload IPAs
     needs: test-ios
     if: always() && (needs.test-ios.result == 'success' || needs.test-ios.result == 'skipped')
     runs-on: xcode-27
@@ -137,56 +137,10 @@ jobs:
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-watch-sandbox.log"
 
-      - name: Build legacy financedemo iPhone app and widget
-        run: |
-          set -o pipefail
-          xcodebuild \
-            -project PocketLedger.xcodeproj \
-            -scheme PocketLedger \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination "generic/platform=iOS" \
-            -derivedDataPath "$RUNNER_TEMP/LegacyDerivedData" \
-            -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/SourcePackages" \
-            ASSETCATALOG_COMPILER_APPICON_NAME=AppIconLegacy \
-            POCKET_LEDGER_DEVELOPER_PRO_OVERRIDE=YES \
-            POCKET_LEDGER_BUNDLE_ID_BASE=com.josephlteif.financedemo \
-            POCKET_LEDGER_APP_GROUP_ID_BASE=group.com.josephlteif.financedemo \
-            POCKET_LEDGER_DISPLAY_NAME="Pocket Ledger Legacy" \
-            POCKET_LEDGER_WIDGET_DISPLAY_NAME="Pocket Ledger Legacy Balance" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
-            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-legacy.log"
-
-      - name: Build legacy financedemo Apple Watch app and complication
-        run: |
-          set -o pipefail
-          xcodebuild \
-            -project PocketLedger.xcodeproj \
-            -scheme PocketLedgerWatch \
-            -configuration Release \
-            -sdk watchos \
-            -destination "generic/platform=watchOS" \
-            -derivedDataPath "$RUNNER_TEMP/LegacyWatchDerivedData" \
-            -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/SourcePackages" \
-            POCKET_LEDGER_BUNDLE_ID_BASE=com.josephlteif.financedemo \
-            POCKET_LEDGER_APP_GROUP_ID_BASE=group.com.josephlteif.financedemo \
-            POCKET_LEDGER_WATCH_DISPLAY_NAME="Pocket Ledger Legacy" \
-            POCKET_LEDGER_WATCH_WIDGET_DISPLAY_NAME="Pocket Ledger Legacy Complication" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
-            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-watch-legacy.log"
-
-      - name: Stage all three app variants
+      - name: Stage the two app variants
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/sideload/normal" "$RUNNER_TEMP/sideload/sandbox" "$RUNNER_TEMP/sideload/legacy"
+          mkdir -p "$RUNNER_TEMP/sideload/normal" "$RUNNER_TEMP/sideload/sandbox"
           ditto "$RUNNER_TEMP/NormalDerivedData/Build/Products/Release-iphoneos/PocketLedger.app" \
             "$RUNNER_TEMP/sideload/normal/PocketLedger.app"
           ditto "$RUNNER_TEMP/NormalWatchDerivedData/Build/Products/Release-watchos/PocketLedgerWatch.app" \
@@ -195,12 +149,8 @@ jobs:
             "$RUNNER_TEMP/sideload/sandbox/PocketLedger.app"
           ditto "$RUNNER_TEMP/SandboxWatchDerivedData/Build/Products/Release-watchos/PocketLedgerWatch.app" \
             "$RUNNER_TEMP/sideload/sandbox/PocketLedgerWatch.app"
-          ditto "$RUNNER_TEMP/LegacyDerivedData/Build/Products/Release-iphoneos/PocketLedger.app" \
-            "$RUNNER_TEMP/sideload/legacy/PocketLedger.app"
-          ditto "$RUNNER_TEMP/LegacyWatchDerivedData/Build/Products/Release-watchos/PocketLedgerWatch.app" \
-            "$RUNNER_TEMP/sideload/legacy/PocketLedgerWatch.app"
 
-      - name: Package and verify the three iPhone, Watch, and widget IPAs
+      - name: Package and verify the two iPhone, Watch, and widget IPAs
         run: |
           set -euo pipefail
 
@@ -315,11 +265,10 @@ jobs:
 
           package_ipa normal "com.josephlteif.pocketledger" "Pocket Ledger" "Pocket Ledger Balance" "Pocket Ledger" "Pocket Ledger Complication" "PocketLedger-normal-build-$GITHUB_RUN_NUMBER.ipa"
           package_ipa sandbox "com.josephlteif.pocketledger.sandbox" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Balance" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Complication" "PocketLedger-sandbox-build-$GITHUB_RUN_NUMBER.ipa"
-          package_ipa legacy "com.josephlteif.financedemo" "Pocket Ledger Legacy" "Pocket Ledger Legacy Balance" "Pocket Ledger Legacy" "Pocket Ledger Legacy Complication" "PocketLedger-financedemo-build-$GITHUB_RUN_NUMBER.ipa"
 
-          test "$(find "$GITHUB_WORKSPACE" -maxdepth 1 -name '*.ipa' -type f | wc -l | tr -d '[:space:]')" = "3"
+          test "$(find "$GITHUB_WORKSPACE" -maxdepth 1 -name '*.ipa' -type f | wc -l | tr -d '[:space:]')" = "2"
 
-      - name: Upload the three IPA files
+      - name: Upload the two IPA files
         uses: actions/upload-artifact@v7
         with:
           name: PocketLedger-build-${{ github.run_number }}

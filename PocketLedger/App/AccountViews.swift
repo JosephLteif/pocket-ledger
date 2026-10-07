@@ -156,7 +156,10 @@ struct AccountDetailView: View {
                 TemplateNameEditor(store: store, transaction: transaction)
             }
             .pocketScreen()
-            .onAppear(perform: refreshSnapshot)
+            .onAppear {
+                store.captureDailyPhysicalAssetGainHistory()
+                refreshSnapshot()
+            }
             .onChange(of: accountID) { _, _ in
                 transactionPage = 0
                 refreshSnapshot()
@@ -180,6 +183,14 @@ struct AccountDetailView: View {
                 PocketGlassContainer(spacing: 14) {
                     VStack(alignment: .leading, spacing: 18) {
                         balanceCard(account)
+                        if account.type == .physicalAsset {
+                            PhysicalAssetGainHistoryChart(
+                                account: account,
+                                areBalancesRevealed: areBalancesRevealed
+                            )
+                            .padding(16)
+                            .pocketGroupedSurface(cornerRadius: 20)
+                        }
                         totalsScopeCard(account)
 
                         if !hidesGenericActivity {

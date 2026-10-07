@@ -1,5 +1,4 @@
 import Foundation
-import Charts
 import SwiftUI
 
 @MainActor
@@ -189,7 +188,7 @@ struct DashboardView: View {
     @State private var snapshot = DashboardSnapshot.empty
     @State private var dashboardPreferences = DashboardPreferences.load()
     @State private var isBalanceScopeExpanded = false
-    @State private var preferredPhysicalAssetHistoryCurrency = LedgerCurrency.usd
+    @State private var selectedPhysicalAssetGainAccountID: UUID? = nil
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @AppStorage("pocketLedger.showAllBalanceCurrencies") private var showsAllBalanceCurrencies = false
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
@@ -305,6 +304,8 @@ struct DashboardView: View {
         switch widget {
         case .balance:
             balanceHero
+        case .physicalAssetGain:
+            physicalAssetGainWidget
         case .attention:
             attentionSnapshot
         case .accounts:
@@ -377,8 +378,6 @@ struct DashboardView: View {
                 }
             }
 
-            physicalAssetGainChart
-
             Text("Includes accounts marked for totals, including investments and physical assets. Loans are tracked separately in Accounts.")
                 .font(.caption)
                 .foregroundStyle(PocketLedgerTheme.textTertiary)
@@ -439,139 +438,65 @@ struct DashboardView: View {
         .padding(.vertical, 9)
     }
 
-    @ViewBuilder
-    private var physicalAssetGainChart: some View {
-        if snapshot.activeAccounts.contains(where: { $0.type == .physicalAsset && $0.includeInTotals }) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Physical asset gain/loss")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(PocketLedgerTheme.textPrimary)
+    private var physicalAssetGainAccounts: [Account] {
+        store.activeAccounts.filter {
+            $0.type == .physicalAsset && !($0.tracking?.metalPurchases.isEmpty ?? true)
+        }
+    }
 
-                    Spacer()
-                    if physicalAssetHistoryCurrencies.count > 1 {
+    private var physicalAssetGainWidget: some View {
+        let accounts = physicalAssetGainAccounts
+        let selectedAccount = accounts.first { $0.id == selectedPhysicalAssetGainAccountID } ?? accounts.first
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Physical asset gain/loss", systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PocketLedgerTheme.textPrimary)
+
+                Spacer(minLength: 8)
+                if let selectedAccount {
+                    if accounts.count > 1 {
                         Menu {
-                            ForEach(physicalAssetHistoryCurrencies) { currency in
+                            ForEach(accounts) { account in
                                 Button {
-                                    preferredPhysicalAssetHistoryCurrency = currency
+                                    selectedPhysicalAssetGainAccountID = account.id
                                 } label: {
-                                    if currency == selectedPhysicalAssetHistoryCurrency {
-                                        Label(currency.rawValue, systemImage: "checkmark")
+                                    if account.id == selectedAccount.id {
+                                        Label(account.name, systemImage: "checkmark")
                                     } else {
-                                        Text(currency.rawValue)
+                                        Text(account.name)
                                     }
                                 }
                             }
                         } label: {
-                            Label(selectedPhysicalAssetHistoryCurrency.rawValue, systemImage: "chevron.down")
+                            Label(selectedAccount.name, systemImage: "chevron.down")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(PocketLedgerTheme.accent)
                         }
-                    } else if let currency = physicalAssetHistoryCurrencies.first {
-                        Text(currency.rawValue)
+                        .accessibilityLabel("Choose physical asset account")
+                    } else {
+                        Text(selectedAccount.name)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(PocketLedgerTheme.accent)
                     }
                 }
-
-                if !areBalancesRevealed {
-                    Text("Reveal balances to view the history chart.")
-                        .font(.caption)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-                } else if physicalAssetHistoryCurrencies.isEmpty {
-                    Text("Daily history starts once all included physical assets have a current value.")
-                        .font(.caption)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-                } else {
-                    let currency = selectedPhysicalAssetHistoryCurrency
-                    let points = Array(physicalAssetHistoryPoints.suffix(365))
-                    let values = points.map { Double($0.gainLoss.minorUnits) / Double(currency.minorUnitScale) }
-                    let lowerBound = min(values.min() ?? 0, 0)
-                    let upperBound = max(values.max() ?? 0, 0)
-                    let padding = max((upperBound - lowerBound) * 0.12, 1)
-
-                    Chart {
-                        RuleMark(y: .value("Break-even", 0))
-                            .foregroundStyle(PocketLedgerTheme.divider)
-
-                        ForEach(points, id: \.date) { point in
-                            LineMark(
-                                x: .value("Date", point.date),
-                                y: .value("Gain/loss", Double(point.gainLoss.minorUnits) / Double(currency.minorUnitScale))
-                            )
-                            .interpolationMethod(.linear)
-                            .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                            .foregroundStyle(PocketLedgerTheme.accent)
-
-                            PointMark(
-                                x: .value("Date", point.date),
-                                y: .value("Gain/loss", Double(point.gainLoss.minorUnits) / Double(currency.minorUnitScale))
-                            )
-                            .foregroundStyle(PocketLedgerTheme.accent)
-                            .symbolSize(24)
-                        }
-                    }
-                    .chartYScale(domain: (lowerBound - padding)...(upperBound + padding))
-                    .chartYAxis {
-                        AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { value in
-                            AxisGridLine().foregroundStyle(PocketLedgerTheme.divider)
-                            AxisValueLabel {
-                                if let amount = value.as(Double.self) {
-                                    Text(amount.formatted(.currency(code: currency.rawValue)))
-                                        .font(.caption2)
-                                }
-                            }
-                        }
-                    }
-                    .chartXAxis {
-                        AxisMarks(values: .automatic(desiredCount: 4)) { _ in
-                            AxisGridLine().foregroundStyle(PocketLedgerTheme.divider)
-                            AxisValueLabel(format: .dateTime.month(.abbreviated).day())
-                                .foregroundStyle(PocketLedgerTheme.textSecondary)
-                        }
-                    }
-                    .frame(height: 190)
-
-                    Text("Daily snapshots · last 365 days")
-                        .font(.caption2)
-                        .foregroundStyle(PocketLedgerTheme.textTertiary)
-                }
             }
-            .padding(.top, 4)
-        }
-    }
 
-    private var physicalAssetHistoryCurrencies: [LedgerCurrency] {
-        LedgerCurrency.allCases.filter { currency in
-            let accounts = store.data.accounts.filter {
-                !$0.isArchived && $0.includeInTotals && $0.type == .physicalAsset && $0.currency == currency
+            if let selectedAccount {
+                PhysicalAssetGainHistoryChart(
+                    account: selectedAccount,
+                    areBalancesRevealed: areBalancesRevealed
+                )
+            } else {
+                Text("Track gold or silver in a physical asset account to see daily gains here.")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
             }
-            return !accounts.isEmpty
-                && accounts.allSatisfy { store.gainLoss(for: $0) != nil }
-                && accounts.contains { $0.tracking?.physicalAssetGainHistory?.isEmpty == false }
         }
-    }
-
-    private var physicalAssetHistoryPoints: [PhysicalAssetGainSnapshot] {
-        let currency = selectedPhysicalAssetHistoryCurrency
-        let history = store.data.accounts
-            .filter { !$0.isArchived && $0.includeInTotals && $0.type == .physicalAsset && $0.currency == currency }
-            .flatMap { $0.tracking?.physicalAssetGainHistory ?? [] }
-        let grouped = Dictionary(grouping: history) { Calendar.current.startOfDay(for: $0.date) }
-
-        return grouped.map { date, snapshots in
-            PhysicalAssetGainSnapshot(
-                date: date,
-                gainLoss: Money(currency: currency, minorUnits: snapshots.reduce(0) { $0 + $1.gainLoss.minorUnits })
-            )
-        }
-        .sorted { $0.date < $1.date }
-    }
-
-    private var selectedPhysicalAssetHistoryCurrency: LedgerCurrency {
-        physicalAssetHistoryCurrencies.contains(preferredPhysicalAssetHistoryCurrency)
-            ? preferredPhysicalAssetHistoryCurrency
-            : physicalAssetHistoryCurrencies.first ?? .usd
+        .padding(20)
+        .pocketGroupedSurface(cornerRadius: 22)
+        .task { await store.refreshMetalPrices() }
     }
 
     @ViewBuilder

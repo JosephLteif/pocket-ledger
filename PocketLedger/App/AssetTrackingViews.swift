@@ -1,4 +1,184 @@
 import SwiftUI
+import Charts
+
+private struct PhysicalAssetGainHistoryPoint: Identifiable {
+    let date: Date
+    let gainLoss: Money
+    var id: Date { date }
+}
+
+@MainActor
+struct PhysicalAssetGainHistoryChart: View {
+    let account: Account
+    let areBalancesRevealed: Bool
+    @State private var selectedMetal: PreciousMetal? = nil
+
+    private var history: [PhysicalAssetGainSnapshot] {
+        account.tracking?.physicalAssetGainHistory ?? []
+    }
+
+    private var availableMetals: [PreciousMetal] {
+        PreciousMetal.allCases.filter { metal in
+            account.tracking?.metalPurchases.contains { $0.metal == metal } == true
+        }
+    }
+
+    private var selectedHistoryMetal: PreciousMetal? {
+        guard let selectedMetal, availableMetals.contains(selectedMetal) else { return nil }
+        return selectedMetal
+    }
+
+    private var chartPoints: [PhysicalAssetGainHistoryPoint] {
+        history.sorted { $0.date < $1.date }.suffix(365).compactMap { snapshot in
+            let gainLoss: Money?
+            if let metal = selectedHistoryMetal {
+                gainLoss = snapshot.gainLossByMetal?[metal]
+            } else {
+                gainLoss = snapshot.gainLoss
+            }
+            return gainLoss.map { PhysicalAssetGainHistoryPoint(date: snapshot.date, gainLoss: $0) }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Gain/loss over time")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PocketLedgerTheme.textPrimary)
+
+                Spacer(minLength: 8)
+                if !availableMetals.isEmpty {
+                    Menu {
+                        Button {
+                            selectedMetal = nil
+                        } label: {
+                            if selectedHistoryMetal == nil {
+                                Label("All metals", systemImage: "checkmark")
+                            } else {
+                                Text("All metals")
+                            }
+                        }
+                        ForEach(availableMetals) { metal in
+                            Button {
+                                selectedMetal = metal
+                            } label: {
+                                if selectedHistoryMetal == metal {
+                                    Label(metal.displayName, systemImage: "checkmark")
+                                } else {
+                                    Text(metal.displayName)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label(selectedHistoryMetal?.displayName ?? "All metals", systemImage: "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(PocketLedgerTheme.accent)
+                    }
+                    .accessibilityLabel("Choose metal for gain/loss chart")
+                }
+            }
+
+            if !areBalancesRevealed {
+                Text("Reveal balances to view this history chart.")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            } else if availableMetals.isEmpty {
+                Text("Add a gold or silver holding to start daily tracking.")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            } else if chartPoints.isEmpty {
+                Text(emptyHistoryMessage)
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            } else {
+                if let currentPoint = chartPoints.last {
+                    HStack {
+                        Text("Latest · \(currentPoint.date.formatted(.dateTime.month(.abbreviated).day()))")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                            .lineLimit(1)
+                        Spacer()
+                        ProtectedAmountText(
+                            value: currentPoint.gainLoss.minorUnits > 0
+                                ? "+\(currentPoint.gainLoss.formatted)"
+                                : currentPoint.gainLoss.formatted,
+                            isRevealed: areBalancesRevealed
+                        )
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .foregroundStyle(currentPoint.gainLoss.minorUnits >= 0 ? PocketLedgerTheme.positive : .red)
+                    }
+                }
+
+                let values = chartPoints.map {
+                    Double($0.gainLoss.minorUnits) / Double(account.currency.minorUnitScale)
+                }
+                let lowerBound = min(values.min() ?? 0, 0)
+                let upperBound = max(values.max() ?? 0, 0)
+                let padding = max((upperBound - lowerBound) * 0.12, 1)
+
+                Chart {
+                    RuleMark(y: .value("Break-even", 0))
+                        .foregroundStyle(PocketLedgerTheme.divider)
+
+                    ForEach(chartPoints) { point in
+                        let value = Double(point.gainLoss.minorUnits) / Double(account.currency.minorUnitScale)
+                        LineMark(
+                            x: .value("Date", point.date),
+                            y: .value("Gain/loss", value)
+                        )
+                        .interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .foregroundStyle(PocketLedgerTheme.accent)
+
+                        PointMark(
+                            x: .value("Date", point.date),
+                            y: .value("Gain/loss", value)
+                        )
+                        .foregroundStyle(PocketLedgerTheme.accent)
+                        .symbolSize(24)
+                    }
+                }
+                .chartYScale(domain: (lowerBound - padding)...(upperBound + padding))
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { value in
+                        AxisGridLine().foregroundStyle(PocketLedgerTheme.divider)
+                        AxisValueLabel {
+                            if let amount = value.as(Double.self) {
+                                Text(amount.formatted(.currency(code: account.currency.rawValue)))
+                                    .font(.caption2)
+                            }
+                        }
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                        AxisGridLine().foregroundStyle(PocketLedgerTheme.divider)
+                        AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    }
+                }
+                .frame(height: 190)
+
+                Text("Daily snapshots · last 365 days")
+                    .font(.caption2)
+                    .foregroundStyle(PocketLedgerTheme.textTertiary)
+            }
+        }
+    }
+
+    private var emptyHistoryMessage: String {
+        if history.isEmpty {
+            return "Daily history starts once a current metal price is available."
+        }
+        if selectedHistoryMetal == nil {
+            return "Choose a metal to see its individual history."
+        }
+        return "Daily history for this metal starts once its current price is available."
+    }
+}
 
 @MainActor
 struct AssetPurchaseEditor: View {

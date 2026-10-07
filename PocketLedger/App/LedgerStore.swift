@@ -2015,15 +2015,25 @@ final class LedgerStore: ObservableObject {
             var account = updated.accounts[accountIndex]
             guard !account.isArchived,
                   account.type == .physicalAsset,
-                  var tracking = account.tracking,
-                  let gainLoss = FinanceAssetTracking.gainLoss(
-                    account: account,
-                    recordedBalance: index.balance(for: account),
-                    data: updated
-                  ) else { continue }
+                  var tracking = account.tracking else { continue }
+
+            let gainLoss = FinanceAssetTracking.gainLoss(
+                account: account,
+                recordedBalance: index.balance(for: account),
+                data: updated
+            )
+            let gainLossByMetal = Dictionary(uniqueKeysWithValues: PreciousMetal.allCases.compactMap { metal in
+                FinanceAssetTracking.gainLoss(account: account, metal: metal, data: updated)
+                    .map { (metal, $0) }
+            })
+            guard gainLoss != nil || !gainLossByMetal.isEmpty else { continue }
 
             var history = tracking.physicalAssetGainHistory ?? []
-            let snapshot = PhysicalAssetGainSnapshot(date: date, gainLoss: gainLoss)
+            let snapshot = PhysicalAssetGainSnapshot(
+                date: date,
+                gainLoss: gainLoss,
+                gainLossByMetal: gainLossByMetal.isEmpty ? nil : gainLossByMetal
+            )
             if let snapshotIndex = history.firstIndex(where: {
                 Calendar.current.isDate($0.date, inSameDayAs: date)
             }) {

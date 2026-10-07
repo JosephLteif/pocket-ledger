@@ -82,7 +82,8 @@ struct InvestmentEntry: Identifiable, Codable, Equatable {
 
 struct PhysicalAssetGainSnapshot: Codable, Equatable {
     var date: Date
-    var gainLoss: Money
+    var gainLoss: Money?
+    var gainLossByMetal: [PreciousMetal: Money]? = nil
 }
 
 struct AccountTracking: Codable, Equatable {

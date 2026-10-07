@@ -70,6 +70,27 @@ enum FinanceAssetTracking {
         return try? money((Decimal(value.minorUnits) - Decimal(recordedBalance.minorUnits) + realized) / Decimal(account.currency.minorUnitScale), currency: account.currency)
     }
 
+    static func gainLoss(account: Account, metal: PreciousMetal, data: FinanceData) -> Money? {
+        guard account.type == .physicalAsset, let tracking = account.tracking else { return nil }
+        let purchases = tracking.metalPurchases.filter { $0.metal == metal }
+        guard !purchases.isEmpty else { return nil }
+
+        let price = pricePerGram(account: account, metal: metal, data: data)
+        guard purchases.allSatisfy({ $0.remainingWeightGrams == 0 || price != nil }) else { return nil }
+
+        let scale = Decimal(account.currency.minorUnitScale)
+        let marketValue = purchases.reduce(Decimal.zero) { total, purchase in
+            total + purchase.pureWeightGrams * (price ?? Decimal.zero)
+        }
+        let remainingCost = purchases.reduce(Decimal.zero) {
+            $0 + Decimal($1.remainingCost.minorUnits) / scale
+        }
+        let realized = purchases.reduce(Decimal.zero) { total, purchase in
+            total + purchase.sales.reduce(Decimal.zero) { $0 + Decimal($1.gain.minorUnits) / scale }
+        }
+        return try? money(marketValue + realized - remainingCost, currency: account.currency)
+    }
+
     private static func accountIndex(_ id: UUID, type: AccountType, in data: FinanceData) throws -> Int {
         guard let index = data.accounts.firstIndex(where: { $0.id == id && $0.type == type && !$0.isArchived }) else {
             throw AssetTrackingError(message: "Choose an active \(type.displayName.lowercased()) account.")
@@ -272,7 +293,10 @@ enum FinanceAssetTracking {
             guard (account.type == .physicalAsset || gainHistory.isEmpty),
                   historyDays.count == gainHistory.count,
                   gainHistory.allSatisfy({
-                      $0.gainLoss.currency == account.currency && $0.date.timeIntervalSince1970.isFinite
+                      $0.date.timeIntervalSince1970.isFinite
+                          && ($0.gainLoss.map { $0.currency == account.currency } ?? true)
+                          && ($0.gainLossByMetal?.values.allSatisfy { $0.currency == account.currency } ?? true)
+                          && ($0.gainLoss != nil || $0.gainLossByMetal?.isEmpty == false)
                   }) else {
                 return "Invalid physical asset gain history."
             }

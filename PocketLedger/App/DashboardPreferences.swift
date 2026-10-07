@@ -2,6 +2,7 @@ import Foundation
 
 enum DashboardWidget: String, CaseIterable, Codable, Hashable, Identifiable {
     case balance
+    case physicalAssetGain
     case attention
     case accounts
     case loans
@@ -18,6 +19,8 @@ enum DashboardWidget: String, CaseIterable, Codable, Hashable, Identifiable {
         switch self {
         case .balance:
             return "Included balances"
+        case .physicalAssetGain:
+            return "Physical asset gains"
         case .attention:
             return "Needs attention"
         case .accounts:
@@ -43,6 +46,8 @@ enum DashboardWidget: String, CaseIterable, Codable, Hashable, Identifiable {
         switch self {
         case .balance:
             return "Balances across your currencies"
+        case .physicalAssetGain:
+            return "Daily gold and silver gains by account"
         case .attention:
             return "Items that need a review"
         case .accounts:
@@ -68,6 +73,8 @@ enum DashboardWidget: String, CaseIterable, Codable, Hashable, Identifiable {
         switch self {
         case .balance:
             return "wallet.pass.fill"
+        case .physicalAssetGain:
+            return "chart.line.uptrend.xyaxis"
         case .attention:
             return "exclamationmark.triangle.fill"
         case .accounts:
@@ -103,6 +110,7 @@ struct DashboardPreferences: Codable, Equatable {
     static let defaultPreferences = DashboardPreferences(
         order: [
             .balance,
+            .physicalAssetGain,
             .attention,
             .monthSummary,
             .recentActivity,

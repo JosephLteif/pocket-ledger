@@ -1037,7 +1037,6 @@ struct TransactionRow: View {
     let amountOverride: String?
     let amountColorOverride: Color?
     let usesScrollSwipeActions: Bool
-    let swipeActionHorizontalInset: CGFloat
     let allowsActions: Bool
     let isSelectionMode: Bool
     let isSelected: Bool
@@ -1061,7 +1060,6 @@ struct TransactionRow: View {
         amountOverride: String? = nil,
         amountColorOverride: Color? = nil,
         usesScrollSwipeActions: Bool = false,
-        swipeActionHorizontalInset: CGFloat = 0,
         reportingCurrency: LedgerCurrency? = nil,
         accountContext: Account? = nil
     ) {
@@ -1076,7 +1074,6 @@ struct TransactionRow: View {
         self.amountOverride = amountOverride
         self.amountColorOverride = amountColorOverride
         self.usesScrollSwipeActions = usesScrollSwipeActions
-        self.swipeActionHorizontalInset = swipeActionHorizontalInset
         self.reportingCurrency = reportingCurrency
         self.accountContext = accountContext
         self.allowsActions = allowsActions
@@ -1087,50 +1084,44 @@ struct TransactionRow: View {
 
     var body: some View {
         renderedRow
-            .padding(.horizontal, swipeActionHorizontalInset)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 if canEditTransaction {
-                    Button(role: .destructive) {
+                    PocketSwipeActionButton(
+                        title: "Delete",
+                        systemImage: "trash",
+                        tint: .red,
+                        role: .destructive
+                    ) {
                         isShowingDeleteConfirmation = true
-                    } label: {
-                        PocketSwipeActionLabel(title: "Delete", systemImage: "trash", tint: .red)
                     }
-                    .tint(.red)
 
-                    Button(action: onEdit) {
-                        PocketSwipeActionLabel(
-                            title: "Edit",
-                            systemImage: "pencil",
-                            tint: PocketLedgerTheme.warning
-                        )
-                    }
-                    .tint(PocketLedgerTheme.warning)
+                    PocketSwipeActionButton(
+                        title: "Edit",
+                        systemImage: "pencil",
+                        tint: PocketLedgerTheme.warning,
+                        action: onEdit
+                    )
                 }
             }
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                 if canEditTransaction {
-                    Button(action: onDuplicate) {
-                        PocketSwipeActionLabel(
-                            title: "Duplicate",
-                            systemImage: "plus.square.on.square",
-                            tint: PocketLedgerTheme.accent
-                        )
-                    }
-                    .tint(PocketLedgerTheme.accent)
+                    PocketSwipeActionButton(
+                        title: "Duplicate",
+                        systemImage: "plus.square.on.square",
+                        tint: PocketLedgerTheme.accent,
+                        action: onDuplicate
+                    )
 
-                    Button(action: onSaveTemplate) {
-                        PocketSwipeActionLabel(
-                            title: "Template",
-                            systemImage: "rectangle.stack.badge.plus",
-                            tint: PocketLedgerTheme.positive
-                        )
-                    }
-                    .tint(PocketLedgerTheme.positive)
+                    PocketSwipeActionButton(
+                        title: "Template",
+                        systemImage: "rectangle.stack.badge.plus",
+                        tint: PocketLedgerTheme.positive,
+                        action: onSaveTemplate
+                    )
                 }
             }
-            .padding(.horizontal, -swipeActionHorizontalInset)
             .confirmationDialog(
                 "Delete transaction?",
                 isPresented: $isShowingDeleteConfirmation,
@@ -1167,9 +1158,9 @@ struct TransactionRow: View {
         Button(action: activateRow) {
             rowContent
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(usesCustomScrollSwipeFallback ? PocketLedgerTheme.surface : .clear)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(usesCustomScrollSwipeFallback ? PocketLedgerTheme.surface : .clear)
         .offset(x: usesCustomScrollSwipeFallback ? swipeOffset : 0)
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)

@@ -195,28 +195,27 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                PocketGlassContainer(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        dashboardDateHeader
-                        if !store.storageAvailable || !store.sharedStorageAvailable {
-                            storageNotice
-                        }
-                        dashboardWidgets
+            PocketGlassContainer(spacing: 14) {
+                List {
+                    dashboardListRow(dashboardDateHeader, top: 12, bottom: 0)
+                    if !store.storageAvailable || !store.sharedStorageAvailable {
+                        dashboardListRow(storageNotice)
+                    }
+                    dashboardWidgets
 
-                        if let status = store.lastActionStatus {
+                    if let status = store.lastActionStatus {
+                        dashboardListRow(
                             Text(status)
                                 .font(.caption)
                                 .foregroundStyle(PocketLedgerTheme.textTertiary)
-                                .padding(.horizontal, 4)
-                        }
+                                .padding(.horizontal, 4),
+                            bottom: 24
+                        )
                     }
-                    .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
-                    .padding(.top, 12)
-                    .padding(.bottom, 24)
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
-            .pocketSwipeActionsContainer()
             .pocketScreen()
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !deletedTransactionsForUndo.isEmpty {
@@ -291,7 +290,7 @@ struct DashboardView: View {
     @ViewBuilder
     private var dashboardWidgets: some View {
         if dashboardPreferences.enabledWidgets.isEmpty {
-            dashboardEmptyState
+            dashboardListRow(dashboardEmptyState)
         } else {
             ForEach(dashboardPreferences.enabledWidgets) { widget in
                 dashboardWidget(widget)
@@ -303,30 +302,48 @@ struct DashboardView: View {
     private func dashboardWidget(_ widget: DashboardWidget) -> some View {
         switch widget {
         case .balance:
-            balanceHero
+            dashboardListRow(balanceHero)
         case .physicalAssetGain:
-            physicalAssetGainWidget
+            dashboardListRow(physicalAssetGainWidget)
         case .attention:
-            attentionSnapshot
+            dashboardListRow(attentionSnapshot)
         case .accounts:
-            accountBreakdown
+            dashboardListRow(accountBreakdown)
         case .loans:
-            loanSnapshot
+            dashboardListRow(loanSnapshot)
         case .monthSummary:
-            monthSnapshot
+            dashboardListRow(monthSnapshot)
         case .recentActivity:
             recentActivity
         case .upcoming:
-            upcomingSchedules
+            dashboardListRow(upcomingSchedules)
         case .cashFlow:
-            cashFlowSnapshot
+            dashboardListRow(cashFlowSnapshot)
         case .budgetPulse:
-            budgetSnapshot
+            dashboardListRow(budgetSnapshot)
         case .storageStatus:
             if store.storageAvailable && store.sharedStorageAvailable {
-                storageNotice
+                dashboardListRow(storageNotice)
             }
         }
+    }
+
+    private func dashboardListRow<Content: View>(
+        _ content: Content,
+        top: CGFloat = 8,
+        bottom: CGFloat = 8
+    ) -> some View {
+        content
+            .listRowInsets(
+                EdgeInsets(
+                    top: top,
+                    leading: PocketLedgerTheme.screenHorizontalPadding,
+                    bottom: bottom,
+                    trailing: PocketLedgerTheme.screenHorizontalPadding
+                )
+            )
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
     }
 
     private var dashboardEmptyState: some View {
@@ -1023,19 +1040,7 @@ struct DashboardView: View {
     }
 
     private var recentActivity: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Recent activity")
-                    .font(.title3.weight(.bold))
-                Spacer()
-                Button("See all", action: onShowTransactions)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(PocketLedgerTheme.accent)
-                    .accessibilityLabel("See all transactions")
-                    .accessibilityHint("Opens transaction history")
-                    .font(.caption.weight(.semibold))
-            }
-
+        Section {
             if snapshot.recentTransactions.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "tray")
@@ -1053,42 +1058,60 @@ struct DashboardView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 22)
                 .pocketCard()
+                .listRowInsets(
+                    EdgeInsets(
+                        top: 0,
+                        leading: PocketLedgerTheme.screenHorizontalPadding,
+                        bottom: 0,
+                        trailing: PocketLedgerTheme.screenHorizontalPadding
+                    )
+                )
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(snapshot.recentTransactions.prefix(5))) { transaction in
-                        TransactionRow(
-                            transaction: transaction,
-                            store: store,
-                            onEdit: { presentedSheet = .transaction(transaction) },
-                            onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-                            onDelete: {
-                                if store.deleteTransaction(id: transaction.id) {
-                                    deletedTransactionsForUndo.append(transaction)
-                                } else {
-                                    transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
-                                }
-                            },
-                            onSaveTemplate: { transactionToTemplate = transaction },
-                            allowsActions: true,
-                            usesScrollSwipeActions: true,
-                            swipeActionHorizontalInset: 14
-                        )
-                        .transition(
-                            reduceMotion
-                                ? .identity
-                                : .move(edge: .top).combined(with: .opacity)
-                        )
-                        Divider().overlay(PocketLedgerTheme.divider)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .pocketGroupedSurface(cornerRadius: 18)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18)
-                        .stroke(PocketLedgerTheme.divider, lineWidth: 1)
+                ForEach(Array(snapshot.recentTransactions.prefix(5).enumerated()), id: \.element.id) { entry in
+                    let transaction = entry.element
+                    TransactionRow(
+                        transaction: transaction,
+                        store: store,
+                        onEdit: { presentedSheet = .transaction(transaction) },
+                        onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
+                        onDelete: {
+                            if store.deleteTransaction(id: transaction.id) {
+                                deletedTransactionsForUndo.append(transaction)
+                            } else {
+                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
+                            }
+                        },
+                        onSaveTemplate: { transactionToTemplate = transaction },
+                        allowsActions: true
+                    )
+                    .transition(
+                        reduceMotion
+                            ? .identity
+                            : .move(edge: .top).combined(with: .opacity)
+                    )
+                    .pocketGroupedListRow(
+                        index: entry.offset,
+                        count: min(snapshot.recentTransactions.count, 5)
+                    )
                 }
             }
+        } header: {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Recent activity")
+                    .font(.title3.weight(.bold))
+                Spacer()
+                Button("See all", action: onShowTransactions)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(PocketLedgerTheme.accent)
+                    .accessibilityLabel("See all transactions")
+                    .accessibilityHint("Opens transaction history")
+                    .font(.caption.weight(.semibold))
+            }
+            .textCase(nil)
         }
+        .listSectionSeparator(.hidden)
     }
 
     @ViewBuilder

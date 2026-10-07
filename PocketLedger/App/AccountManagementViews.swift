@@ -344,39 +344,34 @@ struct AccountsView: View {
                     return store.moveAccount(accountID: draggedID, beforeAccountID: account.id)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    PocketCircularSwipeAction(
+                    PocketSwipeActionButton(
                         title: "Edit",
                         systemImage: "pencil",
-                        tint: .yellow,
-                        iconColor: .black,
-                        titleColor: .black
+                        tint: .yellow
                     ) {
                         presentAccount(account)
                     }
-                    PocketCircularSwipeAction(
+                    PocketSwipeActionButton(
                         title: "Archive",
                         systemImage: "archivebox",
-                        tint: PocketLedgerTheme.warning,
-                        titleColor: .white
+                        tint: PocketLedgerTheme.warning
                     ) {
                         _ = store.setAccountArchived(accountID: account.id, isArchived: true)
                     }
-                    PocketCircularSwipeAction(
+                    PocketSwipeActionButton(
                         title: "Delete account",
                         systemImage: "trash",
                         tint: .red,
-                        titleColor: .white,
                         role: .destructive
                     ) {
                         accountToDelete = account
                     }
                 }
                 .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                    PocketCircularSwipeAction(
+                    PocketSwipeActionButton(
                         title: account.includeInTotals ? "Exclude" : "Include",
                         systemImage: account.includeInTotals ? "eye.slash" : "eye",
-                        tint: account.includeInTotals ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.positive,
-                        titleColor: .white
+                        tint: account.includeInTotals ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.positive
                     ) {
                         _ = store.setAccountIncludedInTotals(
                             accountID: account.id,
@@ -461,22 +456,20 @@ struct AccountsView: View {
                     .frame(minHeight: 68)
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
                         if !store.isManagedLegacyLoanAccount(account.id) {
-                            PocketCircularSwipeAction(
+                            PocketSwipeActionButton(
                                 title: "Restore",
                                 systemImage: "arrow.uturn.backward",
-                                tint: PocketLedgerTheme.accent,
-                                titleColor: .white
+                                tint: PocketLedgerTheme.accent
                             ) {
                                 restoreAccount(account.id)
                             }
                         }
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        PocketCircularSwipeAction(
+                        PocketSwipeActionButton(
                             title: "Delete account",
                             systemImage: "trash",
                             tint: .red,
-                            titleColor: .white,
                             role: .destructive
                         ) {
                             accountToDelete = account

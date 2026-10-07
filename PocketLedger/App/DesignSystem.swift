@@ -574,6 +574,27 @@ struct PocketCircularSwipeAction: View {
     }
 }
 
+struct PocketSwipeActionButton: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    var role: ButtonRole? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(role: role, action: action) {
+            PocketSwipeActionLabel(
+                title: title,
+                systemImage: systemImage,
+                tint: tint,
+                titleColor: .white
+            )
+        }
+        .tint(.clear)
+        .accessibilityLabel(title)
+    }
+}
+
 extension View {
     @ViewBuilder
     func pocketSwipeActionsContainer() -> some View {

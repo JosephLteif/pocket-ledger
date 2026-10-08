@@ -81,6 +81,13 @@ struct MoreView: View {
                     .listRowBackground(PocketLedgerTheme.surface)
 
                     NavigationLink {
+                        SubscriptionReviewView(store: store, security: security)
+                    } label: {
+                        Label("Subscriptions", systemImage: "arrow.clockwise.circle")
+                    }
+                    .listRowBackground(PocketLedgerTheme.surface)
+
+                    NavigationLink {
                         TemplatesView(store: store)
                     } label: {
                         Label("Templates", systemImage: "rectangle.stack")

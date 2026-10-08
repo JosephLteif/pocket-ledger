@@ -81,16 +81,9 @@ struct MoreView: View {
                     .listRowBackground(PocketLedgerTheme.surface)
 
                     NavigationLink {
-                        ScheduledTransactionsView(store: store)
+                        ScheduledTransactionsView(store: store, security: security)
                     } label: {
-                        Label("Scheduled", systemImage: "calendar.badge.clock")
-                    }
-                    .listRowBackground(PocketLedgerTheme.surface)
-
-                    NavigationLink {
-                        SubscriptionReviewView(store: store, security: security)
-                    } label: {
-                        Label("Subscriptions", systemImage: "arrow.clockwise.circle")
+                        Label("Scheduled & subscriptions", systemImage: "calendar.badge.clock")
                     }
                     .listRowBackground(PocketLedgerTheme.surface)
 
@@ -977,7 +970,7 @@ struct DashboardView: View {
         if !schedules.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 NavigationLink {
-                    ScheduledTransactionsView(store: store)
+                    ScheduledTransactionsView(store: store, security: security)
                 } label: {
                     sectionHeader(title: "Upcoming", detail: "Bills & recurring entries")
                 }
@@ -1067,7 +1060,7 @@ struct DashboardView: View {
         if !schedules.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 NavigationLink {
-                    ScheduledTransactionsView(store: store)
+                    ScheduledTransactionsView(store: store, security: security)
                 } label: {
                     sectionHeader(title: "Next 30 days", detail: "Projected cash flow")
                 }
@@ -1533,7 +1526,7 @@ private struct AttentionInboxView: View {
                 initialFilter: .transfer
             )
         case .scheduledTransactions:
-            ScheduledTransactionsView(store: store)
+            ScheduledTransactionsView(store: store, security: security)
         case .budgets:
             BudgetsView(store: store, security: security)
         }

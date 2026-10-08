@@ -22,6 +22,7 @@ private enum ScheduledEditorRoute: Identifiable {
 @MainActor
 struct ScheduledTransactionsView: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject var security: AppSecurityService
     @ObservedObject private var proAccess = ProEntitlementStore.shared
 
     @State private var editorRoute: ScheduledEditorRoute?
@@ -37,7 +38,7 @@ struct ScheduledTransactionsView: View {
 
     var body: some View {
         List {
-            Text("Plan bills, income, and recurring transfers")
+            Text("Manage bills, subscriptions, income, and recurring transfers")
                 .font(.subheadline)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
                 .listRowBackground(Color.clear)
@@ -74,6 +75,12 @@ struct ScheduledTransactionsView: View {
 
             if !schedules.isEmpty {
                 scheduledReminderSettings
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+
+            if !recurringExpenseAnnualTotals.isEmpty {
+                recurringExpenseSummary
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -133,11 +140,13 @@ struct ScheduledTransactionsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: presentNewSchedule) {
-                    Image(systemName: "plus")
+            PocketLedgerToolbar(security: security) {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: presentNewSchedule) {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Add scheduled transaction")
                 }
-                .accessibilityLabel("Add scheduled transaction")
             }
         }
         .background {
@@ -290,6 +299,40 @@ struct ScheduledTransactionsView: View {
         }
     }
 
+    private var recurringExpenses: [ScheduledTransaction] {
+        store.data.scheduledTransactions.filter { isRecurringExpense($0) }
+    }
+
+    private var recurringExpenseAnnualTotals: [LedgerCurrency: Decimal] {
+        var totals: [LedgerCurrency: Decimal] = [:]
+        for schedule in recurringExpenses {
+            let annualMultiplier = annualMultiplier(for: schedule.frequency)
+            for charge in chargeAmounts(for: schedule) {
+                totals[charge.currency, default: .zero] += Decimal(charge.minorUnits) * annualMultiplier
+            }
+        }
+        return totals
+    }
+
+    private var recurringExpenseSummary: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Estimated yearly cost")
+                .font(.headline)
+            ForEach(LedgerCurrency.allCases.filter { recurringExpenseAnnualTotals[$0] != nil }) { currency in
+                LabeledContent(
+                    currency.rawValue,
+                    value: formatted(recurringExpenseAnnualTotals[currency] ?? .zero, currency: currency)
+                )
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+            }
+            Text("Yearly estimates use each schedule’s frequency. Price changes are matched by exact transaction name and currency.")
+                .font(.footnote)
+                .foregroundStyle(PocketLedgerTheme.textTertiary)
+        }
+        .padding(16)
+        .pocketGroupedSurface(cornerRadius: 18)
+    }
+
     private var emptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: "calendar.badge.clock")
@@ -351,6 +394,10 @@ struct ScheduledTransactionsView: View {
                 .font(.caption)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
                 .lineLimit(1)
+
+            if isRecurringExpense(schedule), !chargeAmounts(for: schedule).isEmpty {
+                recurringExpenseDetails(schedule)
+            }
 
             Text(timingText(for: schedule))
                 .font(.caption.weight(.semibold))
@@ -492,6 +539,107 @@ struct ScheduledTransactionsView: View {
                 isShowingDeleteConfirmation = true
             }
         }
+    }
+
+    private func recurringExpenseDetails(_ schedule: ScheduledTransaction) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(chargeAmounts(for: schedule), id: \.currency) { charge in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("Estimated yearly", systemImage: "arrow.clockwise")
+                            .font(.caption)
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        Spacer(minLength: 8)
+                        Text(formatted(
+                            Decimal(charge.minorUnits) * annualMultiplier(for: schedule.frequency),
+                            currency: charge.currency
+                        ))
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(PocketLedgerTheme.textPrimary)
+                    }
+
+                    if let change = priceChange(for: schedule, currency: charge.currency) {
+                        Label("Changed from \(change.previous.formatted) to \(change.current.formatted)", systemImage: "arrow.left.arrow.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(PocketLedgerTheme.warning)
+                    }
+                }
+            }
+        }
+    }
+
+    private func isRecurringExpense(_ schedule: ScheduledTransaction) -> Bool {
+        schedule.isEnabled && schedule.frequency != .once && schedule.kind == .expense
+    }
+
+    private func annualMultiplier(for frequency: ScheduleFrequency) -> Decimal {
+        switch frequency {
+        case .once: .zero
+        case .daily: 365
+        case .weekly: 52
+        case .monthly: 12
+        case .yearly: 1
+        }
+    }
+
+    private func chargeAmounts(for schedule: ScheduledTransaction) -> [Money] {
+        if let amountDue = schedule.amountDue, amountDue.minorUnits > 0 {
+            return [amountDue]
+        }
+
+        let currencies = Set(schedule.outflows.map { $0.money.currency })
+        return currencies.sorted { $0.rawValue < $1.rawValue }.compactMap { currency in
+            let outflow = schedule.outflows
+                .filter { $0.money.currency == currency }
+                .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+            let inflow = schedule.inflows
+                .filter { $0.money.currency == currency }
+                .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+            let charge = max(outflow - inflow, 0)
+            return charge > 0 ? Money(currency: currency, minorUnits: charge) : nil
+        }
+    }
+
+    private func priceChange(
+        for schedule: ScheduledTransaction,
+        currency: LedgerCurrency
+    ) -> (previous: Money, current: Money)? {
+        let normalizedNote = schedule.note.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let matchingTransactions = store.data.transactions
+            .filter {
+                $0.kind == .expense
+                    && $0.note.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalizedNote
+                    && $0.date <= .now
+            }
+            .sorted { $0.date > $1.date }
+
+        let amounts = matchingTransactions.compactMap { transaction -> Money? in
+            if let due = transaction.amountDue, due.currency == currency, due.minorUnits > 0 {
+                return due
+            }
+            let outflow = transaction.outflows
+                .filter { $0.money.currency == currency }
+                .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+            let inflow = transaction.inflows
+                .filter { $0.money.currency == currency }
+                .reduce(Int64.zero) { $0 + $1.money.minorUnits }
+            let charge = max(outflow - inflow, 0)
+            return charge > 0 ? Money(currency: currency, minorUnits: charge) : nil
+        }
+        if let scheduledAmount = chargeAmounts(for: schedule).first(where: { $0.currency == currency }),
+           let latestAmount = amounts.first,
+           scheduledAmount.minorUnits != latestAmount.minorUnits {
+            return (latestAmount, scheduledAmount)
+        }
+        guard amounts.count >= 2, amounts[0].minorUnits != amounts[1].minorUnits else { return nil }
+        return (amounts[1], amounts[0])
+    }
+
+    private func formatted(_ amount: Decimal, currency: LedgerCurrency) -> String {
+        var rounded = Decimal()
+        var annualAmount = amount
+        NSDecimalRound(&rounded, &annualAmount, 0, .plain)
+        return Money(currency: currency, minorUnits: NSDecimalNumber(decimal: rounded).int64Value).formatted
     }
 
     private func recordNow(id: UUID) {

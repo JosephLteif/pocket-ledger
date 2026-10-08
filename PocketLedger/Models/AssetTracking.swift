@@ -23,6 +23,7 @@ enum FinanceAssetTracking {
             guard let price = setting?.manualPricePerGram, !price.isNaN, price > 0 else { return nil }
             return price
         }
+        guard setting?.isAutomaticEnabled == true else { return nil }
         guard let quote = data.metalQuotes.first(where: { $0.metal == metal }),
               !quote.usdPricePerTroyOunce.isNaN, quote.usdPricePerTroyOunce > 0 else { return nil }
         var price = quote.usdPricePerTroyOunce / MetalWeightUnit.troyOunces.gramsPerUnit

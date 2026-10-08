@@ -1603,8 +1603,12 @@ final class LedgerStore: ObservableObject {
     }
 
     func metalQuoteDescription(account: Account, metal: PreciousMetal) -> String {
-        if let setting = account.tracking?.metalPricing.first(where: { $0.metal == metal }), setting.mode == .manual {
-            return "Manual · \(setting.asOf?.formatted(date: .abbreviated, time: .shortened) ?? "Price needed")"
+        let setting = account.tracking?.metalPricing.first { $0.metal == metal }
+        guard setting?.isAutomaticEnabled == true else {
+            if setting?.mode == .automatic {
+                return "Price needed · opt in to Automatic or enter a manual price"
+            }
+            return "Manual · \(setting?.asOf?.formatted(date: .abbreviated, time: .shortened) ?? "Price needed")"
         }
         guard let quote = data.metalQuotes.first(where: { $0.metal == metal }) else { return "Price needed · enter a manual price or refresh" }
         let stale = metalPriceFailures.contains(metal) || Date.now.timeIntervalSince(quote.marketDate) > 900
@@ -1620,7 +1624,7 @@ final class LedgerStore: ObservableObject {
                 .filter { $0.remainingWeightGrams > 0 }
                 .map(\.metal)
             return (selectedMetal + heldMetals).filter { metal in
-                account.tracking?.metalPricing.first(where: { $0.metal == metal })?.mode != .manual
+                account.tracking?.metalPricing.first(where: { $0.metal == metal })?.isAutomaticEnabled == true
             }
         })
         for metal in metals {
@@ -1692,11 +1696,19 @@ final class LedgerStore: ObservableObject {
             return false
         }
         if setting.mode == .manual {
-            guard let price = setting.manualPricePerGram, !price.isNaN, price > 0, price < 1_000_000_000,
+            guard let price = setting.manualPricePerGram else {
+                var updated = data
+                updated.accounts[index].tracking?.metalPricing.removeAll { $0.metal == setting.metal }
+                return persist(updated, successMessage: "Metal pricing updated", allowingAssetActivity: true)
+            }
+            guard !price.isNaN, price > 0, price < 1_000_000_000,
                   let date = setting.asOf, Calendar.current.startOfDay(for: date) <= Calendar.current.startOfDay(for: .now) else {
                 lastActionStatus = "Enter a positive pure-metal price and a date that is not in the future."
                 return false
             }
+        } else if setting.automaticPricingConsent != true {
+            lastActionStatus = "Confirm the automatic pricing disclosure before enabling price retrieval."
+            return false
         }
         var updated = data
         updated.accounts[index].tracking?.metalPricing.removeAll { $0.metal == setting.metal }

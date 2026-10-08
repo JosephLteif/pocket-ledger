@@ -37,9 +37,14 @@ enum MetalPricingMode: String, Codable, CaseIterable, Identifiable {
 
 struct MetalPriceSetting: Codable, Equatable {
     var metal: PreciousMetal
-    var mode: MetalPricingMode = .automatic
+    var mode: MetalPricingMode = .manual
     var manualPricePerGram: Decimal?
     var asOf: Date?
+    var automaticPricingConsent: Bool? = nil
+
+    var isAutomaticEnabled: Bool {
+        mode == .automatic && automaticPricingConsent == true
+    }
 }
 
 struct MetalQuote: Codable, Equatable, Sendable {

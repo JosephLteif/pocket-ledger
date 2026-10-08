@@ -3,7 +3,8 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Only metal symbols are sent to Gold API; holdings and account data stay on device.
+/// Quote requests contain the metal symbol and USD denomination; network metadata such as IP is also exposed to the provider.
+/// Ledger holdings and account data stay on device.
 actor MetalPriceService {
     static let shared = MetalPriceService()
 

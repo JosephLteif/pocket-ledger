@@ -20,16 +20,17 @@
       <header class="document-heading">
         <p class="overline">The fine print, without the fog</p>
         <h1>Privacy, in<br><em>plain terms.</em></h1>
-        <p class="document-date">POLICY 01 <span>·</span> LAST UPDATED 24 SEPTEMBER 2026</p>
+        <p class="document-date">POLICY 01 <span>·</span> LAST UPDATED 08 OCTOBER 2026</p>
       </header>
       <div class="policy-layout">
         <nav class="contents" aria-label="Policy sections">
           <span class="section-index">ON THIS PAGE</span>
           <a href="#stored">01 / Stored</a>
           <a href="#use">02 / Use</a>
-          <a href="#sharing">03 / Permissions</a>
-          <a href="#retention">04 / Retention</a>
-          <a href="#contact">05 / Contact</a>
+          <a href="#market-prices">03 / Market prices</a>
+          <a href="#sharing">04 / Permissions</a>
+          <a href="#retention">05 / Retention</a>
+          <a href="#contact">06 / Contact</a>
         </nav>
         <article class="policy-copy">
           <section id="stored">
@@ -46,22 +47,29 @@
               <p>Receipt scanning and optional writing assistance use on-device processing. Pocket Ledger does not send ledger data to a developer-operated server, third-party analytics service, advertising network, or third-party AI service. The app does not connect to financial institutions.</p>
             </div>
           </section>
-          <section id="sharing">
+          <section id="market-prices">
             <span class="feature-number">03</span>
+            <div><h2>Automatic metal prices</h2>
+              <p>Automatic price retrieval is off by default. When you opt in for an account and metal, Pocket Ledger requests a USD quote from Gold API for the selected symbol (XAU or XAG). The internet request exposes your IP address to the provider. Gold API’s privacy policy says it may collect API requests, timestamps, IP addresses, and approximate location inferred from IP for service delivery and improvement, usage analysis, fraud prevention, and tax or legal compliance.</p>
+              <p>Gold API says it retains information while needed to provide its service or comply with law, but does not specify a retention period for API request logs. Contact Gold API through its privacy policy for data access or deletion requests. Pocket Ledger does not send account names, holdings, balances, or transactions to Gold API. Choose Manual and Save to stop new requests for that account; another opted-in account may still request a shared quote. Manual pricing lets you enter your own price. Read the <a href="https://gold-api.com/privacy" target="_blank" rel="noopener noreferrer">Gold API privacy policy</a>.</p>
+            </div>
+          </section>
+          <section id="sharing">
+            <span class="feature-number">04</span>
             <div><h2>Permissions and sharing</h2>
               <p>The camera, selected photos, or files are accessed only when you choose to scan or attach a receipt, or import a ledger file. Face ID or Touch ID is handled by Apple’s LocalAuthentication system; Pocket Ledger receives the authentication result, not your biometric data. Optional reminders are scheduled as local notifications.</p>
               <p>When you export or share ledger information or a backup, the app hands the selected content to the destination you choose in the system share or file picker. That destination’s own privacy practices apply to the exported copy.</p>
             </div>
           </section>
           <section id="retention">
-            <span class="feature-number">04</span>
+            <span class="feature-number">05</span>
             <div><h2>Retention and deletion</h2>
               <p>The active ledger remains in local app storage until you delete records or erase it in Settings → Data → Import &amp; Backup. Before a reset or replacement, Pocket Ledger keeps one local last-good recovery snapshot that may include receipt files. It remains until replaced by a later snapshot or deleted from the recovery card in Import &amp; Backup. Pocket Ledger keeps no server-side ledger copy.</p>
               <p>Exported backups and copies shared with another app are outside Pocket Ledger’s control; delete them from the destination where you saved or shared them. You can revoke camera, photo, and notification permissions in iOS Settings.</p>
             </div>
           </section>
           <section id="contact">
-            <span class="feature-number">05</span>
+            <span class="feature-number">06</span>
             <div><h2>Contact</h2>
               <p>For questions about this policy, email <a href="mailto:joelteif11@gmail.com">joelteif11@gmail.com</a>. Please don’t include account numbers, balances, transactions, receipts, or backups in your message.</p>
             </div>

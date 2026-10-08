@@ -554,6 +554,12 @@ private struct PrivacyPolicyView: View {
                 Text("Receipt scanning and optional writing assistance use on-device processing. Pocket Ledger does not send ledger data to a developer-operated server, third-party analytics service, advertising network, or third-party AI service.")
             }
 
+            Section("Automatic metal prices") {
+                Text("Automatic price retrieval is off by default. When you opt in for an account and metal, Pocket Ledger requests a USD quote from Gold API for the selected symbol (XAU or XAG); the network request exposes your IP address. Gold API’s privacy policy says it may collect API requests, timestamps, IP addresses, and approximate location inferred from IP for service delivery and improvement, usage analysis, fraud prevention, and tax or legal compliance.")
+                Text("Gold API says it retains information while needed to provide its service or comply with law, but does not specify a retention period for API request logs. Contact Gold API through its privacy policy for data access or deletion requests. Pocket Ledger does not send account names, holdings, balances, or transactions. Choose Manual and Save to stop new requests for that account; another opted-in account may still request a shared quote.")
+                Link("Gold API privacy policy", destination: URL(string: "https://gold-api.com/privacy")!)
+            }
+
             Section("Permissions and sharing") {
                 Text("The camera, selected photos, or files are accessed only when you choose to scan or attach a receipt, or import a ledger file. Face ID or Touch ID is handled by Apple’s LocalAuthentication system; Pocket Ledger receives the authentication result, not your biometric data. Optional reminders are scheduled as local notifications.")
                 Text("When you export or share ledger information or a backup, the app hands the selected content to the destination you choose in the system share or file picker. That destination’s own privacy practices apply to the exported copy.")

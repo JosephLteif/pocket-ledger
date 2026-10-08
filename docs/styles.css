@@ -100,11 +100,11 @@ a:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; }
 .document-date span { padding-inline: 0.4rem; }
 .policy-layout { display: grid; grid-template-columns: 210px 1fr; gap: clamp(2rem, 7vw, 7rem); padding-top: 2.5rem; }
 .contents { height: max-content; display: grid; gap: 0.75rem; position: sticky; top: 1.5rem; }
-.contents .section-index { padding: 0 0 0.3rem; }
-.contents a { color: var(--muted); text-decoration: none; font-family: var(--mono); font-size: 0.66rem; }
+.contents .section-index { padding: 0 0 0.3rem; font-size: 0.7rem; }
+.contents a { color: var(--muted); text-decoration: none; font-family: var(--mono); font-size: 0.7rem; }
 .contents a:hover { color: var(--red); }
 .policy-copy section { display: grid; grid-template-columns: 42px 1fr; gap: 1rem; padding: 0 0 2rem; margin-bottom: 2rem; border-bottom: 1px solid var(--line); scroll-margin-top: 2rem; }
-.policy-copy .feature-number { padding-top: 0.35rem; }
+.policy-copy .feature-number { padding-top: 0.35rem; font-size: 0.7rem; }
 .policy-copy h2, .contact-sheet h2 { margin: 0; font-family: var(--serif); font-size: 1.65rem; font-weight: 500; }
 .policy-copy p, .contact-sheet p { margin: 0.7rem 0 0; color: var(--muted); font-size: 0.92rem; }
 .policy-copy a { color: var(--green); }

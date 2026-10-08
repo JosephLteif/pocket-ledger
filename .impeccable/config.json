@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "all-caps-body",
+        "value": "*",
+        "files": [
+          "docs/privacy/index.html"
+        ],
+        "createdAt": "2026-10-08T06:37:39.119Z",
+        "reason": "Agent: only the short editorial overline and policy date stamp are uppercase, not long body passages"
+      }
+    ]
+  }
+}

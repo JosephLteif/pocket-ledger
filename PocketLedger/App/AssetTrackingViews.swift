@@ -388,6 +388,9 @@ struct AssetTrackingSection: View {
             purchases.contains { $0.metal == metal && $0.remainingWeightGrams > 0 }
         }
         let displayedMetals = account.tracking?.physicalAssetSubtype?.metal.map { [$0] } ?? heldMetals
+        let automaticMetals = Set((account.tracking?.metalPricing ?? []).filter(\.isAutomaticEnabled).map(\.metal))
+        let showsRefreshButton = displayedMetals.contains { automaticMetals.contains($0) }
+        let metalPriceRowCount = displayedMetals.count + (showsRefreshButton ? 1 : 0)
 
         Section {
             VStack(alignment: .leading, spacing: 16) {
@@ -458,19 +461,21 @@ struct AssetTrackingSection: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 10)
-                    .pocketGroupedListRow(index: entry.offset, count: displayedMetals.count + 1)
+                    .pocketGroupedListRow(index: entry.offset, count: metalPriceRowCount)
                     .listRowSeparator(.hidden)
                 }
-                Button {
-                    Task { await store.refreshMetalPrices(force: true) }
-                } label: {
-                    Label("Refresh market prices", systemImage: "arrow.clockwise")
+                if showsRefreshButton {
+                    Button {
+                        Task { await store.refreshMetalPrices(force: true) }
+                    } label: {
+                        Label("Refresh market prices", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 10)
+                    .pocketGroupedListRow(index: displayedMetals.count, count: metalPriceRowCount)
+                    .listRowSeparator(.hidden)
                 }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 10)
-                .pocketGroupedListRow(index: displayedMetals.count, count: displayedMetals.count + 1)
-                .listRowSeparator(.hidden)
             }
             .listSectionSeparator(.hidden)
         }
@@ -1091,6 +1096,8 @@ private struct MetalPricingEditor: View {
     let metal: PreciousMetal
     @Environment(\.dismiss) private var dismiss
     @State private var manual: Bool
+    @State private var automaticPricingConsent: Bool
+    @State private var showAutomaticConsent = false
     @State private var price: String
     @State private var unit: MetalWeightUnit = .grams
     @State private var asOf: Date
@@ -1102,7 +1109,9 @@ private struct MetalPricingEditor: View {
         self.metal = metal
         // One-time draft state; edits remain local until Save.
         let setting = account.tracking?.metalPricing.first { $0.metal == metal }
-        _manual = State(initialValue: setting?.mode == .manual)
+        let automaticEnabled = setting?.isAutomaticEnabled == true
+        _manual = State(initialValue: !automaticEnabled)
+        _automaticPricingConsent = State(initialValue: automaticEnabled)
         _price = State(initialValue: setting?.manualPricePerGram.map(assetDecimalInput) ?? "")
         _asOf = State(initialValue: setting?.asOf ?? Date())
     }
@@ -1110,10 +1119,39 @@ private struct MetalPricingEditor: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Automatic quote privacy") {
+                    Text("Automatic price retrieval is off by default and requires an opt-in for this account and metal. If enabled, Pocket Ledger requests a USD quote from Gold API for the selected metal symbol (XAU or XAG); the network request exposes your IP address.")
+                        .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
+                    Text("Gold API says it may collect API requests, timestamps, IP addresses, and approximate location inferred from IP for service delivery and improvement, usage analysis, fraud prevention, and tax or legal compliance. It says it retains information while needed to provide the service or comply with law, but does not specify a retention period for API request logs. Pocket Ledger does not send account names, holdings, balances, or transactions. Another account using Automatic may still request a shared quote.")
+                        .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
+                    Link("Gold API privacy policy", destination: URL(string: "https://gold-api.com/privacy")!)
+                        .font(.footnote)
+                }
                 Section("Pricing") {
-                    Picker("Mode", selection: $manual) {
+                    Picker("Mode", selection: Binding(
+                        get: { manual },
+                        set: { selectedManual in
+                            if selectedManual {
+                                manual = true
+                                automaticPricingConsent = false
+                            } else if !automaticPricingConsent {
+                                showAutomaticConsent = true
+                            } else {
+                                manual = false
+                            }
+                        }
+                    )) {
                         Text("Automatic").tag(false)
                         Text("Manual").tag(true)
+                    }
+                    .alert("Enable automatic metal pricing?", isPresented: $showAutomaticConsent) {
+                        Button("Enable Automatic") {
+                            manual = false
+                            automaticPricingConsent = true
+                        }
+                        Button("Keep Manual", role: .cancel) {}
+                    } message: {
+                        Text("The metal symbol and USD quote request go to Gold API, which receives your IP address. It may retain request details, timestamps, IP address, and approximate location for service, usage analysis, fraud prevention, and tax or legal compliance. Your account details and holdings are not sent.")
                     }
                     if manual {
                         TextField("Pure metal price (\(account.currency.rawValue))", text: $price).keyboardType(.decimalPad)
@@ -1125,6 +1163,12 @@ private struct MetalPricingEditor: View {
                             .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                     } else {
                         Text("Gold API provides USD quotes per troy ounce. Your existing exchange rates convert the quote to \(account.currency.rawValue). Quotes refresh on opening after 15 minutes; unavailable rates require manual pricing.")
+                            .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
+                    }
+                }
+                if manual {
+                    Section("Manual pricing") {
+                        Text("The entered price applies to this account. Save with no price to stop automatic requests for this account; another opted-in account may still request a shared quote.")
                             .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                     }
                 }
@@ -1146,11 +1190,18 @@ private struct MetalPricingEditor: View {
 
     private func save() {
         let enteredPrice = assetDecimal(price)
-        guard !manual || (enteredPrice.map { $0 > 0 } == true && asOf <= Date()) else {
+        let priceIsBlank = price.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !manual || priceIsBlank || (enteredPrice.map { $0 > 0 } == true && asOf <= Date()) else {
             errorMessage = "Enter a positive pure metal price and an as-of date that is not in the future."
             return
         }
-        let setting = MetalPriceSetting(metal: metal, mode: manual ? .manual : .automatic, manualPricePerGram: manual ? enteredPrice.map { $0 / unit.gramsPerUnit } : nil, asOf: manual ? asOf : nil)
+        let setting = MetalPriceSetting(
+            metal: metal,
+            mode: manual ? .manual : .automatic,
+            manualPricePerGram: manual ? enteredPrice.map { $0 / unit.gramsPerUnit } : nil,
+            asOf: manual && enteredPrice != nil ? asOf : nil,
+            automaticPricingConsent: manual ? nil : automaticPricingConsent
+        )
         if store.setMetalPricing(accountID: account.id, setting: setting) { dismiss() }
         else { errorMessage = store.lastActionStatus ?? "Pricing could not be saved." }
     }

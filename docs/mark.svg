@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Pocket Ledger">
-  <rect x="3" y="3" width="58" height="58" rx="12" fill="#1a2d28"/>
-  <path d="M17 15h27a4 4 0 0 1 4 4v29H21a4 4 0 0 1-4-4z" fill="#f1eddf"/>
-  <path d="M22 25h19M22 32h19M22 39h12" stroke="#17584d" stroke-width="2.5" stroke-linecap="round"/>
-  <path d="M17 20h-2a4 4 0 0 0-4 4v20a5 5 0 0 0 5 5h4" fill="none" stroke="#b69148" stroke-width="3" stroke-linecap="round"/>
+  <rect x="3" y="3" width="58" height="58" rx="12" fill="#312720"/>
+  <path d="M17 15h27a4 4 0 0 1 4 4v29H21a4 4 0 0 1-4-4z" fill="#f6efe5"/>
+  <path d="M22 25h19M22 32h19M22 39h12" stroke="#a35438" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M17 20h-2a4 4 0 0 0-4 4v20a5 5 0 0 0 5 5h4" fill="none" stroke="#b06a00" stroke-width="3" stroke-linecap="round"/>
 </svg>

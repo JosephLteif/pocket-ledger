@@ -3,43 +3,43 @@
   <desc id="desc">A hand-drawn ledger spread with separate dollar and lira columns, on warm paper.</desc>
   <defs>
     <pattern id="paperLines" width="1" height="39" patternUnits="userSpaceOnUse">
-      <path d="M0 38.5H900" stroke="#c8c0ae" stroke-width="1" opacity=".65"/>
+      <path d="M0 38.5H900" stroke="#e4dbd0" stroke-width="1" opacity=".65"/>
     </pattern>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
-      <feDropShadow dx="0" dy="18" stdDeviation="14" flood-color="#26352e" flood-opacity=".16"/>
+      <feDropShadow dx="0" dy="18" stdDeviation="14" flood-color="#312720" flood-opacity=".16"/>
     </filter>
   </defs>
-  <path d="M71 83 429 53l35 21 368 11-31 493-355 23-24-11-369 26z" fill="#1a2d28" opacity=".95"/>
+  <path d="M71 83 429 53l35 21 368 11-31 493-355 23-24-11-369 26z" fill="#312720" opacity=".95"/>
   <g filter="url(#shadow)">
-    <path d="m91 73 345-23 28 23v478l-25-18-350 23z" fill="#f8f4e8" stroke="#b9ad96" stroke-width="2"/>
-    <path d="m464 73 351 10-20 473-351-18 20-18z" fill="#f1eddf" stroke="#b9ad96" stroke-width="2"/>
+    <path d="m91 73 345-23 28 23v478l-25-18-350 23z" fill="#fffbf6" stroke="#e4dbd0" stroke-width="2"/>
+    <path d="m464 73 351 10-20 473-351-18 20-18z" fill="#f6efe5" stroke="#e4dbd0" stroke-width="2"/>
     <path d="m91 73 345-23 28 23v478l-25-18-350 23z" fill="url(#paperLines)"/>
     <path d="m464 73 351 10-20 473-351-18 20-18z" fill="url(#paperLines)"/>
   </g>
-  <path d="M464 73v478" stroke="#b8ad98" stroke-width="3"/>
-  <path d="m449 67 13 12v477l-12-9z" fill="#dfd5c1"/>
-  <text x="127" y="125" fill="#a34835" font-family="monospace" font-size="15" letter-spacing="3">POCKET LEDGER / 01</text>
-  <text x="128" y="172" fill="#192722" font-family="Georgia,serif" font-size="34">Daily record</text>
-  <path d="M128 191h286" stroke="#192722" stroke-width="2"/>
-  <text x="130" y="222" fill="#5c675f" font-family="monospace" font-size="12" letter-spacing="2">DATE</text>
-  <text x="220" y="222" fill="#5c675f" font-family="monospace" font-size="12" letter-spacing="2">DETAIL</text>
-  <text x="369" y="222" fill="#17584d" font-family="monospace" font-size="12" letter-spacing="2">USD</text>
-  <path d="M128 235h287M128 276h287M128 317h287M128 358h287M128 399h287M128 440h287M128 481h287" stroke="#c8c0ae" stroke-width="1"/>
-  <path d="M198 207v275M348 207v275" stroke="#c8c0ae" stroke-width="1"/>
-  <path d="M202 235v247" stroke="#b69148" stroke-width="2" opacity=".8"/>
-  <text x="500" y="125" fill="#a34835" font-family="monospace" font-size="15" letter-spacing="3">SEPARATE BY CURRENCY</text>
-  <text x="501" y="172" fill="#192722" font-family="Georgia,serif" font-size="34">Two columns.</text>
-  <path d="M500 191h274" stroke="#192722" stroke-width="2"/>
-  <text x="506" y="222" fill="#5c675f" font-family="monospace" font-size="12" letter-spacing="2">ACCOUNT</text>
-  <text x="710" y="222" fill="#17584d" font-family="monospace" font-size="12" letter-spacing="2">LBP</text>
-  <path d="M500 235h278M500 276h278M500 317h278M500 358h278M500 399h278M500 440h278M500 481h278" stroke="#c8c0ae" stroke-width="1"/>
-  <path d="M687 207v275" stroke="#c8c0ae" stroke-width="1"/>
+  <path d="M464 73v478" stroke="#e4dbd0" stroke-width="3"/>
+  <path d="m449 67 13 12v477l-12-9z" fill="#ede1d4"/>
+  <text x="127" y="125" fill="#a35438" font-family="monospace" font-size="15" letter-spacing="3">POCKET LEDGER / 01</text>
+  <text x="128" y="172" fill="#312720" font-family="Georgia,serif" font-size="34">Daily record</text>
+  <path d="M128 191h286" stroke="#312720" stroke-width="2"/>
+  <text x="130" y="222" fill="#725c51" font-family="monospace" font-size="12" letter-spacing="2">DATE</text>
+  <text x="220" y="222" fill="#725c51" font-family="monospace" font-size="12" letter-spacing="2">DETAIL</text>
+  <text x="369" y="222" fill="#a35438" font-family="monospace" font-size="12" letter-spacing="2">USD</text>
+  <path d="M128 235h287M128 276h287M128 317h287M128 358h287M128 399h287M128 440h287M128 481h287" stroke="#e4dbd0" stroke-width="1"/>
+  <path d="M198 207v275M348 207v275" stroke="#e4dbd0" stroke-width="1"/>
+  <path d="M202 235v247" stroke="#b06a00" stroke-width="2" opacity=".8"/>
+  <text x="500" y="125" fill="#a35438" font-family="monospace" font-size="15" letter-spacing="3">SEPARATE BY CURRENCY</text>
+  <text x="501" y="172" fill="#312720" font-family="Georgia,serif" font-size="34">Two columns.</text>
+  <path d="M500 191h274" stroke="#312720" stroke-width="2"/>
+  <text x="506" y="222" fill="#725c51" font-family="monospace" font-size="12" letter-spacing="2">ACCOUNT</text>
+  <text x="710" y="222" fill="#a35438" font-family="monospace" font-size="12" letter-spacing="2">LBP</text>
+  <path d="M500 235h278M500 276h278M500 317h278M500 358h278M500 399h278M500 440h278M500 481h278" stroke="#e4dbd0" stroke-width="1"/>
+  <path d="M687 207v275" stroke="#e4dbd0" stroke-width="1"/>
   <g transform="rotate(-7 683 517)">
-    <circle cx="683" cy="517" r="43" fill="none" stroke="#17584d" stroke-width="2"/>
-    <circle cx="683" cy="517" r="36" fill="none" stroke="#17584d" stroke-width="1"/>
-    <text x="683" y="514" text-anchor="middle" fill="#17584d" font-family="monospace" font-size="9" letter-spacing="1">LOCAL</text>
-    <text x="683" y="528" text-anchor="middle" fill="#17584d" font-family="monospace" font-size="9" letter-spacing="1">FIRST</text>
+    <circle cx="683" cy="517" r="43" fill="none" stroke="#a35438" stroke-width="2"/>
+    <circle cx="683" cy="517" r="36" fill="none" stroke="#a35438" stroke-width="1"/>
+    <text x="683" y="514" text-anchor="middle" fill="#a35438" font-family="monospace" font-size="9" letter-spacing="1">LOCAL</text>
+    <text x="683" y="528" text-anchor="middle" fill="#a35438" font-family="monospace" font-size="9" letter-spacing="1">FIRST</text>
   </g>
-  <path d="M124 519h255" stroke="#b69148" stroke-width="3"/>
-  <text x="126" y="542" fill="#5c675f" font-family="monospace" font-size="10" letter-spacing="1">YOUR ENTRIES, IN YOUR OWN HAND</text>
+  <path d="M124 519h255" stroke="#b06a00" stroke-width="3"/>
+  <text x="126" y="542" fill="#725c51" font-family="monospace" font-size="10" letter-spacing="1">YOUR ENTRIES, IN YOUR OWN HAND</text>
 </svg>

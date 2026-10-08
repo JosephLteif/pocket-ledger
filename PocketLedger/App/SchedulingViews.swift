@@ -33,6 +33,7 @@ struct ScheduledTransactionsView: View {
     @State private var recordUndoReceipt: ScheduleRecordUndoReceipt?
     @State private var isRequestingReminderPermission = false
     @State private var isShowingProUpgrade = false
+    @State private var recurringCostIsYearly = false
     @AppStorage(NotificationService.globalReminderKey)
     private var globalReminderRawValue = ScheduledReminderTiming.oneDayBefore.rawValue
 
@@ -69,26 +70,12 @@ struct ScheduledTransactionsView: View {
                 .listRowSeparator(.hidden)
             }
 
-            globalReminderSettings
+            reminderSettings
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
-            if !schedules.isEmpty {
-                scheduledReminderSettings
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-
             if !recurringExpenseAnnualTotals.isEmpty {
                 recurringExpenseSummary
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-
-            if let reminderStatus {
-                Text(reminderStatus)
-                    .font(.caption)
-                    .foregroundStyle(PocketLedgerTheme.textTertiary)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -197,94 +184,71 @@ struct ScheduledTransactionsView: View {
         store.data.scheduledTransactions.filter(\.isEnabled).count
     }
 
-    private var globalReminderSettings: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Reminder timing", systemImage: "bell.badge")
-                .font(.headline)
-                .foregroundStyle(PocketLedgerTheme.textPrimary)
+    private var reminderSettings: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Label("Reminders", systemImage: "bell.badge")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PocketLedgerTheme.textPrimary)
 
-            Menu {
-                ForEach(ScheduledReminderTiming.allCases) { timing in
-                    Button {
-                        globalReminderRawValue = timing.rawValue
-                    } label: {
-                        if timing == globalReminderTiming {
-                            Label(timing.title, systemImage: "checkmark")
-                        } else {
-                            Text(timing.title)
+                Spacer(minLength: 4)
+
+                Menu {
+                    ForEach(ScheduledReminderTiming.allCases) { timing in
+                        Button {
+                            globalReminderRawValue = timing.rawValue
+                        } label: {
+                            if timing == globalReminderTiming {
+                                Label(timing.title, systemImage: "checkmark")
+                            } else {
+                                Text(timing.title)
+                            }
                         }
                     }
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Default")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(PocketLedgerTheme.textPrimary)
-                        Text("Used when a schedule has no override")
-                            .font(.caption)
-                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                } label: {
+                    HStack(spacing: 5) {
+                        Text("Default · \(globalReminderTiming.title)")
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.bold))
                     }
-                    Spacer(minLength: 8)
-                    Text(globalReminderTiming.title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(PocketLedgerTheme.accent)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(PocketLedgerTheme.textTertiary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-        }
-        .padding(14)
-        .pocketGroupedSurface(cornerRadius: 18)
-    }
-
-    private var scheduledReminderSettings: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                Image(systemName: "bell.badge.fill")
-                    .font(.title3.weight(.semibold))
                     .foregroundStyle(PocketLedgerTheme.accent)
-                    .frame(width: 42, height: 42)
-                    .background(PocketLedgerTheme.accent.opacity(0.14), in: Circle())
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Scheduled reminders")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(PocketLedgerTheme.textPrimary)
-                    Text("Get notified before enabled entries are due.")
-                        .font(.caption)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
-            }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Default reminder timing: \(globalReminderTiming.title)")
 
-            Button {
-                Task {
-                    isRequestingReminderPermission = true
-                    defer { isRequestingReminderPermission = false }
-                    reminderStatus = await NotificationService
-                        .requestScheduledTransactionNotifications(schedules: schedules)
-                }
-            } label: {
-                Group {
-                    if isRequestingReminderPermission {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                            Text("Requesting access…")
+                if !schedules.isEmpty {
+                    Button {
+                        Task {
+                            isRequestingReminderPermission = true
+                            defer { isRequestingReminderPermission = false }
+                            reminderStatus = await NotificationService
+                                .requestScheduledTransactionNotifications(schedules: schedules)
                         }
-                    } else {
-                        Label("Enable scheduled reminders", systemImage: "bell.badge")
+                    } label: {
+                        if isRequestingReminderPermission {
+                            ProgressView()
+                                .frame(width: 18, height: 18)
+                        } else {
+                            Label("Enable", systemImage: "bell.badge")
+                                .labelStyle(.titleAndIcon)
+                                .fixedSize()
+                        }
                     }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(PocketLedgerTheme.accent)
+                    .disabled(isRequestingReminderPermission)
+                    .accessibilityLabel("Enable scheduled reminders")
                 }
-                .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(PocketLedgerTheme.accent)
-            .disabled(isRequestingReminderPermission)
+
+            if let reminderStatus {
+                Text(reminderStatus)
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            }
         }
         .padding(14)
         .pocketGroupedSurface(cornerRadius: 18)
@@ -316,16 +280,25 @@ struct ScheduledTransactionsView: View {
 
     private var recurringExpenseSummary: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Estimated yearly cost")
+            Text("Estimated cost")
                 .font(.headline)
+            Picker("Estimate period", selection: $recurringCostIsYearly) {
+                Text("Monthly").tag(false)
+                Text("Yearly").tag(true)
+            }
+            .pickerStyle(.segmented)
+
             ForEach(LedgerCurrency.allCases.filter { recurringExpenseAnnualTotals[$0] != nil }) { currency in
                 LabeledContent(
                     currency.rawValue,
-                    value: formatted(recurringExpenseAnnualTotals[currency] ?? .zero, currency: currency)
+                    value: formatted(
+                        (recurringExpenseAnnualTotals[currency] ?? .zero) / (recurringCostIsYearly ? 1 : 12),
+                        currency: currency
+                    )
                 )
                     .font(.subheadline.weight(.semibold).monospacedDigit())
             }
-            Text("Yearly estimates use each schedule’s frequency. Price changes are matched by exact transaction name and currency.")
+            Text("Estimates use each schedule’s frequency. Price changes are matched by exact transaction name and currency.")
                 .font(.footnote)
                 .foregroundStyle(PocketLedgerTheme.textTertiary)
         }
@@ -403,33 +376,30 @@ struct ScheduledTransactionsView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(schedule.isEnabled ? PocketLedgerTheme.accent : PocketLedgerTheme.textTertiary)
 
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 if schedule.isEnabled {
                     Button {
                         recordNow(id: schedule.id)
                     } label: {
-                        Label("Record", systemImage: "checkmark.circle")
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                        Label("Record now", systemImage: "checkmark.circle")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .tint(PocketLedgerTheme.positive)
-                    .accessibilityLabel("Record now")
                 }
+
+                Spacer(minLength: 8)
 
                 Button {
                     editorRoute = .edit(schedule)
                 } label: {
-                    Label("Edit", systemImage: "pencil")
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                    Image(systemName: "pencil")
+                        .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(PocketLedgerTheme.accent)
-
-                Spacer()
+                .accessibilityLabel("Edit scheduled transaction")
 
                 Menu {
                     Button(
@@ -478,12 +448,12 @@ struct ScheduledTransactionsView: View {
                     }
                     .tint(.red)
                 } label: {
-                    Label("More", systemImage: "ellipsis")
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                    Image(systemName: "ellipsis")
+                        .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .accessibilityLabel("More scheduled transaction actions")
             }
         }
         .padding(16)
@@ -546,12 +516,16 @@ struct ScheduledTransactionsView: View {
             ForEach(chargeAmounts(for: schedule), id: \.currency) { charge in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Label("Estimated yearly", systemImage: "arrow.clockwise")
+                        Label(
+                            recurringCostIsYearly ? "Estimated yearly" : "Estimated monthly",
+                            systemImage: "arrow.clockwise"
+                        )
                             .font(.caption)
                             .foregroundStyle(PocketLedgerTheme.textSecondary)
                         Spacer(minLength: 8)
                         Text(formatted(
-                            Decimal(charge.minorUnits) * annualMultiplier(for: schedule.frequency),
+                            Decimal(charge.minorUnits) * annualMultiplier(for: schedule.frequency)
+                                / (recurringCostIsYearly ? 1 : 12),
                             currency: charge.currency
                         ))
                         .font(.caption.weight(.semibold).monospacedDigit())

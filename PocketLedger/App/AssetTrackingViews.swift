@@ -11,7 +11,22 @@ private struct PhysicalAssetGainHistoryPoint: Identifiable {
 struct PhysicalAssetGainHistoryChart: View {
     let account: Account
     let areBalancesRevealed: Bool
-    @State private var selectedMetal: PreciousMetal? = nil
+    @State private var locallySelectedMetal: PreciousMetal? = nil
+    private let selectedMetalBinding: Binding<PreciousMetal?>?
+
+    private var metalSelection: Binding<PreciousMetal?> {
+        selectedMetalBinding ?? $locallySelectedMetal
+    }
+
+    init(
+        account: Account,
+        areBalancesRevealed: Bool,
+        selectedMetal: Binding<PreciousMetal?>? = nil
+    ) {
+        self.account = account
+        self.areBalancesRevealed = areBalancesRevealed
+        self.selectedMetalBinding = selectedMetal
+    }
 
     private var history: [PhysicalAssetGainSnapshot] {
         account.tracking?.physicalAssetGainHistory ?? []
@@ -24,7 +39,8 @@ struct PhysicalAssetGainHistoryChart: View {
     }
 
     private var selectedHistoryMetal: PreciousMetal? {
-        guard let selectedMetal, availableMetals.contains(selectedMetal) else { return nil }
+        guard let selectedMetal = metalSelection.wrappedValue,
+              availableMetals.contains(selectedMetal) else { return nil }
         return selectedMetal
     }
 
@@ -48,10 +64,10 @@ struct PhysicalAssetGainHistoryChart: View {
                     .foregroundStyle(PocketLedgerTheme.textPrimary)
 
                 Spacer(minLength: 8)
-                if !availableMetals.isEmpty {
+                if selectedMetalBinding == nil, !availableMetals.isEmpty {
                     Menu {
                         Button {
-                            selectedMetal = nil
+                            metalSelection.wrappedValue = nil
                         } label: {
                             if selectedHistoryMetal == nil {
                                 Label("All metals", systemImage: "checkmark")
@@ -61,7 +77,7 @@ struct PhysicalAssetGainHistoryChart: View {
                         }
                         ForEach(availableMetals) { metal in
                             Button {
-                                selectedMetal = metal
+                                metalSelection.wrappedValue = metal
                             } label: {
                                 if selectedHistoryMetal == metal {
                                     Label(metal.displayName, systemImage: "checkmark")

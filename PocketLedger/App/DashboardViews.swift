@@ -203,6 +203,7 @@ struct DashboardView: View {
     @State private var dashboardPreferences = DashboardPreferences.load()
     @State private var isBalanceScopeExpanded = false
     @State private var selectedPhysicalAssetGainAccountID: UUID? = nil
+    @State private var selectedPhysicalAssetGainMetal: PreciousMetal? = nil
     @AppStorage(SetupWizardView.checklistKey) private var showFirstWeekChecklist = false
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @AppStorage("pocketLedger.showAllBalanceCurrencies") private var showsAllBalanceCurrencies = false
@@ -555,9 +556,22 @@ struct DashboardView: View {
         }
     }
 
+    private func physicalAssetGainMetals(in account: Account) -> [PreciousMetal] {
+        PreciousMetal.allCases.filter { metal in
+            account.tracking?.metalPurchases.contains { $0.metal == metal } == true
+        }
+    }
+
     private var physicalAssetGainWidget: some View {
         let accounts = physicalAssetGainAccounts
         let selectedAccount = accounts.first { $0.id == selectedPhysicalAssetGainAccountID } ?? accounts.first
+        let availableMetals = selectedAccount.map { physicalAssetGainMetals(in: $0) } ?? []
+        let selectedMetal = selectedPhysicalAssetGainMetal.flatMap { availableMetals.contains($0) ? $0 : nil }
+        let showsScopeMenu = accounts.count > 1 || accounts.contains { !physicalAssetGainMetals(in: $0).isEmpty }
+        let selectionTitle = selectedAccount.map { account in
+            let scope = selectedMetal?.displayName ?? (availableMetals.isEmpty ? nil : "All metals")
+            return scope.map { "\(account.name) · \($0)" } ?? account.name
+        } ?? ""
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -567,25 +581,60 @@ struct DashboardView: View {
 
                 Spacer(minLength: 8)
                 if let selectedAccount {
-                    if accounts.count > 1 {
+                    if showsScopeMenu {
                         Menu {
                             ForEach(accounts) { account in
-                                Button {
-                                    selectedPhysicalAssetGainAccountID = account.id
-                                } label: {
-                                    if account.id == selectedAccount.id {
-                                        Label(account.name, systemImage: "checkmark")
+                                let metals = physicalAssetGainMetals(in: account)
+                                Section(account.name) {
+                                    if metals.isEmpty {
+                                        Button {
+                                            selectedPhysicalAssetGainAccountID = account.id
+                                            selectedPhysicalAssetGainMetal = nil
+                                        } label: {
+                                            if account.id == selectedAccount.id {
+                                                Label("Account total", systemImage: "checkmark")
+                                            } else {
+                                                Text("Account total")
+                                            }
+                                        }
                                     } else {
-                                        Text(account.name)
+                                        Button {
+                                            selectedPhysicalAssetGainAccountID = account.id
+                                            selectedPhysicalAssetGainMetal = nil
+                                        } label: {
+                                            if account.id == selectedAccount.id && selectedMetal == nil {
+                                                Label("All metals", systemImage: "checkmark")
+                                            } else {
+                                                Text("All metals")
+                                            }
+                                        }
+                                        ForEach(metals) { metal in
+                                            Button {
+                                                selectedPhysicalAssetGainAccountID = account.id
+                                                selectedPhysicalAssetGainMetal = metal
+                                            } label: {
+                                                if account.id == selectedAccount.id && selectedMetal == metal {
+                                                    Label(metal.displayName, systemImage: "checkmark")
+                                                } else {
+                                                    Text(metal.displayName)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
                         } label: {
-                            Label(selectedAccount.name, systemImage: "chevron.down")
+                            Label {
+                                Text(selectionTitle)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            } icon: {
+                                Image(systemName: "chevron.down")
+                            }
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(PocketLedgerTheme.accent)
                         }
-                        .accessibilityLabel("Choose physical asset account")
+                        .accessibilityLabel("Choose physical asset account and metal")
                     } else {
                         Text(selectedAccount.name)
                             .font(.caption.weight(.semibold))
@@ -597,7 +646,8 @@ struct DashboardView: View {
             if let selectedAccount {
                 PhysicalAssetGainHistoryChart(
                     account: selectedAccount,
-                    areBalancesRevealed: areBalancesRevealed
+                    areBalancesRevealed: areBalancesRevealed,
+                    selectedMetal: $selectedPhysicalAssetGainMetal
                 )
             } else {
                 Text("Track gold or silver in a physical asset account to see daily gains here.")
@@ -633,9 +683,6 @@ struct DashboardView: View {
                     }
 
                     Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(PocketLedgerTheme.textTertiary)
                 }
                 .padding(16)
                 .pocketGroupedSurface(cornerRadius: 20)
@@ -659,24 +706,23 @@ struct DashboardView: View {
         }
 
         return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Balance scope")
-                        .font(.title3.weight(.bold))
-                    Text("Account balances by type")
-                        .font(.caption)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+            NavigationLink {
+                AccountsView(store: store, security: security, onAddAction: onAddAction)
+            } label: {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Balance scope")
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(PocketLedgerTheme.textPrimary)
+                        Text("Account balances by type")
+                            .font(.caption)
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    }
+                    Spacer(minLength: 8)
                 }
-                Spacer()
-                NavigationLink {
-                    AccountsView(store: store, security: security, onAddAction: onAddAction)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(PocketLedgerTheme.textTertiary)
-                }
-                .accessibilityLabel("Open accounts")
+                .contentShape(Rectangle())
             }
+            .accessibilityLabel("Balance scope, account balances by type, Open accounts")
 
             HStack(spacing: 10) {
                 scopeMetric(title: "Included", value: "\(includedCount)", tint: PocketLedgerTheme.positive)
@@ -759,25 +805,23 @@ struct DashboardView: View {
         }.count
 
         return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Loans")
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(PocketLedgerTheme.textPrimary)
-                    Text(activeLoans.isEmpty ? "No active loans" : "\(activeLoans.count) active")
-                        .font(.caption)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+            NavigationLink {
+                LoansView(store: store, security: security)
+            } label: {
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Loans")
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(PocketLedgerTheme.textPrimary)
+                        Text(activeLoans.isEmpty ? "No active loans" : "\(activeLoans.count) active")
+                            .font(.caption)
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    }
+                    Spacer(minLength: 8)
                 }
-                Spacer()
-                NavigationLink {
-                    LoansView(store: store, security: security)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(PocketLedgerTheme.textTertiary)
-                }
-                .accessibilityLabel("Open loans")
+                .contentShape(Rectangle())
             }
+            .accessibilityLabel("Loans, \(activeLoans.count) active, Open loans")
 
             if activeLoans.isEmpty {
                 Button {
@@ -886,7 +930,7 @@ struct DashboardView: View {
                     snapshotMetric(
                         title: "Transactions",
                         value: "\(snapshot.monthTransactionCount)",
-                        systemImage: "arrow.left.arrow.right",
+                        systemImage: "list.bullet",
                         tint: PocketLedgerTheme.income
                     )
                 }
@@ -932,17 +976,12 @@ struct DashboardView: View {
 
         if !schedules.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
+                NavigationLink {
+                    ScheduledTransactionsView(store: store)
+                } label: {
                     sectionHeader(title: "Upcoming", detail: "Bills & recurring entries")
-                    NavigationLink {
-                        ScheduledTransactionsView(store: store)
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(PocketLedgerTheme.textTertiary)
-                    }
-                    .accessibilityLabel("Open scheduled transactions")
                 }
+                .accessibilityLabel("Upcoming, bills and recurring entries, Open scheduled transactions")
 
                 VStack(spacing: 0) {
                     ForEach(Array(schedules.prefix(3))) { schedule in
@@ -1027,17 +1066,12 @@ struct DashboardView: View {
 
         if !schedules.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
+                NavigationLink {
+                    ScheduledTransactionsView(store: store)
+                } label: {
                     sectionHeader(title: "Next 30 days", detail: "Projected cash flow")
-                    NavigationLink {
-                        ScheduledTransactionsView(store: store)
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(PocketLedgerTheme.textTertiary)
-                    }
-                    .accessibilityLabel("Open cash flow schedules")
                 }
+                .accessibilityLabel("Next 30 days, projected cash flow, Open cash flow schedules")
 
                 Text("Confirmed balances plus enabled recurring entries. Scheduled items are not included in the ledger until they run.")
                     .font(.caption)
@@ -1210,17 +1244,12 @@ struct DashboardView: View {
     private var budgetSnapshot: some View {
         if !snapshot.budgetSummaries.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
+                NavigationLink {
+                    BudgetsView(store: store, security: security)
+                } label: {
                     sectionHeader(title: "Budget pulse", detail: "This month")
-                    NavigationLink {
-                        BudgetsView(store: store, security: security)
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(PocketLedgerTheme.textTertiary)
-                    }
-                    .accessibilityLabel("Open budgets")
                 }
+                .accessibilityLabel("Budget pulse, this month, Open budgets")
 
                 VStack(spacing: 12) {
                     ForEach(Array(snapshot.budgetSummaries.prefix(3))) { summary in
@@ -1296,6 +1325,7 @@ struct DashboardView: View {
         HStack(alignment: .firstTextBaseline) {
             Text(title)
                 .font(.title3.weight(.bold))
+                .foregroundStyle(PocketLedgerTheme.textPrimary)
             Spacer()
             Text(detail)
                 .font(.caption.weight(.medium))

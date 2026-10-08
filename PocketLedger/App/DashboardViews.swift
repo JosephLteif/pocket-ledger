@@ -60,6 +60,13 @@ struct MoreView: View {
 
                 Section("Planning") {
                     NavigationLink {
+                        SavingsGoalsView(store: store, security: security)
+                    } label: {
+                        Label("Savings goals", systemImage: "flag")
+                    }
+                    .listRowBackground(PocketLedgerTheme.surface)
+
+                    NavigationLink {
                         LoansView(store: store, security: security)
                     } label: {
                         Label("Loans", systemImage: "arrow.left.arrow.right.circle.fill")

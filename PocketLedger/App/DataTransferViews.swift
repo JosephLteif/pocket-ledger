@@ -636,7 +636,7 @@ private struct BackupRestoreView: View {
                 Button("Replace ledger", role: .destructive, action: replace)
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("The current accounts, categories, and transactions will be replaced by the backup.")
+                Text("The active ledger, including its savings goals, will be replaced by the backup.")
             }
             .alert("Restore failed", isPresented: errorPresented) {
                 Button("OK") { errorMessage = nil }

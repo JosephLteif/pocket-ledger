@@ -1204,6 +1204,39 @@ final class LedgerStore: ObservableObject {
     }
 
     @discardableResult
+    func upsertSavingsGoal(_ goal: SavingsGoal) -> Bool {
+        var goal = goal
+        goal.name = goal.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !goal.name.isEmpty,
+              goal.targetAmount.minorUnits > 0,
+              goal.currentAmount.minorUnits >= 0,
+              goal.targetAmount.currency == goal.currentAmount.currency else {
+            lastActionStatus = "Enter a name, a positive target, and a valid saved amount."
+            return false
+        }
+
+        var updated = data
+        if let index = updated.savingsGoals.firstIndex(where: { $0.id == goal.id }) {
+            updated.savingsGoals[index] = goal
+        } else {
+            updated.savingsGoals.append(goal)
+        }
+        return persist(updated, successMessage: "Savings goal saved")
+    }
+
+    @discardableResult
+    func deleteSavingsGoal(id: UUID) -> Bool {
+        var updated = data
+        let originalCount = updated.savingsGoals.count
+        updated.savingsGoals.removeAll { $0.id == id }
+        guard updated.savingsGoals.count != originalCount else {
+            lastActionStatus = "Savings goal not found"
+            return false
+        }
+        return persist(updated, successMessage: "Savings goal deleted")
+    }
+
+    @discardableResult
     func addTemplate(_ template: LedgerTemplate) -> Bool {
         var updated = data
         updated.templates.append(template)
@@ -1387,6 +1420,7 @@ final class LedgerStore: ObservableObject {
         let transactionIDs = Set(updated.transactions.map(\.id))
         let scheduledTransactionIDs = Set(updated.scheduledTransactions.map(\.id))
         let budgetIDs = Set(updated.budgets.map(\.id))
+        let savingsGoalIDs = Set(updated.savingsGoals.map(\.id))
         let templateIDs = Set(updated.templates.map(\.id))
         let attachmentIDs = Set(updated.attachments.map(\.id))
         let loanIDs = Set(updated.loans.map(\.id))
@@ -1425,6 +1459,7 @@ final class LedgerStore: ObservableObject {
             contentsOf: imported.scheduledTransactions.filter { !scheduledTransactionIDs.contains($0.id) }
         )
         updated.budgets.append(contentsOf: imported.budgets.filter { !budgetIDs.contains($0.id) })
+        updated.savingsGoals.append(contentsOf: imported.savingsGoals.filter { !savingsGoalIDs.contains($0.id) })
         updated.templates.append(contentsOf: imported.templates.filter { !templateIDs.contains($0.id) })
         updated.attachments.append(contentsOf: imported.attachments.filter { !attachmentIDs.contains($0.id) })
         for rate in imported.exchangeRates {

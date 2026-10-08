@@ -198,6 +198,7 @@ enum FinanceDataValidationError: LocalizedError, Equatable {
     case invalidScheduleRule(index: Int)
     case invalidTemplate(index: Int, error: FinanceTransactionValidationError)
     case invalidBudget(index: Int)
+    case invalidSavingsGoal(index: Int)
     case invalidExchangeRate(index: Int)
     case invalidLoan(String)
     case invalidAssetTracking(String)
@@ -222,6 +223,8 @@ enum FinanceDataValidationError: LocalizedError, Equatable {
             return "Template \(index + 1) is invalid: \(error.localizedDescription)"
         case .invalidBudget(let index):
             return "Budget \(index + 1) has a missing category, invalid amount, or currency mismatch."
+        case .invalidSavingsGoal(let index):
+            return "Savings goal \(index + 1) has an invalid name or amount."
         case .invalidExchangeRate(let index):
             return "Exchange rate \(index + 1) is invalid."
         case .invalidLoan(let counterparty):
@@ -257,6 +260,9 @@ enum FinanceDataValidator {
         }
         if hasDuplicateIDs(data.budgets.map(\.id)) {
             return .duplicateIDs("budgets")
+        }
+        if hasDuplicateIDs(data.savingsGoals.map(\.id)) {
+            return .duplicateIDs("savings goals")
         }
         if hasDuplicateIDs(data.templates.map(\.id)) {
             return .duplicateIDs("templates")
@@ -439,6 +445,15 @@ enum FinanceDataValidator {
                   budget.monthlyLimit.currency == budget.currency,
                   budget.monthlyLimit.minorUnits > 0 else {
                 return .invalidBudget(index: index)
+            }
+        }
+
+        for (index, goal) in data.savingsGoals.enumerated() {
+            guard !goal.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  goal.targetAmount.minorUnits > 0,
+                  goal.currentAmount.minorUnits >= 0,
+                  goal.targetAmount.currency == goal.currentAmount.currency else {
+                return .invalidSavingsGoal(index: index)
             }
         }
 

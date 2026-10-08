@@ -1164,6 +1164,28 @@ struct LedgerBudget: Identifiable, Codable, Equatable {
     }
 }
 
+struct SavingsGoal: Identifiable, Codable, Equatable {
+    let id: UUID
+    var name: String
+    var targetAmount: Money
+    var currentAmount: Money
+    var targetDate: Date?
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        targetAmount: Money,
+        currentAmount: Money,
+        targetDate: Date? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.targetAmount = targetAmount
+        self.currentAmount = currentAmount
+        self.targetDate = targetDate
+    }
+}
+
 struct FinanceAttentionState: Codable, Equatable {
     var dismissedIDs: Set<String>
 
@@ -1433,6 +1455,7 @@ struct FinanceData: Codable, Equatable {
     var scheduledTransactions: [ScheduledTransaction]
     var exchangeRates: [ExchangeRate]
     var budgets: [LedgerBudget]
+    var savingsGoals: [SavingsGoal]
     var templates: [LedgerTemplate]
     var attachments: [LedgerAttachment]
     var attentionState: FinanceAttentionState
@@ -1448,6 +1471,7 @@ struct FinanceData: Codable, Equatable {
         scheduledTransactions: [ScheduledTransaction] = [],
         exchangeRates: [ExchangeRate] = [],
         budgets: [LedgerBudget] = [],
+        savingsGoals: [SavingsGoal] = [],
         templates: [LedgerTemplate] = [],
         attachments: [LedgerAttachment] = [],
         attentionState: FinanceAttentionState = FinanceAttentionState(),
@@ -1463,6 +1487,7 @@ struct FinanceData: Codable, Equatable {
         self.scheduledTransactions = scheduledTransactions
         self.exchangeRates = exchangeRates
         self.budgets = budgets
+        self.savingsGoals = savingsGoals
         self.templates = templates
         self.attachments = attachments
         self.attentionState = attentionState
@@ -1481,6 +1506,7 @@ struct FinanceData: Codable, Equatable {
         case scheduledTransactions
         case exchangeRates
         case budgets
+        case savingsGoals
         case templates
         case attachments
         case attentionState
@@ -1508,6 +1534,7 @@ struct FinanceData: Codable, Equatable {
             forKey: .exchangeRates
         ) ?? []
         budgets = try container.decodeIfPresent([LedgerBudget].self, forKey: .budgets) ?? []
+        savingsGoals = try container.decodeIfPresent([SavingsGoal].self, forKey: .savingsGoals) ?? []
         templates = try container.decodeIfPresent([LedgerTemplate].self, forKey: .templates) ?? []
         attachments = try container.decodeIfPresent([LedgerAttachment].self, forKey: .attachments) ?? []
         attentionState = try container.decodeIfPresent(
@@ -1532,6 +1559,7 @@ struct FinanceData: Codable, Equatable {
         try container.encode(scheduledTransactions, forKey: .scheduledTransactions)
         try container.encode(exchangeRates, forKey: .exchangeRates)
         try container.encode(budgets, forKey: .budgets)
+        try container.encode(savingsGoals, forKey: .savingsGoals)
         try container.encode(templates, forKey: .templates)
         try container.encode(attachments, forKey: .attachments)
         try container.encode(attentionState, forKey: .attentionState)

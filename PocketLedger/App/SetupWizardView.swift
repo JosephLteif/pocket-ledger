@@ -3,11 +3,13 @@ import SwiftUI
 @MainActor
 struct SetupWizardView: View {
     static let completedKey = "pocketLedger.setupCompleted"
+    static let checklistKey = "pocketLedger.firstWeekChecklist"
 
     @ObservedObject var store: LedgerStore
     @ObservedObject private var proAccess = ProEntitlementStore.shared
     @Environment(\.dismiss) private var dismiss
     @AppStorage(Self.completedKey) private var setupCompleted = false
+    @AppStorage(Self.checklistKey) private var showFirstWeekChecklist = false
     @State private var accountName = "Cash"
     @State private var accountType: AccountType = .cash
     @State private var currency: LedgerCurrency = .usd
@@ -102,6 +104,9 @@ struct SetupWizardView: View {
     }
 
     private func createLedger() {
+        let isFirstLedger = store.data.accounts.isEmpty
+            && store.data.categories.isEmpty
+            && store.data.transactions.isEmpty
         let trimmedName = accountName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
             errorMessage = "Enter a name for your first account."
@@ -128,6 +133,9 @@ struct SetupWizardView: View {
             for name in ["Food", "Bills", "Transport", "Shopping"] {
                 _ = store.addCategory(LedgerCategory(name: name))
             }
+        }
+        if isFirstLedger {
+            showFirstWeekChecklist = true
         }
         complete()
     }

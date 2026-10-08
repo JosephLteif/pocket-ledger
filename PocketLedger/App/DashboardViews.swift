@@ -203,6 +203,7 @@ struct DashboardView: View {
     @State private var dashboardPreferences = DashboardPreferences.load()
     @State private var isBalanceScopeExpanded = false
     @State private var selectedPhysicalAssetGainAccountID: UUID? = nil
+    @AppStorage(SetupWizardView.checklistKey) private var showFirstWeekChecklist = false
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @AppStorage("pocketLedger.showAllBalanceCurrencies") private var showsAllBalanceCurrencies = false
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
@@ -212,6 +213,9 @@ struct DashboardView: View {
             PocketGlassContainer(spacing: 14) {
                 List {
                     dashboardListRow(dashboardDateHeader, top: 12, bottom: 0)
+                    if showFirstWeekChecklist && !hasCompletedFirstWeekChecklist {
+                        dashboardListRow(firstWeekChecklist)
+                    }
                     if !store.storageAvailable || !store.sharedStorageAvailable {
                         dashboardListRow(storageNotice)
                     }
@@ -285,10 +289,16 @@ struct DashboardView: View {
             .onAppear {
                 store.captureDailyPhysicalAssetGainHistory()
                 refreshSnapshot()
+                if hasCompletedFirstWeekChecklist {
+                    showFirstWeekChecklist = false
+                }
             }
             .onChange(of: store.ledgerRevision) { _, _ in
                 withAnimation(PocketLedgerMotion.expressive(reduceMotion: reduceMotion)) {
                     refreshSnapshot()
+                }
+                if hasCompletedFirstWeekChecklist {
+                    showFirstWeekChecklist = false
                 }
             }
             .onChange(of: dashboardPreferences) { _, preferences in preferences.save() }
@@ -299,6 +309,74 @@ struct DashboardView: View {
         Text(Date.now, style: .date)
             .font(.subheadline)
             .foregroundStyle(PocketLedgerTheme.textSecondary)
+    }
+
+    private var hasCompletedFirstWeekChecklist: Bool {
+        !store.data.transactions.isEmpty && !store.data.budgets.isEmpty
+    }
+
+    private var firstWeekChecklist: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Your first week", systemImage: "sparkles")
+                    .font(.headline)
+                    .foregroundStyle(PocketLedgerTheme.textPrimary)
+                Spacer()
+                Button("Hide") { showFirstWeekChecklist = false }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            }
+
+            Text("Your account is ready. A transaction and a budget will help bring your ledger to life.")
+                .font(.subheadline)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
+
+            Label("First account added", systemImage: "checkmark.circle.fill")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(PocketLedgerTheme.positive)
+
+            if store.data.transactions.isEmpty {
+                Button(action: onAddExpense) {
+                    Label("Add your first transaction", systemImage: "plus.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .tint(PocketLedgerTheme.accent)
+            } else {
+                Label("First transaction added", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(PocketLedgerTheme.positive)
+            }
+
+            if store.data.budgets.isEmpty {
+                if store.activeCategories.isEmpty {
+                    NavigationLink {
+                        CategoriesView(store: store)
+                    } label: {
+                        Label("Add a category to start a budget", systemImage: "square.grid.2x2")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                    .tint(PocketLedgerTheme.accent)
+                } else {
+                    NavigationLink {
+                        BudgetsView(store: store, security: security)
+                    } label: {
+                        Label("Create your first budget", systemImage: "chart.bar.doc.horizontal")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                    .tint(PocketLedgerTheme.accent)
+                }
+            } else {
+                Label("First budget created", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(PocketLedgerTheme.positive)
+            }
+        }
+        .padding(16)
+        .pocketGroupedSurface(cornerRadius: 20)
+        .overlay { RoundedRectangle(cornerRadius: 20).stroke(PocketLedgerTheme.divider, lineWidth: 1) }
     }
 
     @ViewBuilder

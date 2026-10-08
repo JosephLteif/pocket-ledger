@@ -11,6 +11,24 @@
         ],
         "createdAt": "2026-10-08T06:37:39.119Z",
         "reason": "Agent: only the short editorial overline and policy date stamp are uppercase, not long body passages"
+      },
+      {
+        "rule": "all-caps-body",
+        "value": "*",
+        "files": [
+          "docs/index.html"
+        ],
+        "createdAt": "2026-10-08T09:18:53.457Z",
+        "reason": "Agent: the 43-character iPhone and Watch footnote is a short metadata label, not body copy"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "docs/index.html"
+        ],
+        "createdAt": "2026-10-08T09:18:53.510Z",
+        "reason": "Agent: privacy-strip content is inset by the centered page-frame with viewport gutters"
       }
     ]
   }

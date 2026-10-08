@@ -572,7 +572,8 @@ private struct PrivacyPolicyView: View {
 
             Section("Contact") {
                 Text("For privacy questions, email:")
-                Link("joelteif11@gmail.com", destination: URL(string: "mailto:joelteif11@gmail.com")!)
+                Link("josephmllteif@icloud.com", destination: URL(string: "mailto:josephmllteif@icloud.com")!)
+                Link("josephmllteif@gmail.com", destination: URL(string: "mailto:josephmllteif@gmail.com")!)
             }
         }
         .pocketListSurface()

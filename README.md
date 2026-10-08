@@ -2,7 +2,7 @@
 
 Pocket Ledger is a local-first personal finance ledger for iPhone and Apple Watch, built with SwiftUI. Keep accounts, transactions, budgets, receipts, and reports together without linking a bank account.
 
-[Public site](https://josephlteif.github.io/pocket-ledger/) · [Privacy](https://josephlteif.github.io/pocket-ledger/privacy/) · [Support](https://josephlteif.github.io/pocket-ledger/support/) · [Email](mailto:joelteif11@gmail.com)
+[Public site](https://josephlteif.github.io/pocket-ledger/) · [Privacy](https://josephlteif.github.io/pocket-ledger/privacy/) · [Support](https://josephlteif.github.io/pocket-ledger/support/) · [Email](mailto:josephmllteif@icloud.com,josephmllteif@gmail.com)
 
 ## What it does
 
@@ -17,7 +17,7 @@ Pocket Ledger is a local-first personal finance ledger for iPhone and Apple Watc
 
 Ledger data and attachments are stored locally on the user’s devices. The app does not connect to financial institutions or send ledger data to a developer-operated server, advertising network, analytics service, or third-party AI service. Watch features can synchronize selected data to a paired Apple Watch. Exports are shared only when the user chooses a destination.
 
-Read the full [privacy policy](https://josephlteif.github.io/pocket-ledger/privacy/). For support or privacy questions, email [joelteif11@gmail.com](mailto:joelteif11@gmail.com). Please do not email account numbers, balances, receipts, backups, or other private financial information.
+Read the full [privacy policy](https://josephlteif.github.io/pocket-ledger/privacy/). For support or privacy questions, email [josephmllteif@icloud.com](mailto:josephmllteif@icloud.com) or [josephmllteif@gmail.com](mailto:josephmllteif@gmail.com). Please do not email account numbers, balances, receipts, backups, or other private financial information.
 
 ## Platforms
 

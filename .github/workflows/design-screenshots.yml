@@ -10,6 +10,7 @@ jobs:
   capture:
     name: Capture current iPhone UI
     runs-on: xcode-27
+    timeout-minutes: 45
 
     steps:
       - name: Check out selected commit

@@ -7,10 +7,10 @@ final class DashboardPreferencesTests: XCTestCase {
             DashboardPreferences.defaultPreferences.order,
             [
                 .balance,
+                .physicalAssetGain,
+                .attention,
                 .monthSummary,
                 .recentActivity,
-                .attention,
-                .physicalAssetGain,
                 .accounts,
                 .loans,
                 .upcoming,
@@ -21,7 +21,7 @@ final class DashboardPreferencesTests: XCTestCase {
         )
         XCTAssertEqual(
             DashboardPreferences.defaultPreferences.enabledWidgets,
-            [.balance, .monthSummary, .recentActivity, .attention, .physicalAssetGain]
+            [.balance, .physicalAssetGain, .attention, .monthSummary, .recentActivity]
         )
     }
 

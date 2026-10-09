@@ -217,8 +217,12 @@ final class DesignReviewScreenshots: XCTestCase {
     @MainActor
     private func openMoreDestination(_ title: String, navigationTitle: String, app: XCUIApplication) {
         let destination = app.buttons[title].firstMatch
-        for _ in 0..<8 where !destination.isHittable { app.swipeUp() }
         XCTAssertTrue(destination.waitForExistence(timeout: 10), "Could not find More destination: \(title)")
+        for _ in 0..<8 {
+            if destination.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(destination.isHittable, "More destination is not tappable: \(title)")
         destination.tap()
         XCTAssertTrue(app.navigationBars[navigationTitle].waitForExistence(timeout: 10))
     }

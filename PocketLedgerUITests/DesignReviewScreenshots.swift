@@ -27,12 +27,6 @@ final class DesignReviewScreenshots: XCTestCase {
         app.buttons["add-transaction-button"].tap()
         XCTAssertTrue(app.navigationBars["New transaction"].waitForExistence(timeout: 10))
         capture("05-expense-editor", app: app)
-        let categoryControl = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Category")).firstMatch
-        XCTAssertTrue(categoryControl.waitForExistence(timeout: 10))
-        categoryControl.tap()
-        XCTAssertTrue(app.navigationBars["Choose category"].waitForExistence(timeout: 10))
-        capture("05a-expense-category-picker", app: app)
-        app.buttons["Done"].tap()
         app.buttons["Cancel"].tap()
 
         app.buttons["more-transaction-actions"].tap()

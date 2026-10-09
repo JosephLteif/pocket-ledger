@@ -97,6 +97,7 @@ targets:
       gatherCoverageData: false
       testTargets:
         - PocketLedgerTests
+        - PocketLedgerUITests
 
   PocketLedgerWidget:
     type: app-extension
@@ -209,3 +210,15 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.josephlteif.pocketledger.tests
         GENERATE_INFOPLIST_FILE: YES
+
+  PocketLedgerUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: PocketLedgerUITests
+    dependencies:
+      - target: PocketLedger
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.josephlteif.pocketledger.uitests
+        TEST_TARGET_NAME: PocketLedger

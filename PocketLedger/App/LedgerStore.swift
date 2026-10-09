@@ -67,7 +67,14 @@ final class LedgerStore: ObservableObject {
 
     init(hasProAccess: @escaping () -> Bool = { ProEntitlementStore.shared.hasProAccess }) {
         self.hasProAccess = hasProAccess
-        let loadedData = storage.load()
+        var loadedData = storage.load()
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-DesignReviewMode") {
+            let fixture = DesignReviewFixture.make()
+            _ = storage.save(fixture, expected: loadedData, allowingCorruptedReplacement: true)
+            loadedData = fixture
+        }
+        #endif
         data = loadedData
         ledgerIndex = LedgerIndex(data: loadedData)
         ledgerRevision = 1

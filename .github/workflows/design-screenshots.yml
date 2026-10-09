@@ -1,0 +1,113 @@
+name: Capture design review screenshots
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    name: Capture current iPhone UI
+    runs-on: xcode-27
+
+    steps:
+      - name: Check out selected commit
+        uses: actions/checkout@v7
+
+      - name: Cache Swift package data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/Developer/Xcode/SourcePackages
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('project.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Select simulator and capture screenshots
+        run: |
+          set -euo pipefail
+          SIMULATOR_ID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ && $2 ~ /^[A-Fa-f0-9-]+$/ { print $2; exit }')"
+          test -n "$SIMULATOR_ID" || { echo "No available iPhone simulator found"; exit 1; }
+          xcrun simctl ui "$SIMULATOR_ID" appearance light
+
+          xcodebuild \
+            -project PocketLedger.xcodeproj \
+            -scheme PocketLedger \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -parallel-testing-enabled NO \
+            -derivedDataPath "$RUNNER_TEMP/DesignReviewDerivedData" \
+            -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/SourcePackages" \
+            -resultBundlePath "$RUNNER_TEMP/DesignReview.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            test \
+            -only-testing:PocketLedgerUITests 2>&1 | tee "$RUNNER_TEMP/design-review-xcodebuild.log"
+
+      - name: Export screenshot attachments
+        run: |
+          set -euo pipefail
+          SCREENSHOT_DIR="$RUNNER_TEMP/design-review-screenshots"
+          mkdir -p "$SCREENSHOT_DIR"
+          xcrun xcresulttool export attachments \
+            --path "$RUNNER_TEMP/DesignReview.xcresult" \
+            --output-path "$SCREENSHOT_DIR"
+          python3 - "$SCREENSHOT_DIR" <<'PY'
+          import json
+          import pathlib
+          import re
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          manifest_path = root / "manifest.json"
+          manifest = json.loads(manifest_path.read_text())
+          for result in manifest:
+              for attachment in result.get("attachments", []):
+                  filename = attachment.get("exportedFileName", "")
+                  suggested = attachment.get("suggestedHumanReadableName", "")
+                  if not filename.lower().endswith(".png") or not suggested:
+                      continue
+                  name = re.sub(r"_\d+_[A-Fa-f0-9-]+(?=\.png$)", "", suggested)
+                  if not name.lower().endswith(".png"):
+                      name += ".png"
+                  source = root / filename
+                  destination = root / name
+                  if source != destination:
+                      source.rename(destination)
+                      attachment["exportedFileName"] = name
+          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+          PY
+          find "$SCREENSHOT_DIR" -type f -iname '*.png' -print -quit | grep -q . || {
+            echo "No screenshots were exported from the UI capture run."
+            exit 1
+          }
+
+      - name: Publish screenshots
+        uses: actions/upload-artifact@v7
+        with:
+          name: PocketLedger-design-review-${{ github.sha }}
+          path: ${{ runner.temp }}/design-review-screenshots/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summarize capture
+        run: |
+          {
+            echo "## Design review screenshots"
+            echo
+            echo "Captured from commit $GITHUB_SHA on the selected branch. The PocketLedger-design-review-$GITHUB_SHA artifact contains the current app screens and menus."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -4,46 +4,53 @@ final class DesignReviewScreenshots: XCTestCase {
     @MainActor
     func testCapturePrimaryNavigationAndEditors() {
         let app = XCUIApplication()
-        app.launchArguments.append("-DesignReviewMode")
+        app.launchArguments = ["-DesignReviewMode", "-PocketLedger.developerProOverride.enabled", "NO"]
         app.launch()
 
         selectTab("tab-overview", title: "Home", app: app)
-        XCTAssertTrue(app.buttons["dashboard-customize"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 30))
         capture("01-home", app: app)
 
+        app.buttons["screen-actions"].tap()
+        XCTAssertTrue(app.buttons["dashboard-customize"].waitForExistence(timeout: 10))
         app.buttons["dashboard-customize"].tap()
         XCTAssertTrue(app.navigationBars["Customize dashboard"].waitForExistence(timeout: 10))
         capture("02-dashboard-customization", app: app)
         app.buttons["Done"].tap()
 
-        app.buttons["more-transaction-actions"].tap()
+        app.buttons["add-transaction-button"].tap()
         XCTAssertTrue(app.buttons["Income"].waitForExistence(timeout: 10))
-        capture("03-transaction-actions-menu", app: app)
+        capture("03-add-chooser", app: app)
         app.buttons["Income"].tap()
         XCTAssertTrue(app.navigationBars["New transaction"].waitForExistence(timeout: 10))
         capture("04-income-editor", app: app)
         app.buttons["Cancel"].tap()
 
         app.buttons["add-transaction-button"].tap()
+        XCTAssertTrue(app.buttons["Expense"].waitForExistence(timeout: 10))
+        app.buttons["Expense"].tap()
         XCTAssertTrue(app.navigationBars["New transaction"].waitForExistence(timeout: 10))
         capture("05-expense-editor", app: app)
         app.buttons["Cancel"].tap()
 
-        app.buttons["more-transaction-actions"].tap()
+        app.buttons["add-transaction-button"].tap()
+        XCTAssertTrue(app.buttons["Transfer"].waitForExistence(timeout: 10))
         app.buttons["Transfer"].tap()
         XCTAssertTrue(app.navigationBars["New transaction"].waitForExistence(timeout: 10))
         capture("06-transfer-editor", app: app)
         app.buttons["Cancel"].tap()
 
-        app.buttons["more-transaction-actions"].tap()
+        app.buttons["add-transaction-button"].tap()
+        XCTAssertTrue(app.buttons["Loan"].waitForExistence(timeout: 10))
         app.buttons["Loan"].tap()
         XCTAssertTrue(app.navigationBars["New loan"].waitForExistence(timeout: 10))
         capture("07-loan-editor", app: app)
         app.buttons["Cancel"].tap()
 
-        app.buttons["more-transaction-actions"].tap()
+        app.buttons["add-transaction-button"].tap()
+        XCTAssertTrue(app.buttons["Physical asset purchase"].waitForExistence(timeout: 10))
         app.buttons["Physical asset purchase"].tap()
-        XCTAssertTrue(app.navigationBars["Physical asset purchase"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["Asset purchase"].waitForExistence(timeout: 10))
         capture("08-physical-asset-account-picker", app: app)
         app.buttons["Gold holdings"].tap()
         XCTAssertTrue(app.navigationBars["Add gold purchase"].waitForExistence(timeout: 10))
@@ -53,7 +60,8 @@ final class DesignReviewScreenshots: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).tap()
         app.buttons["Cancel"].tap()
 
-        app.buttons["more-transaction-actions"].tap()
+        app.buttons["add-transaction-button"].tap()
+        XCTAssertTrue(app.buttons["Investment purchase"].waitForExistence(timeout: 10))
         app.buttons["Investment purchase"].tap()
         XCTAssertTrue(app.navigationBars["Investment purchase"].waitForExistence(timeout: 10))
         capture("10-investment-account-picker", app: app)
@@ -62,13 +70,14 @@ final class DesignReviewScreenshots: XCTestCase {
         capture("11-investment-purchase-editor", app: app)
         app.buttons["Cancel"].tap()
 
-        app.buttons["more-transaction-actions"].tap()
+        app.buttons["add-transaction-button"].tap()
+        XCTAssertTrue(app.buttons["Scheduled"].waitForExistence(timeout: 10))
         app.buttons["Scheduled"].tap()
-        XCTAssertTrue(app.navigationBars["Schedule transaction"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["New schedule"].waitForExistence(timeout: 10))
         capture("12-scheduled-transaction-editor", app: app)
         app.buttons["Cancel"].tap()
 
-        selectTab("tab-search", title: "Search", app: app)
+        app.buttons["global-search-button"].tap()
         XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 10))
         capture("13-search", app: app)
         let searchField = app.searchFields.firstMatch
@@ -76,6 +85,7 @@ final class DesignReviewScreenshots: XCTestCase {
         searchField.typeText("groceries")
         app.keyboards.buttons["Search"].tap()
         capture("13a-search-results", app: app)
+        app.buttons["Done"].tap()
 
         selectTab("tab-transactions", title: "Transactions", app: app)
         XCTAssertTrue(app.navigationBars["Transactions"].waitForExistence(timeout: 10))
@@ -97,8 +107,8 @@ final class DesignReviewScreenshots: XCTestCase {
         capture("18-account-editor", app: app)
         app.buttons["Cancel"].tap()
 
-        app.buttons["Adjust current balance"].tap()
-        XCTAssertTrue(app.navigationBars["Edit balance"].waitForExistence(timeout: 10))
+        app.buttons["Adjust balance"].tap()
+        XCTAssertTrue(app.navigationBars["Adjust balance"].waitForExistence(timeout: 10))
         capture("19-account-balance-editor", app: app)
         app.buttons["Cancel"].tap()
     }
@@ -106,24 +116,25 @@ final class DesignReviewScreenshots: XCTestCase {
     @MainActor
     func testCaptureMoreDestinations() {
         let app = XCUIApplication()
-        app.launchArguments.append("-DesignReviewMode")
+        app.launchArguments = ["-DesignReviewMode", "-PocketLedger.developerProOverride.enabled", "NO"]
         app.launch()
         selectTab("tab-more", title: "More", app: app)
         XCTAssertTrue(app.navigationBars["More"].waitForExistence(timeout: 10))
         capture("20-more", app: app)
 
-        openMoreDestination("Metrics", navigationTitle: "Metrics", app: app)
+        selectTab("tab-metrics", title: "Insights", app: app)
+        XCTAssertTrue(app.navigationBars["Insights"].waitForExistence(timeout: 10))
         capture("21-metrics", app: app)
         app.buttons["metrics-secondary-filters"].tap()
         XCTAssertTrue(app.navigationBars["Breakdown"].waitForExistence(timeout: 10))
         capture("22-metrics-breakdown", app: app)
         app.buttons["Done"].tap()
-        returnToMore(app)
+        selectTab("tab-more", title: "More", app: app)
 
         openMoreDestination("Savings goals", navigationTitle: "Savings goals", app: app)
         capture("23-savings-goals", app: app)
         app.buttons["Add savings goal"].tap()
-        XCTAssertTrue(app.navigationBars["New savings goal"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["New goal"].waitForExistence(timeout: 10))
         capture("24-savings-goal-editor", app: app)
         app.buttons["Cancel"].tap()
         returnToMore(app)
@@ -153,7 +164,7 @@ final class DesignReviewScreenshots: XCTestCase {
         openMoreDestination("Scheduled & subscriptions", navigationTitle: "Scheduled", app: app)
         capture("31-scheduled-transactions", app: app)
         app.buttons["Add scheduled transaction"].tap()
-        XCTAssertTrue(app.navigationBars["Schedule transaction"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["New schedule"].waitForExistence(timeout: 10))
         capture("32-scheduled-editor", app: app)
         app.buttons["Cancel"].tap()
         returnToMore(app)
@@ -203,20 +214,83 @@ final class DesignReviewScreenshots: XCTestCase {
     @MainActor
     func testCaptureImportWizardScreenshots() {
         let app = XCUIApplication()
-        app.launchArguments = ["-DesignReviewMode", "-ImportWizardUITest"]
+        app.launchArguments = ["-DesignReviewMode", "-ImportWizardUITest", "-PocketLedger.developerProOverride.enabled", "NO"]
         app.launch()
 
-        XCTAssertTrue(app.navigationBars["Source & mapping"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.navigationBars["Source"].waitForExistence(timeout: 30))
         capture("44-import-source-mapping", app: app)
         app.buttons["importWizard.next"].tap()
         XCTAssertTrue(app.navigationBars["Defaults"].waitForExistence(timeout: 10))
         capture("45-import-defaults", app: app)
         app.buttons["importWizard.next"].tap()
-        XCTAssertTrue(app.navigationBars["Accounts & categories"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.navigationBars["Organize"].waitForExistence(timeout: 30))
         capture("46-import-accounts-and-categories", app: app)
         app.buttons["importWizard.next"].tap()
-        XCTAssertTrue(app.navigationBars["Review & import"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["Review"].waitForExistence(timeout: 10))
         capture("47-import-review", app: app)
+    }
+
+    @MainActor
+    func testSearchSheetReturnsToEachMainTab() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-DesignReviewMode", "-PocketLedger.developerProOverride.enabled", "NO"]
+        app.launch()
+        for (identifier, title) in [("tab-overview", "Home"), ("tab-transactions", "Transactions"), ("tab-accounts", "Accounts"), ("tab-metrics", "Insights"), ("tab-more", "More")] {
+            selectTab(identifier, title: title, app: app)
+            XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 10))
+            app.buttons["global-search-button"].tap()
+            XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 10))
+            app.buttons["Done"].tap()
+            XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 10))
+        }
+        XCTAssertFalse(app.tabBars.buttons["Search"].exists)
+    }
+
+    @MainActor
+    func testCaptureDarkAndAccessibilityLayouts() {
+        for (name, category) in [("dark", "UICTContentSizeCategoryL"), ("accessibility", "UICTContentSizeCategoryAccessibilityXXXL")] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-DesignReviewMode", "-PocketLedger.developerProOverride.enabled", "NO", "-pocketLedger.appearanceMode", "dark", "-UIPreferredContentSizeCategoryName", category]
+            app.launch()
+            selectTab("tab-overview", title: "Home", app: app)
+            XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 30))
+            capture("48-\(name)-home", app: app)
+            app.buttons["add-transaction-button"].tap()
+            XCTAssertTrue(app.buttons["Expense"].waitForExistence(timeout: 10))
+            capture("49-\(name)-add", app: app)
+            app.buttons["Expense"].tap()
+            XCTAssertTrue(app.navigationBars["New transaction"].waitForExistence(timeout: 10))
+            XCTAssertFalse(app.staticTexts["Save needs attention"].exists)
+            XCTAssertTrue(app.textFields["Amount"].firstMatch.isHittable)
+            capture("50-\(name)-expense-keyboard", app: app)
+            app.buttons["Cancel"].tap()
+            selectTab("tab-metrics", title: "Insights", app: app)
+            XCTAssertTrue(app.navigationBars["Insights"].waitForExistence(timeout: 10))
+            capture("51-\(name)-insights", app: app)
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testCaptureEmptyAndLongNameAccessStates() {
+        for (name, arguments) in [
+            ("empty-free", ["-DesignReviewEmpty", "-PocketLedger.developerProOverride.enabled", "NO"]),
+            ("long-names-free", ["-DesignReviewLongNames", "-PocketLedger.developerProOverride.enabled", "NO"]),
+            ("long-names-pro", ["-DesignReviewLongNames", "-PocketLedger.developerProOverride.enabled", "YES"])
+        ] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-DesignReviewMode", "-pocketLedger.setupCompleted", "YES"] + arguments
+            app.launch()
+            for (identifier, title) in [("tab-overview", "Home"), ("tab-transactions", "Transactions"), ("tab-accounts", "Accounts"), ("tab-metrics", "Insights"), ("tab-more", "More")] {
+                selectTab(identifier, title: title, app: app)
+                XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 30))
+                if title == "More" {
+                    XCTAssertTrue(app.buttons[name.hasSuffix("-pro") ? "Pro is active" : "Explore Pro"].waitForExistence(timeout: 10))
+                }
+                capture("52-\(name)-\(title.lowercased())", app: app)
+            }
+            app.terminate()
+        }
     }
 
     @MainActor

@@ -23,7 +23,15 @@ final class AppNavigationTests: XCTestCase {
     }
 
     func testMainTabOrderAndHomeLabel() {
-        XCTAssertEqual(AppTab.tabBarOrder, [.overview, .transactions, .accounts, .more, .search])
+        XCTAssertEqual(AppTab.tabBarOrder, [.overview, .transactions, .accounts, .metrics, .more])
         XCTAssertEqual(AppTab.overview.title, "Home")
+        XCTAssertEqual(AppTab.metrics.title, "Insights")
+    }
+
+    func testRestoredSelectionSupportsInsightsAndRetiresSearchTab() {
+        XCTAssertEqual(AppTab.restoredTab(rawValue: "metrics"), .metrics)
+        XCTAssertEqual(AppTab.restoredTab(rawValue: "search"), .overview)
+        XCTAssertEqual(AppTab.restoredTab(rawValue: "unknown"), .overview)
+        XCTAssertEqual(AppTab.restoredTab(rawValue: "accounts"), .accounts)
     }
 }

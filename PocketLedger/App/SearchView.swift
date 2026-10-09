@@ -155,7 +155,7 @@ struct GlobalSearchView: View {
                         ContentUnavailableView(
                             "Search your ledger",
                             systemImage: "magnifyingglass",
-                            description: Text("Accounts, transactions, and categories")
+                            description: Text("Find accounts, transactions, descriptions, categories, amounts, and currencies.")
                         )
                         .padding(.top, 18)
                         if !savedSearches.isEmpty {
@@ -189,12 +189,16 @@ struct GlobalSearchView: View {
                                 }
                             }
                             .padding(.top, 8)
+                        } else {
+                            Text("Enter a search, then tap Save search to reuse it later.")
+                                .font(.footnote)
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
                         }
                     } else if results.isEmpty {
                         ContentUnavailableView(
                             "No results",
                             systemImage: "magnifyingglass",
-                            description: Text("Try a different search.")
+                            description: Text("Try another name, description, category, amount, or currency.")
                         )
                         .padding(.top, 18)
                     } else {

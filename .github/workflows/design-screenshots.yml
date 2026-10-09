@@ -60,10 +60,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            POCKET_LEDGER_DEVELOPER_PRO_OVERRIDE=YES \
             test \
-            -only-testing:PocketLedgerTests/AppNavigationTests \
-            -only-testing:PocketLedgerTests/DashboardPreferencesTests \
             -only-testing:PocketLedgerUITests 2>&1 | tee "$RUNNER_TEMP/design-review-xcodebuild.log"
 
       - name: Export screenshot attachments

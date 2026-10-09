@@ -86,7 +86,6 @@ private struct MovementLineEditor: View {
     let amountPlaceholder: String
     let allowsArchivedAccount: Bool
     var focusAmountOnAppear = false
-    var focusRequest = 0
 
     var body: some View {
         let availableCurrencies = LedgerCurrency.allCases.filter { currency in
@@ -108,8 +107,7 @@ private struct MovementLineEditor: View {
                     }
                 ),
                 selectableCurrencies: availableCurrencies,
-                focusOnAppear: focusAmountOnAppear,
-                focusRequest: focusRequest
+                focusOnAppear: focusAmountOnAppear
             )
             if !line.amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                let amount = Money.parse(line.amount, currency: line.currency), amount.minorUnits <= 0 {
@@ -223,11 +221,6 @@ struct TransactionEditor: View {
     @State private var errorMessage: String?
     @State private var isShowingMoreDetails = false
     @State private var saveFeedbackTrigger = 0
-    @State private var movementFocusID: UUID?
-    @State private var movementFocusRequest = 0
-    @State private var billFocusRequest = 0
-    @FocusState private var focusedField: ValidationField?
-    private enum ValidationField: Hashable { case templateName, rate }
     private let editingScheduleID: UUID?
     private let editingScheduleLastRunDate: Date?
     private let editingScheduleNextRunDate: Date?
@@ -370,7 +363,8 @@ struct TransactionEditor: View {
         let initialHasAttachments = !(transaction?.attachmentIDs ?? []).isEmpty
             || initialAttachmentData != nil
         _isShowingMoreDetails = State(initialValue:
-            initialTiming == .scheduled
+            resolvedInitialKind != .expense
+                || initialTiming == .scheduled
                 || scheduledTransaction != nil
                 || !initialInflows.isEmpty
                 || sourceTransaction?.changeAdjustment != nil
@@ -380,7 +374,6 @@ struct TransactionEditor: View {
                 || initialHasAttachments
                 || initialCurrencies.count > 1
                 || !initialReceiptItems.isEmpty
-                || !(sourceTransaction?.note ?? scheduledTransaction?.note ?? initialNote ?? "").isEmpty
         )
         _requestedChange = State(
             initialValue: (sourceTransaction?.changeAdjustment ?? scheduledTransaction?.changeAdjustment).map { Self.inputText(for: $0.requested) } ?? ""
@@ -428,6 +421,8 @@ struct TransactionEditor: View {
                         }
                     }
                     .pickerStyle(.menu)
+                } header: {
+                    Text("Transaction type")
                 }
 
                 if assetCreatedNotice {
@@ -445,13 +440,20 @@ struct TransactionEditor: View {
                     }
                 }
 
+                if let saveValidationMessage {
+                    Section("Save needs attention") {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "info.circle")
+                            Text(verbatim: saveValidationMessage)
+                        }
+                            .font(.footnote)
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    }
+                }
+
                 if isTemplateEditor {
                     Section("Template") {
-                        LabeledContent("Name") {
-                            TextField("Template name", text: $templateName)
-                                .multilineTextAlignment(.trailing)
-                                .focused($focusedField, equals: .templateName)
-                        }
+                        TextField("Template name", text: $templateName)
                     }
                 }
 
@@ -461,18 +463,18 @@ struct TransactionEditor: View {
                     expenseDateSection
                     moreDetailsSection
                 } else {
+                    timingSection
+                    detailsSection
+                    attachmentSection
                     outgoingMovementSection
                     receivingMovementSection
-                    expenseDateSection
-                    moreDetailsSection
+                    exchangeRateSection
                 }
 
             }
             .onAppear {
-                if (kind == .transfer || (kind == .income && originalEditorSnapshot == nil
-                    && !hasPrefilledTransactionContent && editingScheduleID == nil && editingTemplateID == nil)),
-                   inflows.isEmpty {
-                    inflows.append(kind == .income ? (outflows.first ?? newMovementDraft) : newReceivingMovementDraft)
+                if kind == .transfer && inflows.isEmpty {
+                    inflows.append(newReceivingMovementDraft)
                 }
                 synchronizeRatePair()
                 synchronizeAutomaticTransferAmount()
@@ -484,7 +486,7 @@ struct TransactionEditor: View {
                 handleKindChange(newKind)
             }
             .onChange(of: selectedCurrencies) { _, _ in
-                if selectedCurrencies.count > 1 {
+                if kind == .expense && selectedCurrencies.count > 1 {
                     isShowingMoreDetails = true
                 }
                 synchronizeRatePair()
@@ -532,10 +534,7 @@ struct TransactionEditor: View {
                 }
             }
             .alert("Transaction not saved", isPresented: errorPresented) {
-                Button("OK") {
-                    errorMessage = nil
-                    focusInvalidField()
-                }
+                Button("OK") { errorMessage = nil }
             } message: {
                 Text(verbatim: errorMessage ?? "")
             }
@@ -694,6 +693,11 @@ struct TransactionEditor: View {
     private var expensePaymentsSection: some View {
         Section(
             header: Text(outflows.count > 1 ? "Payment breakdown" : "Payment"),
+            footer: Text(outflows.isEmpty
+                         ? "Choose the account this purchase was paid from."
+                         : outflows.count > 1
+                            ? "These amounts combine into one purchase total. Each part can use a different account or currency."
+                            : "Add another part only if you paid from more than one account."),
             content: {
             if outflows.isEmpty {
                 Button("Choose payment account") {
@@ -703,11 +707,11 @@ struct TransactionEditor: View {
                 ForEach(Array(outflows.enumerated()), id: \.element.id) { entry in
                     let index = entry.offset
                     VStack(alignment: .leading, spacing: 10) {
-                        if outflows.count > 1 {
-                            HStack {
-                                Text("Payment \(index + 1)")
-                                    .font(.subheadline.weight(.semibold))
-                                Spacer()
+                        HStack {
+                            Text(index == 0 ? "Main payment" : "Additional payment \(index + 1)")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            if outflows.count > 1 {
                                 removeLineButton(
                                     accessibilityLabel: "Remove payment \(index + 1)"
                                 ) {
@@ -721,14 +725,25 @@ struct TransactionEditor: View {
                             line: $outflows[index],
                             amountPlaceholder: index == 0 ? "Amount" : "Amount for this payment",
                             allowsArchivedAccount: allowsArchivedMovementAccounts,
-                            focusAmountOnAppear: index == 0 && outflows[index].amount.isEmpty,
-                            focusRequest: movementFocusID == outflows[index].id ? movementFocusRequest : 0
+                            focusAmountOnAppear: index == 0 && outflows[index].amount.isEmpty
                         )
                     }
                     .padding(.vertical, 4)
                 }
             }
 
+            if !outflows.isEmpty {
+                Button {
+                    outflows.append(newSplitPaymentDraft)
+                } label: {
+                    Label(
+                        outflows.count > 1 ? "Add another payment" : "Split this payment",
+                        systemImage: "arrow.left.arrow.right"
+                    )
+                }
+                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.borderless)
+            }
             })
     }
 
@@ -746,33 +761,11 @@ struct TransactionEditor: View {
         Section {
             DisclosureGroup(isExpanded: $isShowingMoreDetails) {
                 VStack(alignment: .leading, spacing: 14) {
-                    LabeledContent("Note") {
-                        TextField("Optional", text: $note, axis: .vertical)
-                            .lineLimit(1...5)
-                            .multilineTextAlignment(.trailing)
-                            .accessibilityLabel("Note")
-                    }
-                    Divider()
                     expenseScheduleDetails
-                    if kind == .expense {
-                        Divider()
-                        Button("Split payment", systemImage: "arrow.left.arrow.right") {
-                            outflows.append(newSplitPaymentDraft)
-                        }
-                        expenseBillDetails
-                        Divider()
-                        expenseReturnedMoneyDetails
-                    } else {
-                        Divider()
-                        if kind == .transfer {
-                            Button("Add sending account", systemImage: "plus.circle") {
-                                outflows.append(newMovementDraft)
-                            }
-                        }
-                        Button("Add receiving account", systemImage: "plus.circle") {
-                            inflows.append(kind == .income ? newMovementDraft : newReceivingMovementDraft)
-                        }
-                    }
+                    Divider()
+                    expenseBillDetails
+                    Divider()
+                    expenseReturnedMoneyDetails
                     if !attachments.isEmpty || initialAttachmentFileName != nil {
                         Divider()
                         expenseAttachmentDetails
@@ -838,13 +831,7 @@ struct TransactionEditor: View {
             Text("Bill total")
                 .font(.subheadline.weight(.semibold))
 
-            CurrencyInputField("Total due (optional)", text: $amountDue, currency: $dueCurrency,
-                focusRequest: billFocusRequest)
-            if !amountDue.isEmpty,
-               Money.parse(amountDue, currency: dueCurrency).map({ $0.minorUnits > 0 }) != true {
-                Label("Enter a positive total.", systemImage: "exclamationmark.circle")
-                    .font(.caption).foregroundStyle(PocketLedgerTheme.warning)
-            }
+            CurrencyInputField("Total due (optional)", text: $amountDue, currency: $dueCurrency)
         }
     }
 
@@ -872,8 +859,7 @@ struct TransactionEditor: View {
                             store: store,
                             line: $inflows[index],
                             amountPlaceholder: "Amount returned",
-                            allowsArchivedAccount: allowsArchivedMovementAccounts,
-                            focusRequest: movementFocusID == inflows[index].id ? movementFocusRequest : 0
+                            allowsArchivedAccount: allowsArchivedMovementAccounts
                         )
                     }
                     .padding(12)
@@ -987,6 +973,8 @@ struct TransactionEditor: View {
                 }
             }
 
+            TextField("What was this for?", text: $note, axis: .vertical)
+                .lineLimit(2...5)
         }
     }
 
@@ -1041,14 +1029,22 @@ struct TransactionEditor: View {
                         store: store,
                         line: $line,
                         amountPlaceholder: kind == .transfer ? "Amount sent" : "Amount leaving account",
-                        allowsArchivedAccount: allowsArchivedMovementAccounts,
-                        focusRequest: movementFocusID == line.id ? movementFocusRequest : 0
+                        allowsArchivedAccount: allowsArchivedMovementAccounts
                     )
                 }
                 .onDelete { outflows.remove(atOffsets: $0) }
 
+                Button {
+                    outflows.append(newMovementDraft)
+                } label: {
+                    Label("Add another account", systemImage: "plus.circle")
+                }
             } header: {
                 Text(kind == .transfer ? "From" : "Money leaving accounts")
+            } footer: {
+                Text(kind == .transfer
+                     ? "Choose the account and amount sending the transfer."
+                     : "Use one line for each currency or account used to pay.")
             }
         }
     }
@@ -1070,12 +1066,16 @@ struct TransactionEditor: View {
                         store: store,
                         line: $line,
                         amountPlaceholder: kind == .transfer ? "Amount received" : "Amount entering account",
-                        allowsArchivedAccount: allowsArchivedMovementAccounts,
-                        focusAmountOnAppear: kind == .income && line.id == inflows.first?.id && line.amount.isEmpty,
-                        focusRequest: movementFocusID == line.id ? movementFocusRequest : 0
+                        allowsArchivedAccount: allowsArchivedMovementAccounts
                     )
                 }
                 .onDelete { inflows.remove(atOffsets: $0) }
+
+                Button {
+                    inflows.append(newMovementDraft)
+                } label: {
+                    Label("Add another receiving account", systemImage: "plus.circle")
+                }
 
                 if kind == .expense && inflows.count == 1 {
                     CurrencyInputField(
@@ -1094,6 +1094,12 @@ struct TransactionEditor: View {
             Text(kind == .transfer
                  ? "To"
                  : kind == .expense ? "Change / money returned" : "Money entering accounts")
+        } footer: {
+            Text(kind == .transfer
+                 ? "The amount is filled from the sending amount when possible. You can edit it for a specific transfer."
+                 : kind == .expense
+                    ? "Returned money may go to a different account and currency than the payment."
+                    : "Choose the account and currency receiving the money.")
         }
     }
 
@@ -1184,12 +1190,8 @@ struct TransactionEditor: View {
                         Text(currency.rawValue).tag(currency)
                     }
                 }
-                LabeledContent("Rate") {
-                    TextField("Quote units per base unit", text: $rateText)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .focused($focusedField, equals: .rate)
-                }
+                TextField("Quote units per base unit", text: $rateText)
+                    .keyboardType(.decimalPad)
 
                 if let savedRate {
                     Button {
@@ -1223,12 +1225,12 @@ struct TransactionEditor: View {
         if editingTransactionID != nil {
             return "Edit transaction"
         }
-        return timing == .scheduled ? "New schedule" : "New transaction"
+        return timing == .scheduled ? "Schedule transaction" : "New transaction"
     }
 
     private var saveButtonTitle: String {
         if isTemplateEditor {
-            return "Save"
+            return "Save template"
         }
         if timing == .scheduled {
             return isEditingScheduledTransaction ? "Update" : "Schedule"
@@ -1492,8 +1494,8 @@ struct TransactionEditor: View {
     }
 
     private func handleKindChange(_ newKind: TransactionKind) {
-        if (newKind == .transfer || newKind == .income) && inflows.isEmpty {
-            inflows.append(newKind == .income ? newMovementDraft : newReceivingMovementDraft)
+        if newKind == .transfer && inflows.isEmpty {
+            inflows.append(newReceivingMovementDraft)
         }
         if newKind != .transfer {
             automaticTransferDestinationAmount = nil
@@ -1717,31 +1719,6 @@ struct TransactionEditor: View {
             return MoneyMovement(accountID: account.id, money: money)
         }
         return movements.count == drafts.count ? movements : nil
-    }
-
-    private func focusInvalidField() {
-        guard saveValidationMessage != nil else { return }
-        if isTemplateEditor && templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            focusedField = .templateName
-        } else if let movement = ((kind == .income ? [] : outflows) + inflows).first(where: {
-            Money.parse($0.amount, currency: $0.currency).map { $0.minorUnits > 0 } != true
-        }) {
-            if kind == .expense && inflows.contains(where: { $0.id == movement.id }) {
-                isShowingMoreDetails = true
-            }
-            movementFocusID = movement.id
-            movementFocusRequest += 1
-        } else if !amountDue.isEmpty,
-                  Money.parse(amountDue, currency: dueCurrency).map({ $0.minorUnits > 0 }) != true {
-            isShowingMoreDetails = true
-            billFocusRequest += 1
-        } else if selectedCurrencies.count > 1 && appliedExchangeRate == nil {
-            isShowingMoreDetails = true
-            Task { @MainActor in
-                await Task.yield()
-                focusedField = .rate
-            }
-        }
     }
 
     private func save() {

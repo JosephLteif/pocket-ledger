@@ -230,20 +230,20 @@ struct ProUpgradePrompt: View {
             access.requestUpgrade(for: feature)
             isPresentingUpgrade = true
         } label: {
-            HStack(spacing: 10) {
-                Label(title, systemImage: "lock")
+            VStack(alignment: .leading, spacing: 8) {
+                Label(title, systemImage: "sparkles")
+                    .font(.headline)
                     .foregroundStyle(PocketLedgerTheme.textPrimary)
-                Spacer(minLength: 8)
-                Text("Pro")
-                    .font(.caption.weight(.semibold))
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                Text("Explore Pro")
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(PocketLedgerTheme.accent)
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
             }
-            .font(.subheadline)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .accessibilityHint(detail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .pocketGroupedSurface(cornerRadius: 16)
         }
         .buttonStyle(.plain)
         .sheet(isPresented: $isPresentingUpgrade) {

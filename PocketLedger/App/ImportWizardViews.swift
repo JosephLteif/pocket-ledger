@@ -157,7 +157,7 @@ struct ImportWizardView: View {
                 Divider()
                 stepContent
             }
-            .navigationTitle(draft.step.shortTitle)
+            .navigationTitle(draft.step.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .cancellationAction) {
@@ -607,17 +607,26 @@ private struct ImportWizardProgressView: View {
     let step: ImportStep
 
     var body: some View {
-        HStack {
-            Text("Step \(step.rawValue + 1) of \(ImportStep.allCases.count)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            ProgressView(value: Double(step.rawValue + 1), total: Double(ImportStep.allCases.count))
-                .frame(width: 100)
-                .tint(PocketLedgerTheme.accent)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(ImportStep.allCases) { item in
+                    HStack(spacing: 6) {
+                        Image(systemName: item.rawValue <= step.rawValue ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(item.rawValue <= step.rawValue ? Color.accentColor : Color.secondary)
+                        Text(item.shortTitle)
+                            .font(.subheadline.weight(item == step ? .semibold : .regular))
+                    }
+                    .foregroundStyle(item == step ? .primary : .secondary)
+                    if item != ImportStep.allCases.last {
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
         .accessibilityIdentifier("importWizard.steps")
     }
 }
@@ -842,11 +851,9 @@ private struct ImportWizardOrganizeStep: View {
                             Text("\(data.categories.count) categories")
                                 .foregroundStyle(.secondary)
                         }
-                        DisclosureGroup("Review accounts and categories") {
-                            Text("Nothing is saved until import. Tap a row to edit, or select rows for a bulk action.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
+                        Text("Review provisional records here before any data is written. Tap a row for detailed edits, or select several rows for a bulk action.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
 
                     accountsSection(data: data)
@@ -1620,6 +1627,9 @@ private struct ImportWizardReviewList: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            Text("Review highlighted exceptions before importing.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -1632,7 +1642,7 @@ private struct ImportWizardReviewList: View {
                     Text(filter.title).tag(filter)
                 }
             }
-            .pickerStyle(.menu)
+            .pickerStyle(.segmented)
 
             if let warnings = draft.result?.warnings, !warnings.isEmpty {
                 ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in

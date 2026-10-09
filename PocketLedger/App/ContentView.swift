@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var addAction: AddAction?
     @State private var searchText = ""
     @State private var isSearchPresented = false
+    @State private var tabBeforeSearch = AppTab.overview
     @FocusState private var isSearchFieldFocused: Bool
     @State private var isShowingSetup = false
     @State private var isShowingImportWizardUITest = false
@@ -69,8 +70,6 @@ struct ContentView: View {
             openPendingVisualBillScan()
         }
         .onChange(of: isUnlocked) { _, _ in
-            if !isUnlocked && security.isPasscodeEnabled { isSearchPresented = false }
-            openPendingIntentSearch()
             openPendingVisualBillScan()
         }
         .task {
@@ -96,10 +95,6 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pocketLedgerWatchLedgerDidChange)) { _ in
             store.reload()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .pocketLedgerOpenSearch)) { _ in
-            guard !security.isPasscodeEnabled || isUnlocked else { return }
-            isSearchPresented = true
-        }
         .onOpenURL(perform: handleDeepLink)
         .sheet(isPresented: $isShowingSetup) {
             SetupWizardView(store: store)
@@ -113,10 +108,18 @@ struct ContentView: View {
     private var selectedTabBinding: Binding<AppTab> {
         Binding(
             get: {
-                AppTab.restoredTab(rawValue: selectedTabRawValue)
+                let tab = AppTab(rawValue: selectedTabRawValue) ?? .overview
+                return tab == .metrics ? .more : tab
             },
             set: { tab in
                 guard selectedTabRawValue != tab.rawValue else { return }
+                let currentTab = AppTab(rawValue: selectedTabRawValue) ?? .overview
+                if tab == .search, currentTab != .search {
+                    tabBeforeSearch = currentTab
+                } else if tab != .search {
+                    isSearchPresented = false
+                    isSearchFieldFocused = false
+                }
                 withAnimation(PocketLedgerMotion.quick(reduceMotion: reduceMotion)) {
                     selectedTabRawValue = tab.rawValue
                 }
@@ -147,9 +150,9 @@ struct ContentView: View {
     }
 
     private func openPendingIntentSearch() {
-        guard !security.isPasscodeEnabled || isUnlocked else { return }
         guard let request = intentSearchRouter.consumePendingSearch() else { return }
         searchText = request.query
+        selectedTabBinding.wrappedValue = .search
         isSearchPresented = true
         isSearchFieldFocused = true
     }
@@ -179,6 +182,25 @@ struct ContentView: View {
                 )
             }
             .accessibilityIdentifier("tab-overview")
+
+            Tab(value: AppTab.search, role: .search) {
+                NavigationStack {
+                    GlobalSearchView(store: store, security: security, searchText: $searchText)
+                        .searchable(
+                            text: $searchText,
+                            isPresented: $isSearchPresented,
+                            placement: .toolbar,
+                            prompt: "Search accounts, transactions, descriptions…"
+                        )
+                        .searchFocused($isSearchFieldFocused)
+                        .toolbar {
+                            PocketLedgerToolbar(security: security) {
+                                AddTransactionToolbar(store: store, onAction: { addAction = $0 })
+                            }
+                        }
+                }
+            }
+            .accessibilityIdentifier("tab-search")
 
             Tab(
                 "Transactions",
@@ -211,16 +233,6 @@ struct ContentView: View {
             }
             .accessibilityIdentifier("tab-accounts")
 
-            Tab("Insights", systemImage: AppTab.metrics.systemImage, value: AppTab.metrics) {
-                NavigationStack {
-                    MetricsView(store: store, security: security)
-                        .toolbar {
-                            AddTransactionToolbar(store: store, onAction: { addAction = $0 })
-                        }
-                }
-            }
-            .accessibilityIdentifier("tab-metrics")
-
             Tab(
                 "More",
                 systemImage: AppTab.more.systemImage,
@@ -236,21 +248,14 @@ struct ContentView: View {
             .accessibilityIdentifier("tab-more")
         }
         .tabBarMinimizeBehavior(.onScrollDown)
-        .sheet(isPresented: $isSearchPresented) {
-            NavigationStack {
-                GlobalSearchView(store: store, security: security, searchText: $searchText)
-                    .navigationTitle("Search")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search ledger")
-                    .searchFocused($isSearchFieldFocused)
-                    .task { isSearchFieldFocused = true }
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { isSearchPresented = false }
-                        }
-                    }
-            }
-            .pocketScreen()
+        .onChange(of: selectedTabRawValue) { _, rawValue in
+            guard rawValue == AppTab.search.rawValue else { return }
+            isSearchPresented = true
+            isSearchFieldFocused = true
+        }
+        .onChange(of: isSearchPresented) { _, isPresented in
+            guard !isPresented, selectedTabBinding.wrappedValue == .search else { return }
+            selectedTabBinding.wrappedValue = tabBeforeSearch
         }
         .tint(PocketLedgerTheme.accent)
         .preferredColorScheme(
@@ -372,8 +377,6 @@ enum AddAction: Identifiable {
 @MainActor
 struct AddTransactionToolbar: ToolbarContent {
     @ObservedObject var store: LedgerStore
-    @State private var isShowingChooser = false
-    @State private var pendingAction: AddAction?
     @AppStorage("pocketLedger.recentTemplateIDs") private var recentTemplateIDsValue = ""
     let onAction: (AddAction) -> Void
     var systemImage = "plus"
@@ -393,102 +396,83 @@ struct AddTransactionToolbar: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             Button {
-                isShowingChooser = true
+                onAction(.expense)
             } label: {
                 Image(systemName: systemImage)
             }
-            .accessibilityLabel("Add")
-            .accessibilityHint("Choose an entry type")
+            .accessibilityLabel("Add expense")
+            .accessibilityHint("Opens a new expense")
             .accessibilityIdentifier("add-transaction-button")
-            .sheet(isPresented: $isShowingChooser, onDismiss: {
-                guard let action = pendingAction else { return }
-                pendingAction = nil
-                onAction(action)
-            }) {
-                NavigationStack {
-                    List {
-                        Section {
-                            Button("Expense", systemImage: "arrow.up.right") { choose(.expense) }
-                            Button("Income", systemImage: "arrow.down.left") { choose(.income) }
-                            Button("Transfer", systemImage: "arrow.left.arrow.right") { choose(.transfer) }
-                        }
-                        Section {
-                            Button("Loan", systemImage: "banknote") { choose(.loan) }
-                            Button("Physical asset purchase", systemImage: "shippingbox") { choose(.physicalAsset) }
-                            Button("Investment purchase", systemImage: "chart.line.uptrend.xyaxis") { choose(.investment) }
-                        }
+        }
 
-                        Section("Other") {
-                            Menu("Scan bill", systemImage: "doc.text.viewfinder") {
-                                Button("Choose photo", systemImage: "photo") {
-                                    choose(.scanBill(.photoLibrary))
-                                }
-                                if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                                    Button("Take photo", systemImage: "camera") {
-                                        choose(.scanBill(.camera))
-                                    }
-                                }
-                                Button("Choose PDF", systemImage: "doc.richtext") {
-                                    choose(.scanBill(.pdf))
-                                }
-                            }
-                            Button("Scheduled", systemImage: "calendar.badge.clock") { choose(.scheduled) }
-                            NavigationLink("Templates", destination: TemplatesView(store: store))
-                        }
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Section("Add transaction") {
+                    Button("Income", systemImage: "arrow.down.left") { onAction(.income) }
+                    Button("Transfer", systemImage: "arrow.left.arrow.right") { onAction(.transfer) }
+                    Button("Loan", systemImage: "banknote") { onAction(.loan) }
+                    Button("Physical asset purchase", systemImage: "shippingbox") { onAction(.physicalAsset) }
+                    Button("Investment purchase", systemImage: "chart.line.uptrend.xyaxis") { onAction(.investment) }
+                }
 
-                        if !recentTemplates.isEmpty {
-                            Section("Recent templates") {
-                                ForEach(Array(recentTemplates.prefix(3)), id: \.id) { template in
-                                    Button(template.name, systemImage: "clock.arrow.circlepath") {
-                                        useTemplate(template.id)
-                                    }
-                                }
+                Section("Other") {
+                    Menu("Scan bill", systemImage: "doc.text.viewfinder") {
+                        Button("Choose photo", systemImage: "photo") {
+                            onAction(.scanBill(.photoLibrary))
+                        }
+                        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                            Button("Take photo", systemImage: "camera") {
+                                onAction(.scanBill(.camera))
                             }
                         }
-
-                        if !otherTemplates.isEmpty {
-                            Section("Templates") {
-                                ForEach(otherTemplates, id: \.id) { template in
-                                    Button(template.name, systemImage: "rectangle.stack") {
-                                        useTemplate(template.id)
-                                    }
-                                }
-                            }
-                        }
-
-                        if !store.recentTransactions.isEmpty {
-                            Section("Recent") {
-                                ForEach(Array(store.recentTransactions.prefix(3)), id: \.id) { transaction in
-                                    Button(transaction.note, systemImage: "clock.arrow.circlepath") {
-                                        choose(.recent(transaction.id))
-                                    }
-                                }
-                            }
+                        Button("Choose PDF", systemImage: "doc.richtext") {
+                            onAction(.scanBill(.pdf))
                         }
                     }
-                    .listStyle(.insetGrouped)
-                    .pocketListSurface()
-                    .navigationTitle("Add")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Close") { isShowingChooser = false }
+                    Button("Scheduled", systemImage: "calendar.badge.clock") { onAction(.scheduled) }
+                }
+
+                if !recentTemplates.isEmpty {
+                    Section("Recent templates") {
+                        ForEach(Array(recentTemplates.prefix(3)), id: \.id) { template in
+                            Button(template.name, systemImage: "clock.arrow.circlepath") {
+                                useTemplate(template.id)
+                            }
                         }
                     }
                 }
-            }
-        }
-    }
 
-    private func choose(_ action: AddAction) {
-        pendingAction = action
-        isShowingChooser = false
+                if !otherTemplates.isEmpty {
+                    Section("Templates") {
+                        ForEach(Array(otherTemplates.prefix(3)), id: \.id) { template in
+                            Button(template.name, systemImage: "rectangle.stack") {
+                                useTemplate(template.id)
+                            }
+                        }
+                    }
+                }
+
+                if !store.recentTransactions.isEmpty {
+                    Section("Recent") {
+                        ForEach(Array(store.recentTransactions.prefix(3)), id: \.id) { transaction in
+                            Button(transaction.note, systemImage: "clock.arrow.circlepath") {
+                                onAction(.recent(transaction.id))
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .accessibilityLabel("More transaction actions")
+            .accessibilityIdentifier("more-transaction-actions")
+        }
     }
 
     private func useTemplate(_ id: UUID) {
         let recent = ([id] + recentTemplateIDs.filter { $0 != id }).prefix(5)
         recentTemplateIDsValue = recent.map(\.uuidString).joined(separator: ",")
-        choose(.template(id))
+        onAction(.template(id))
     }
 }
 
@@ -500,12 +484,7 @@ enum AppTab: String, Hashable {
     case metrics
     case more
 
-    static let tabBarOrder: [AppTab] = [.overview, .transactions, .accounts, .metrics, .more]
-
-    static func restoredTab(rawValue: String) -> AppTab {
-        let tab = AppTab(rawValue: rawValue) ?? .overview
-        return tab == .search ? .overview : tab
-    }
+    static let tabBarOrder: [AppTab] = [.overview, .transactions, .accounts, .more, .search]
 
     var title: String {
         switch self {
@@ -518,7 +497,7 @@ enum AppTab: String, Hashable {
         case .transactions:
             return "Transactions"
         case .metrics:
-            return "Insights"
+            return "Metrics"
         case .more:
             return "More"
         }

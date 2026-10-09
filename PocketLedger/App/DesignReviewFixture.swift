@@ -3,12 +3,8 @@ import Foundation
 
 enum DesignReviewFixture {
     static func make() -> FinanceData {
-        if ProcessInfo.processInfo.arguments.contains("-DesignReviewEmpty") {
-            return FinanceData(accounts: [], categories: [], transactions: [])
-        }
-        let usesLongNames = ProcessInfo.processInfo.arguments.contains("-DesignReviewLongNames")
         let checking = Account(
-            name: usesLongNames ? "Everyday Checking for household expenses and recurring payments" : "Everyday Checking",
+            name: "Everyday Checking",
             type: .bankAccount,
             currency: .usd,
             openingBalance: Money(currency: .usd, minorUnits: 462_000)

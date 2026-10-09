@@ -69,12 +69,16 @@ struct AccountsView: View {
                 archivedAccountsSection
             }
 
-            if !store.storageAvailable {
-                Label("Changes cannot be saved. Check storage in Settings.", systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundStyle(PocketLedgerTheme.warning)
-                    .listRowBackground(Color.clear)
-            }
+            Text(store.storageAvailable && store.sharedStorageAvailable
+                 ? "Stored locally in the shared app container."
+                 : store.storageAvailable
+                 ? "Stored persistently on this device; widget sharing is unavailable."
+                 : "Persistent storage is unavailable; changes cannot be saved.")
+                .font(.caption)
+                .foregroundStyle(PocketLedgerTheme.textTertiary)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 20, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
         }
         .listStyle(.plain)
         .listSectionSpacing(20)
@@ -152,6 +156,9 @@ struct AccountsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Account totals by type")
                         .font(.title3.weight(.bold))
+                    Text("Included balances stay in their account currency")
+                        .font(.caption)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
                 Spacer(minLength: 8)
             }
@@ -206,6 +213,7 @@ struct AccountsView: View {
                 }
             }
         }
+        .pocketCard()
     }
 
     private var globalPositionSummary: some View {
@@ -214,6 +222,9 @@ struct AccountsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Net worth by currency")
                         .font(.title3.weight(.bold))
+                    Text("Tap a currency to see assets and liabilities")
+                        .font(.caption)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
 
                 Spacer()
@@ -267,6 +278,7 @@ struct AccountsView: View {
                 }
             }
         }
+        .pocketCard()
     }
 
     private func accountPositionRow(
@@ -636,7 +648,7 @@ private struct AccountRow: View {
                 }
             }
         }
-        .frame(minHeight: 44)
+        .frame(minHeight: 68)
     }
 }
 

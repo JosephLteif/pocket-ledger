@@ -1,10 +1,6 @@
 import SwiftUI
 import UIKit
 
-extension Notification.Name {
-    static let pocketLedgerOpenSearch = Notification.Name("pocketLedger.openSearch")
-}
-
 enum PocketLedgerAppearanceMode: String, CaseIterable, Identifiable {
     case system
     case light
@@ -245,9 +241,9 @@ enum PocketLedgerTheme {
         colorTheme.palette
     }
 
-    static var background: Color { Color(uiColor: .systemGroupedBackground) }
-    static var surface: Color { Color(uiColor: .secondarySystemGroupedBackground) }
-    static var surfaceElevated: Color { Color(uiColor: .tertiarySystemGroupedBackground) }
+    static var background: Color { palette.background }
+    static var surface: Color { palette.surface }
+    static var surfaceElevated: Color { palette.surfaceElevated }
     static var divider: Color { Color(uiColor: .separator) }
     static var textPrimary: Color { .primary }
     static var textSecondary: Color { .secondary }
@@ -367,13 +363,8 @@ struct BalanceVisibilityToolbarItem: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
-            Menu {
-                BalanceVisibilityControl(security: security, isRevealed: $isRevealed)
-                    .accessibilityIdentifier("balance-visibility-control")
-            } label: {
-                Label("More", systemImage: "ellipsis")
-            }
-            .accessibilityIdentifier("screen-actions")
+            BalanceVisibilityControl(security: security, isRevealed: $isRevealed)
+                .accessibilityIdentifier("balance-visibility-control")
         }
     }
 }
@@ -392,14 +383,6 @@ struct PocketLedgerToolbar<Content: ToolbarContent>: ToolbarContent {
     }
 
     var body: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Button {
-                NotificationCenter.default.post(name: .pocketLedgerOpenSearch, object: nil)
-            } label: {
-                Label("Search", systemImage: "magnifyingglass")
-            }
-            .accessibilityIdentifier("global-search-button")
-        }
         BalanceVisibilityToolbarItem(security: security)
         content
     }
@@ -450,21 +433,18 @@ struct CurrencyInputField: View {
     @Binding private var currency: LedgerCurrency
     private let selectableCurrencies: [LedgerCurrency]
     private let focusOnAppear: Bool
-    private let focusRequest: Int
     @FocusState private var isFocused: Bool
 
     init(
         _ title: String,
         text: Binding<String>,
-        currency: LedgerCurrency,
-        focusRequest: Int = 0
+        currency: LedgerCurrency
     ) {
         self.title = title
         _text = text
         _currency = .constant(currency)
         selectableCurrencies = [currency]
         focusOnAppear = false
-        self.focusRequest = focusRequest
     }
 
     init(
@@ -472,8 +452,7 @@ struct CurrencyInputField: View {
         text: Binding<String>,
         currency: Binding<LedgerCurrency>,
         selectableCurrencies: [LedgerCurrency] = LedgerCurrency.allCases,
-        focusOnAppear: Bool = false,
-        focusRequest: Int = 0
+        focusOnAppear: Bool = false
     ) {
         self.title = title
         _text = text
@@ -482,21 +461,14 @@ struct CurrencyInputField: View {
             selectableCurrencies.contains($0) || $0 == currency.wrappedValue
         }
         self.focusOnAppear = focusOnAppear
-        self.focusRequest = focusRequest
     }
 
     var body: some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextField("0", text: $text)
-                    .accessibilityLabel(title)
-                    .keyboardType(.decimalPad)
-                    .monospacedDigit()
-                    .focused($isFocused)
-            }
+            TextField(title, text: $text)
+                .keyboardType(.decimalPad)
+                .monospacedDigit()
+                .focused($isFocused)
 
             if selectableCurrencies.count > 1 {
                 CurrencySelectionMenu(currency: $currency, currencies: selectableCurrencies)
@@ -508,15 +480,12 @@ struct CurrencyInputField: View {
         }
         .onAppear {
             formatText()
-            if focusOnAppear || focusRequest > 0 { isFocused = true }
+            if focusOnAppear { isFocused = true }
         }
         .onChange(of: isFocused) { _, focused in
             if !focused {
                 formatText()
             }
-        }
-        .onChange(of: focusRequest) { _, _ in
-            isFocused = true
         }
         .onChange(of: currency) { _, _ in
             if !isFocused {
@@ -639,7 +608,18 @@ extension View {
     func pocketScreen() -> some View {
         self
             .scrollEdgeEffectStyle(.soft, for: .vertical)
-            .background(PocketLedgerTheme.background.ignoresSafeArea())
+            .background {
+                LinearGradient(
+                    colors: [
+                        PocketLedgerTheme.background,
+                        PocketLedgerTheme.surfaceElevated.opacity(0.24),
+                        PocketLedgerTheme.background
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+            }
             .foregroundStyle(PocketLedgerTheme.textPrimary)
             .tint(PocketLedgerTheme.accent)
             .preferredColorScheme(PocketLedgerTheme.appearanceMode.preferredColorScheme)
@@ -692,6 +672,15 @@ extension View {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(PocketLedgerTheme.surface)
             }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(PocketLedgerTheme.divider.opacity(0.65), lineWidth: 0.75)
+            }
+            .shadow(
+                color: Color.black.opacity(0.04),
+                radius: 12,
+                y: 5
+            )
     }
 
     @ViewBuilder

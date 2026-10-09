@@ -181,35 +181,39 @@ struct AccountDetailView: View {
             && (account.tracking?.metalPurchases.isEmpty == false || account.tracking?.physicalAssetSubtype == .other)
         return List {
             Section {
-                balanceCard(account)
-            }
-            .listRowBackground(PocketLedgerTheme.surface)
+                PocketGlassContainer(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        balanceCard(account)
+                        if account.type == .physicalAsset {
+                            PhysicalAssetGainHistoryChart(
+                                account: account,
+                                areBalancesRevealed: areBalancesRevealed
+                            )
+                            .padding(16)
+                            .pocketGroupedSurface(cornerRadius: 20)
+                        }
+                        totalsScopeCard(account)
 
-            if !store.isManagedLegacyLoanAccount(account.id) {
-                Section {
-                    Button {
-                        isPresentingBalanceEditor = true
-                    } label: {
-                        Label("Adjust balance", systemImage: "slider.horizontal.3")
-                            .frame(minHeight: 44)
+                        if !hidesGenericActivity {
+                            ViewThatFits(in: .horizontal) {
+                                HStack(spacing: 10) {
+                                    accountActivityMetrics(account: account, snapshot: snapshot)
+                                }
+                                VStack(spacing: 10) {
+                                    accountActivityMetrics(account: account, snapshot: snapshot)
+                                }
+                            }
+                        }
                     }
                 }
-                .listRowBackground(PocketLedgerTheme.surface)
+                .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 12)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
-
-            if !hidesGenericActivity {
-                Section("Summary") {
-                    accountActivityMetrics(account: account, snapshot: snapshot)
-                }
-                .listRowBackground(PocketLedgerTheme.surface)
-            }
-
-            if account.type == .physicalAsset {
-                Section("Asset gains") {
-                    PhysicalAssetGainHistoryChart(account: account, areBalancesRevealed: areBalancesRevealed)
-                }
-                .listRowBackground(PocketLedgerTheme.surface)
-            }
+            .listSectionSeparator(.hidden)
 
             AssetTrackingSection(store: store, account: account, areBalancesRevealed: areBalancesRevealed)
 
@@ -253,7 +257,10 @@ struct AccountDetailView: View {
                                 allowsActions: true,
                                 accountContext: account
                             )
-                            .listRowBackground(PocketLedgerTheme.surface)
+                            .pocketGroupedListRow(
+                                index: entry.offset,
+                                count: snapshot.pageTransactions.count
+                            )
                         }
 
                         if snapshot.pageCount > 1 {
@@ -302,7 +309,8 @@ struct AccountDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .listSectionSpacing(12)
+        .contentMargins(.horizontal, 0, for: .scrollContent)
+        .listSectionSpacing(24)
         .listSectionSeparator(.hidden)
         .textCase(nil)
         .scrollContentBackground(.hidden)
@@ -328,6 +336,36 @@ struct AccountDetailView: View {
             transactionPage,
             pageSize: transactionsPerPage
         )
+    }
+
+    private func totalsScopeCard(_ account: Account) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if store.isManagedLegacyLoanAccount(account.id) {
+                Label("Managed in Loans", systemImage: "arrow.left.arrow.right.circle")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PocketLedgerTheme.accent)
+                Text("This account remains as the history for the converted loan balances.")
+                    .font(.footnote)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            } else {
+                Toggle("Include in totals and metrics", isOn: Binding(
+                    get: { account.includeInTotals },
+                    set: { store.setAccountIncludedInTotals(accountID: account.id, included: $0) }
+                ))
+                Text(account.includeInTotals
+                     ? "This account contributes to balances and spending metrics."
+                     : "This account stays visible here but is excluded from balances and spending metrics.")
+                    .font(.footnote)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            }
+        }
+        .tint(PocketLedgerTheme.accent)
+        .padding(16)
+        .pocketGroupedSurface(cornerRadius: 18)
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(PocketLedgerTheme.divider, lineWidth: 1)
+        }
     }
 
     @ViewBuilder
@@ -417,8 +455,25 @@ struct AccountDetailView: View {
             .font(.caption)
             .foregroundStyle(PocketLedgerTheme.textTertiary)
 
+            if store.isManagedLegacyLoanAccount(account.id) {
+                Text("This account’s balance is represented by the managed loans.")
+                    .font(.footnote)
+                    .foregroundStyle(PocketLedgerTheme.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Button {
+                    isPresentingBalanceEditor = true
+                } label: {
+                    Label("Adjust current balance", systemImage: "slider.horizontal.3")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .tint(PocketLedgerTheme.accent)
+            }
         }
-        .padding(.vertical, 4)
+        .padding(20)
+        .pocketGroupedSurface(cornerRadius: 22)
     }
 
     private func accountMetric(
@@ -428,10 +483,9 @@ struct AccountDetailView: View {
         tint: Color,
         protectsValue: Bool = false
     ) -> some View {
-        HStack {
-            Label(title, systemImage: systemImage)
-                .foregroundStyle(PocketLedgerTheme.textSecondary)
-            Spacer()
+        VStack(alignment: .leading, spacing: 7) {
+            Image(systemName: systemImage)
+                .foregroundStyle(tint)
             Group {
                 if protectsValue {
                     ProtectedAmountText(value: value, isRevealed: areBalancesRevealed)
@@ -440,10 +494,15 @@ struct AccountDetailView: View {
                 }
             }
             .font(.subheadline.weight(.semibold).monospacedDigit())
-            .foregroundStyle(tint)
+            .lineLimit(2)
+            Text(title.uppercased())
+                .font(.caption2.weight(.bold))
+                .tracking(0.4)
+                .foregroundStyle(PocketLedgerTheme.textTertiary)
         }
-        .frame(minHeight: 44)
-
+        .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
+        .padding(11)
+        .pocketGroupedSurface(cornerRadius: 16)
     }
 }
 
@@ -493,7 +552,7 @@ private struct AccountBalanceEditor: View {
                 }
             }
             .pocketListSurface()
-            .navigationTitle("Adjust balance")
+            .navigationTitle("Edit balance")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

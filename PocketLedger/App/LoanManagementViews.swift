@@ -118,6 +118,8 @@ struct LoansView: View {
                     } label: {
                         Label("Enable loan reminders", systemImage: "bell.badge")
                     }
+                } footer: {
+                    Text("Reminders use your saved timing preference. Due dates stay visible here if notifications are unavailable.")
                 }
             }
         }
@@ -200,7 +202,7 @@ struct LoansView: View {
     }
 
     private func loanCountBadge(title: String, count: Int, tint: Color) -> some View {
-        HStack(spacing: 4) {
+        VStack(spacing: 3) {
             Text("\(count)")
                 .font(.headline.weight(.semibold).monospacedDigit())
                 .foregroundStyle(tint)
@@ -209,6 +211,8 @@ struct LoansView: View {
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(PocketLedgerTheme.surfaceElevated, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var activeLoans: [Loan] { store.data.loans.filter { !$0.isSettled } }
@@ -521,12 +525,17 @@ struct LoanEditor: View {
                             }
                         }
                     }
-                    LabeledContent(loan?.direction.counterpartyLabel ?? direction.counterpartyLabel) {
-                        TextField("Name", text: $counterparty)
-                            .multilineTextAlignment(.trailing)
-                    }
+                    TextField(loan?.direction.counterpartyLabel ?? direction.counterpartyLabel, text: $counterparty)
                     if loan == nil {
                         CurrencyInputField("Total amount owed", text: $amountText, currency: $loanCurrency)
+                        CurrencyInputField(
+                            direction == .lent ? "Amount given" : "Amount received",
+                            text: $fundedAmountText,
+                            currency: $loanCurrency
+                        )
+                        Text("Leave the funded amount blank to use the total owed. The total can include manually entered interest.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                         DatePicker("Started", selection: $startedAt, in: Date.distantPast...Date.now, displayedComponents: .date)
                     }
                     Toggle("Add due date", isOn: $hasDueDate)
@@ -565,15 +574,9 @@ struct LoanEditor: View {
                         }
                     }
                     Section {
-                        DisclosureGroup("Funding details") {
-                            CurrencyInputField(
-                                direction == .lent ? "Amount given" : "Amount received",
-                                text: $fundedAmountText,
-                                currency: $loanCurrency
-                            )
-                            Text("Leave blank to use the total owed, including any interest. Principal is excluded from income and expenses.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
+                        Text("The loan uses its own currency. Funding is converted to the selected cash account with a saved exchange rate, and principal stays out of income and expense totals.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -582,7 +585,7 @@ struct LoanEditor: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).disabled(!canSave) }
+                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
             }
             .alert("Loan not saved", isPresented: errorPresented) {
                 Button("OK") { errorMessage = nil }
@@ -594,14 +597,6 @@ struct LoanEditor: View {
 
     private var eligibleAccounts: [Account] {
         store.activeAccounts.filter { !$0.isArchived && ($0.type == .cash || $0.type == .bankAccount) }
-    }
-
-    private var canSave: Bool {
-        !counterparty.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (loan != nil || (selectedAccount != nil
-                && Money.parse(amountText, currency: loanCurrency).map { $0.minorUnits > 0 } == true
-                && fundingAmount.map { $0.minorUnits > 0 } == true
-                && cashMovementAmount.map { $0.minorUnits > 0 } == true))
     }
 
     private var selectedAccount: Account? {
@@ -792,56 +787,96 @@ struct LoanDetailView: View {
     }
 
     private func detail(_ loan: Loan) -> some View {
-        List {
-            Section {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(loan.direction.displayName, systemImage: loan.direction == .lent ? "arrow.up.right" : "arrow.down.left")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    ProtectedAmountText(value: loan.outstandingAmount.formatted, isRevealed: areBalancesRevealed)
-                        .font(.largeTitle.weight(.bold).monospacedDigit())
-                        .minimumScaleFactor(0.7)
-                    Text(loan.isSettled ? "Settled" : "Outstanding")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                if let dueDate = loan.dueDate {
-                    LabeledContent("Due", value: dueDate.formatted(date: .abbreviated, time: .omitted))
-                }
-                if let account = loan.settlementAccountID.flatMap({ store.account(with: $0) }) {
-                    LabeledContent("Cash account", value: account.name)
-                }
-                if !loan.isSettled {
-                    Button {
-                        isPresentingPayment = true
-                    } label: {
-                        Label(loan.direction == .lent ? "Record collection" : "Record repayment", systemImage: "plus.circle")
-                    }
-                }
-            }
-            Section("Payment history") {
-                if loan.payments.isEmpty {
-                    Text("No payments yet").foregroundStyle(.secondary)
-                } else {
-                    ForEach(loan.payments.sorted { $0.date > $1.date }) { payment in
-                        paymentRow(payment, loan: loan)
-                    }
-                }
-            }
-            Section {
-                DisclosureGroup("Loan details") {
-                    LabeledContent("Started", value: loan.startedAt.formatted(date: .abbreviated, time: .omitted))
-                    LabeledContent("Original total") {
-                        ProtectedAmountText(value: loan.startingAmount.formatted, isRevealed: areBalancesRevealed)
-                    }
-                    if let funding = originalFunding(for: loan) {
-                        LabeledContent(loan.direction == .lent ? "Amount given" : "Amount received") {
-                            ProtectedAmountText(value: funding.amount.formatted, isRevealed: areBalancesRevealed)
+        ScrollView(showsIndicators: false) {
+            PocketGlassContainer(spacing: 14) {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Label(loan.direction.displayName, systemImage: loan.direction == .lent ? "arrow.up.right" : "arrow.down.left")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                            Spacer()
+                            Text(loan.currency.rawValue)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(PocketLedgerTheme.accent)
                         }
-                        LabeledContent("Through", value: funding.account.name)
+                        Text(loan.counterparty)
+                            .font(.title3.weight(.semibold))
+                        ProtectedAmountText(value: loan.outstandingAmount.formatted, isRevealed: areBalancesRevealed)
+                            .font(.largeTitle.weight(.bold).monospacedDigit())
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                        Text(loan.isSettled ? "Settled" : "Outstanding")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(loan.isSettled ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.income)
+                        if let dueDate = loan.dueDate {
+                            Label("Due \(dueDate.formatted(date: .long, time: .omitted))", systemImage: "calendar")
+                                .font(.subheadline)
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        }
+                        if let account = loan.settlementAccountID.flatMap({ store.account(with: $0) }) {
+                            Label("Cash account: \(account.name)", systemImage: account.type.systemImage)
+                                .font(.caption)
+                                .foregroundStyle(PocketLedgerTheme.textTertiary)
+                        }
+                        if let funding = originalFunding(for: loan) {
+                            LabeledContent(loan.direction == .lent ? "Amount given" : "Amount received") {
+                                ProtectedAmountText(
+                                    value: funding.amount.formatted,
+                                    isRevealed: areBalancesRevealed
+                                )
+                                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                            }
+                            Text("Through \(funding.account.name)")
+                                .font(.caption)
+                                .foregroundStyle(PocketLedgerTheme.textTertiary)
+                        }
                     }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .pocketGroupedSurface(cornerRadius: 20)
+
+                    if !loan.isSettled {
+                        Button {
+                            isPresentingPayment = true
+                        } label: {
+                            Label(loan.direction == .lent ? "Record collection" : "Record repayment", systemImage: "plus.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(PocketLedgerTheme.accent)
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Payment history")
+                            .font(.headline)
+                        if loan.payments.isEmpty {
+                            Text("No payments recorded yet.")
+                                .font(.subheadline)
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 10)
+                        } else {
+                            ForEach(loan.payments.sorted { $0.date > $1.date }) { payment in
+                                paymentRow(payment, loan: loan)
+                            }
+                        }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .pocketGroupedSurface(cornerRadius: 18)
+
+                    Text("Started \(loan.startedAt.formatted(date: .abbreviated, time: .omitted)) · Original total \(loan.startingAmount.formatted)")
+                        .font(.caption)
+                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
+                .padding(.vertical, 12)
             }
         }
-        .pocketListSurface()
+        .scrollIndicators(.hidden)
+        .pocketScreen()
     }
 
     private func paymentRow(_ payment: LoanPayment, loan: Loan) -> some View {
@@ -869,13 +904,16 @@ struct LoanDetailView: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.headline.weight(.semibold))
-                    .frame(width: 44, height: 44)
+                    .frame(width: 36, height: 36)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Payment actions")
         }
         .padding(.vertical, 8)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(PocketLedgerTheme.divider).frame(height: 1)
+        }
     }
 
     private func originalFunding(for loan: Loan) -> (amount: Money, account: Account)? {

@@ -39,6 +39,15 @@ struct MoreView: View {
                     }
                 }
 
+                Section("Insights") {
+                    NavigationLink {
+                        MetricsView(store: store, security: security)
+                    } label: {
+                        Label("Metrics", systemImage: "chart.xyaxis.line")
+                    }
+                    .listRowBackground(PocketLedgerTheme.surface)
+                }
+
                 Section("Pocket Ledger Pro") {
                     ProUpgradeButton(feature: .general) {
                         Label(
@@ -125,7 +134,14 @@ struct MoreView: View {
                     .listRowBackground(PocketLedgerTheme.surface)
                 } header: {
                     Text("Data & security")
+                } footer: {
+                    Text("Keep advanced tools close without crowding the daily flow")
                 }
+                Section("App version") {
+                    LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown")
+                    LabeledContent("Build", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown")
+                }
+                .listRowBackground(PocketLedgerTheme.surface)
             }
             .navigationTitle("More")
             .navigationBarTitleDisplayMode(.large)
@@ -190,14 +206,14 @@ struct DashboardView: View {
         NavigationStack {
             PocketGlassContainer(spacing: 14) {
                 List {
-                    if !store.storageAvailable {
-                        dashboardListRow(storageNotice)
-                    }
-                    dashboardWidgets
-
+                    dashboardListRow(dashboardDateHeader, top: 12, bottom: 0)
                     if showFirstWeekChecklist && !hasCompletedFirstWeekChecklist {
                         dashboardListRow(firstWeekChecklist)
                     }
+                    if !store.storageAvailable || !store.sharedStorageAvailable {
+                        dashboardListRow(storageNotice)
+                    }
+                    dashboardWidgets
 
                     if let status = store.lastActionStatus {
                         dashboardListRow(
@@ -235,33 +251,23 @@ struct DashboardView: View {
             .preferredColorScheme(
                 PocketLedgerAppearanceMode(rawValue: selectedAppearanceMode)?.preferredColorScheme
             )
-            .navigationTitle("Home")
+            .navigationTitle("Pocket Ledger")
             .navigationBarTitleDisplayMode(.large)
             .toolbar(.visible, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        NotificationCenter.default.post(name: .pocketLedgerOpenSearch, object: nil)
-                    } label: {
-                        Label("Search", systemImage: "magnifyingglass")
-                    }
-                    .accessibilityIdentifier("global-search-button")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        BalanceVisibilityControl(security: security, isRevealed: $areBalancesRevealed)
+                PocketLedgerToolbar(security: security) {
+                    ToolbarItem(placement: .primaryAction) {
                         Button {
                             presentedSheet = .customization
                         } label: {
-                            Label("Customize dashboard", systemImage: "slider.horizontal.3")
+                            Image(systemName: "slider.horizontal.3")
                         }
+                        .accessibilityLabel("Customize dashboard")
+                        .accessibilityHint("Choose which widgets appear and reorder them")
                         .accessibilityIdentifier("dashboard-customize")
-                    } label: {
-                        Label("More actions", systemImage: "ellipsis")
                     }
-                    .accessibilityIdentifier("screen-actions")
+                    AddTransactionToolbar(store: store, onAction: onAddAction)
                 }
-                AddTransactionToolbar(store: store, onAction: onAddAction)
             }
             .sheet(item: $presentedSheet) { sheet in
                 switch sheet {
@@ -304,7 +310,21 @@ struct DashboardView: View {
     }
 
     private var firstWeekChecklist: some View {
-        DisclosureGroup("Getting started") {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Your first week", systemImage: "sparkles")
+                    .font(.headline)
+                    .foregroundStyle(PocketLedgerTheme.textPrimary)
+                Spacer()
+                Button("Hide") { showFirstWeekChecklist = false }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            }
+
+            Text("Your account is ready. A transaction and a budget will help bring your ledger to life.")
+                .font(.subheadline)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
+
             Label("First account added", systemImage: "checkmark.circle.fill")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(PocketLedgerTheme.positive)
@@ -347,10 +367,10 @@ struct DashboardView: View {
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(PocketLedgerTheme.positive)
             }
-            Button("Hide checklist") { showFirstWeekChecklist = false }
         }
         .padding(16)
         .pocketGroupedSurface(cornerRadius: 20)
+        .overlay { RoundedRectangle(cornerRadius: 20).stroke(PocketLedgerTheme.divider, lineWidth: 1) }
     }
 
     @ViewBuilder
@@ -388,7 +408,9 @@ struct DashboardView: View {
         case .budgetPulse:
             dashboardListRow(budgetSnapshot)
         case .storageStatus:
-            EmptyView()
+            if store.storageAvailable && store.sharedStorageAvailable {
+                dashboardListRow(storageNotice)
+            }
         }
     }
 
@@ -433,9 +455,9 @@ struct DashboardView: View {
             ? LedgerCurrency.allCases
             : LedgerCurrency.allCases.filter { usedCurrencies.contains($0) }
 
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Label("Balances", systemImage: "wallet.pass.fill")
+                Label("Included balances", systemImage: "wallet.pass.fill")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
 
@@ -459,8 +481,11 @@ struct DashboardView: View {
                 }
             }
 
+            Text("Includes accounts marked for totals, including investments and physical assets. Loans are tracked separately in Accounts.")
+                .font(.caption)
+                .foregroundStyle(PocketLedgerTheme.textTertiary)
         }
-        .padding(16)
+        .padding(20)
         .pocketGroupedSurface(cornerRadius: 22)
     }
 
@@ -470,6 +495,9 @@ struct DashboardView: View {
                 Text(currency.rawValue)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(currency == .usd ? PocketLedgerTheme.income : PocketLedgerTheme.textSecondary)
+                Text(currency.displayName)
+                    .font(.caption2)
+                    .foregroundStyle(PocketLedgerTheme.textTertiary)
             }
 
             Spacer(minLength: 12)
@@ -540,16 +568,11 @@ struct DashboardView: View {
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Asset gains", systemImage: "chart.line.uptrend.xyaxis")
+                Label("Physical asset gain/loss", systemImage: "chart.line.uptrend.xyaxis")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(PocketLedgerTheme.textPrimary)
 
                 Spacer(minLength: 8)
-                if selectedAccount == nil {
-                    Text("No holdings")
-                        .font(.caption)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-                }
                 if let selectedAccount {
                     if showsScopeMenu {
                         Menu {
@@ -619,9 +642,13 @@ struct DashboardView: View {
                     areBalancesRevealed: areBalancesRevealed,
                     selectedMetal: $selectedPhysicalAssetGainMetal
                 )
+            } else {
+                Text("Track gold or silver in a physical asset account to see daily gains here.")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
             }
         }
-        .padding(16)
+        .padding(20)
         .pocketGroupedSurface(cornerRadius: 22)
         .task { await store.refreshMetalPrices() }
     }
@@ -694,6 +721,12 @@ struct DashboardView: View {
                 scopeMetric(title: "Included", value: "\(includedCount)", tint: PocketLedgerTheme.positive)
                 scopeMetric(title: "Excluded", value: "\(excludedCount)", tint: PocketLedgerTheme.textTertiary)
             }
+
+            Text(excludedCount == 0
+                 ? "Included accounts feed totals; loans remain separate from included balances."
+                 : "Excluded accounts remain visible in Accounts but do not affect balances or metrics. Loans remain separate from included balances.")
+                .font(.caption)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
 
             if activeAccounts.isEmpty {
                 Text("Add an account to start tracking a balance.")
@@ -877,44 +910,56 @@ struct DashboardView: View {
         return VStack(alignment: .leading, spacing: 12) {
             sectionHeader(title: "This month", detail: Date.now.formatted(.dateTime.month(.wide).year()))
 
-            VStack(spacing: 0) {
+            HStack(spacing: 10) {
                 NavigationLink {
-                    TransactionsView(store: store, onAddExpense: onAddExpense, security: security,
-                                     initialFilter: .all, initialPeriod: .thisMonth)
+                    TransactionsView(
+                        store: store,
+                        onAddExpense: onAddExpense,
+                        security: security,
+                        initialFilter: .all,
+                        initialPeriod: .thisMonth
+                    )
                 } label: {
-                    HStack {
-                        Label("Transactions", systemImage: "list.bullet")
-                        Spacer()
-                        Text("\(snapshot.monthTransactionCount)").monospacedDigit()
-                        Image(systemName: "chevron.right").font(.caption)
-                    }
-                    .frame(minHeight: 44)
+                    snapshotMetric(
+                        title: "Transactions",
+                        value: "\(snapshot.monthTransactionCount)",
+                        systemImage: "list.bullet",
+                        tint: PocketLedgerTheme.income
+                    )
                 }
                 .buttonStyle(.plain)
-                if let topCategory = snapshot.topCategory {
-                    Divider()
-                    NavigationLink {
-                        TransactionsView(store: store, onAddExpense: onAddExpense, security: security,
-                                         initialFilter: .expense, initialPeriod: .thisMonth, initialSearch: topCategory)
-                    } label: {
-                        HStack {
-                            Text("Top category")
-                            Spacer()
-                            Text(topCategory).foregroundStyle(PocketLedgerTheme.textSecondary)
-                            Image(systemName: "chevron.right").font(.caption)
-                        }
-                        .frame(minHeight: 44)
-                    }
-                    .buttonStyle(.plain)
+
+                NavigationLink {
+                    TransactionsView(
+                        store: store,
+                        onAddExpense: onAddExpense,
+                        security: security,
+                        initialFilter: .expense,
+                        initialPeriod: .thisMonth,
+                        initialSearch: snapshot.topCategory ?? ""
+                    )
+                } label: {
+                    snapshotMetric(
+                        title: "Top category",
+                        value: snapshot.topCategory ?? "No activity",
+                        systemImage: "tag.fill",
+                        tint: PocketLedgerTheme.accent
+                    )
                 }
-                ForEach(LedgerCurrency.allCases.filter { expenses[$0, default: 0] != 0 }) { currency in
-                    Divider()
+                .buttonStyle(.plain)
+            }
+
+            VStack(spacing: 0) {
+                ForEach(LedgerCurrency.allCases.indices, id: \.self) { index in
+                    if index > 0 {
+                        Divider().overlay(PocketLedgerTheme.divider)
+                    }
+                    let currency = LedgerCurrency.allCases[index]
                     monthExpenseRow(currency: currency, total: expenses[currency] ?? 0)
-                        .frame(minHeight: 44)
                 }
             }
-            .padding(.horizontal, 16)
-            .pocketGroupedSurface(cornerRadius: 12)
+            .padding(14)
+            .pocketGroupedSurface(cornerRadius: 17)
         }
     }
 
@@ -1021,6 +1066,10 @@ struct DashboardView: View {
                 }
                 .accessibilityLabel("Next 30 days, projected cash flow, Open cash flow schedules")
 
+                Text("Confirmed balances plus enabled recurring entries. Scheduled items are not included in the ledger until they run.")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+
                 VStack(spacing: 0) {
                     ForEach(LedgerCurrency.allCases) { currency in
                         let current = snapshot.availableBalances[currency]
@@ -1084,7 +1133,7 @@ struct DashboardView: View {
                 .tracking(0.6)
                 .foregroundStyle(PocketLedgerTheme.textTertiary)
         }
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
         .padding(13)
         .pocketGroupedSurface(cornerRadius: 17)
     }
@@ -1116,8 +1165,12 @@ struct DashboardView: View {
                     Image(systemName: "tray")
                         .font(.title2)
                         .foregroundStyle(PocketLedgerTheme.textTertiary)
-                    Text("No recent transactions")
+                    Text("Your ledger is ready")
                         .font(.headline)
+                    Text("Add your first expense, income, or transfer to see it here.")
+                        .font(.subheadline)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        .multilineTextAlignment(.center)
                     Button("Add expense", systemImage: "plus", action: onAddExpense)
                         .buttonStyle(.glassProminent)
                 }
@@ -1282,6 +1335,13 @@ private struct DashboardCustomizationView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Text("Turn widgets on or off. Tap Edit to drag them into your preferred order.")
+                        .font(.subheadline)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        .listRowBackground(PocketLedgerTheme.surface)
+                }
+
                 Section("Dashboard widgets") {
                     ForEach(preferences.order) { widget in
                         Toggle(isOn: Binding(
@@ -1289,7 +1349,12 @@ private struct DashboardCustomizationView: View {
                             set: { preferences.setEnabled($0, for: widget) }
                         )) {
                             Label {
-                                Text(widget.title)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(widget.title)
+                                    Text(widget.subtitle)
+                                        .font(.caption)
+                                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                }
                             } icon: {
                                 Image(systemName: widget.systemImage)
                                     .foregroundStyle(PocketLedgerTheme.accent)

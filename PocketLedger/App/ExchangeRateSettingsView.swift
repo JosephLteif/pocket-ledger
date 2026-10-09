@@ -63,7 +63,7 @@ struct ExchangeRatesView: View {
                                     .foregroundStyle(.tertiary)
                             }
                             .foregroundStyle(PocketLedgerTheme.textPrimary)
-                            .frame(minHeight: 44)
+                            .frame(minHeight: 68)
                         }
                         .buttonStyle(.plain)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -80,7 +80,8 @@ struct ExchangeRatesView: View {
                 }
             } header: {
                 Text("Saved rates")
-
+            } footer: {
+                Text("A rate means how many quote-currency units equal one base-currency unit. Saving a reverse pair replaces the existing pair.")
             }
 
             Section {
@@ -143,11 +144,8 @@ private struct ExchangeRateEditor: View {
                         Label("Swap currencies", systemImage: "arrow.up.arrow.down")
                     }
 
-                    LabeledContent("Rate") {
-                        TextField("Quote units per base unit", text: $rateText)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                    }
+                    TextField("Quote units per base unit", text: $rateText)
+                        .keyboardType(.decimalPad)
 
                     if let rate = parsedRate, rate > 0, baseCurrency != quoteCurrency {
                         VStack(spacing: 8) {
@@ -163,16 +161,15 @@ private struct ExchangeRateEditor: View {
                                 amount: reciprocal(of: rate)
                             )
                         }
-
+                        .padding(12)
+                        .pocketGroupedSurface(cornerRadius: 14)
                     }
                 }
 
                 Section {
-                    DisclosureGroup("About saved rates") {
-                        Text("A rate is the quote-currency amount for one base-currency unit. Saving a reverse pair replaces the existing pair. Transactions use this as a starting value; you can override it for each transaction.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("This saved rate is used as a starting value when a transaction includes these currencies. You can still override the rate on an individual transaction.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
             .pocketListSurface()
@@ -219,7 +216,8 @@ private struct ExchangeRateEditor: View {
                 .fontWeight(.semibold)
                 .monospacedDigit()
                 .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .font(.footnote)
     }

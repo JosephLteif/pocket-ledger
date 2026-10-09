@@ -51,9 +51,6 @@ struct SecuritySettingsView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    Text("Choose whether Pocket Ledger follows your device appearance or stays light or dark.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
 
                 Section("Reminders") {
@@ -71,20 +68,17 @@ struct SecuritySettingsView: View {
                     .disabled(isUpdatingDailyReminder)
                     .accessibilityIdentifier("daily-transaction-reminder-time")
 
-                    Text("Get a daily notification to add today’s transactions. Notification access is requested when you enable this reminder.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
 
                     Toggle(isOn: $isScheduledLiveActivityEnabled) {
                         Label("Scheduled transaction countdown", systemImage: "timer")
                     }
                     .accessibilityIdentifier("scheduled-transaction-live-activity-toggle")
 
-                    Text("Shows the next scheduled transaction, expected amount, and countdown during the eight hours before it is due. Private details are hidden when iOS requests privacy redaction.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
 
                     DisclosureGroup("Timing and setup") {
+                        Text("Daily reminders ask for notification access when enabled. Countdown details are hidden when iOS requests privacy redaction.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                         Text(
                             "Groups up to three upcoming scheduled entries in one private countdown, and counts any additional entries in the same window. "
                                 + "It stays hidden until the next enabled entry is due within eight hours; scheduled notifications follow their selected reminder time independently. "
@@ -176,11 +170,20 @@ struct SecuritySettingsView: View {
                 }
 
                 Section("Data") {
+                    DisclosureGroup("Storage status") {
+                        Text(store.storageStatus)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                     NavigationLink {
                         DataTransferView(store: store)
                     } label: {
                         Label("Import & Backup", systemImage: "arrow.down.doc")
                     }
+                }
+                Section("About") {
+                    LabeledContent("Version", value: (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "—")
+                    LabeledContent("Build", value: (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "—")
                 }
             }
             .pocketListSurface()

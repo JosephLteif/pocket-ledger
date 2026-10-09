@@ -53,28 +53,19 @@ struct DataTransferView: View {
     }
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 18) {
-                introCard
-                if isProcessingTransfer {
-                    transferProgressCard
-                }
-                if isImportOnly {
-                    importCard
-                } else {
-                    backupCard
-                    if store.hasRecoverySnapshot {
-                        recoveryCard
-                    }
-                    importCard
-                    resetCard
-                }
+        List {
+            if isProcessingTransfer { transferProgressCard }
+            if isImportOnly {
+                importCard
+            } else {
+                backupCard
+                if store.hasRecoverySnapshot { recoveryCard }
+                importCard
+                Section { resetCard }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 24)
         }
-        .pocketScreen()
+        .listStyle(.insetGrouped)
+        .pocketListSurface()
         .onDisappear(perform: cancelTransfer)
         .navigationTitle("Import & Backup")
         .navigationBarTitleDisplayMode(.large)
@@ -152,59 +143,26 @@ struct DataTransferView: View {
         }
     }
 
-    private var introCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Move your ledger safely", systemImage: "arrow.left.arrow.right")
-                .font(.title3.weight(.bold))
-
-            Text(isImportOnly
-                 ? "Choose a file to bring your existing history into Pocket Ledger. You can review mapped rows before saving them. Files stay on this device."
-                 : "Pocket Ledger can restore its own lossless backup or import rows from another app. Files are read on this device and are never uploaded.")
-                .font(.subheadline)
-                .foregroundStyle(PocketLedgerTheme.textSecondary)
-        }
-        .pocketCard()
-    }
-
     private var backupCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Pocket Ledger backup", systemImage: "externaldrive")
-                .font(.title3.weight(.bold))
-
-            Text("Full backups keep accounts, asset purchases and sales, metal prices, categories, transactions, schedules, and local receipt attachments so they can be restored later.")
-                .font(.subheadline)
-                .foregroundStyle(PocketLedgerTheme.textSecondary)
-
-            Button {
-                startBackupExport()
-            } label: {
-                Label("Export full backup", systemImage: "square.and.arrow.up")
-                    .frame(maxWidth: .infinity)
+        Section("Export") {
+            Button { startBackupExport() } label: {
+                Label("Full backup", systemImage: "square.and.arrow.up")
             }
-                .buttonStyle(.glassProminent)
-                .disabled(isProcessingTransfer)
-
-            Button {
-                startJSONBackupExport()
-            } label: {
-                Label("Export JSON compatibility backup", systemImage: "doc.text")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glass)
             .disabled(isProcessingTransfer)
-
+            Button(action: startJSONBackupExport) {
+                Label("JSON backup", systemImage: "doc.text")
+            }
+            .disabled(isProcessingTransfer)
             Button(action: exportCSV) {
-                Label("Export transactions as CSV", systemImage: "tablecells")
-                    .frame(maxWidth: .infinity)
+                Label("Transactions as CSV", systemImage: "tablecells")
             }
-            .buttonStyle(.glass)
             .disabled(isProcessingTransfer)
-
-            Text("The full backup includes local receipt files. JSON remains available for compatibility, while CSV is useful for spreadsheets and other finance apps.")
-                .font(.footnote)
-                .foregroundStyle(PocketLedgerTheme.textTertiary)
+            DisclosureGroup("Choose a backup format") {
+                Text("Full backups preserve your ledger and receipt files. JSON is available for compatibility; CSV exports transactions for spreadsheets and other apps.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .pocketCard()
     }
 
     private var resetCard: some View {
@@ -213,15 +171,17 @@ struct DataTransferView: View {
                 .font(.title3.weight(.bold))
                 .foregroundStyle(PocketLedgerTheme.warning)
 
-            Text("Reset replaces the active ledger with an empty one and normally keeps a local last-good recovery snapshot. Delete any snapshot from this screen if you also want to remove the recovery copy. Your app lock and appearance settings stay unchanged.")
-                .font(.subheadline)
-                .foregroundStyle(PocketLedgerTheme.textSecondary)
+            DisclosureGroup("What is erased?") {
+                Text("Reset replaces the active ledger with an empty one and normally keeps a local last-good recovery snapshot. Delete any snapshot from this screen if you also want to remove the recovery copy. Your app lock and appearance settings stay unchanged.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
 
             Button("Review reset warnings", role: .destructive) {
                 isShowingResetPreparation = true
             }
             .frame(maxWidth: .infinity)
-            .buttonStyle(.glass)
+            .buttonStyle(.borderless)
             .tint(PocketLedgerTheme.warning)
             .disabled(isProcessingTransfer)
             .confirmationDialog(
@@ -262,64 +222,44 @@ struct DataTransferView: View {
                 Text("This is the last confirmation. The active ledger will be replaced with an empty one immediately; any local recovery snapshot will remain.")
             }
         }
-        .pocketCard()
     }
 
     private var recoveryCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Last-good recovery snapshot", systemImage: "arrow.uturn.backward.circle")
-                .font(.title3.weight(.bold))
-
-            Text("Pocket Ledger keeps a local recovery copy before resetting or replacing the ledger. It can contain ledger details and available receipt files. Delete it here to remove the copy from app storage.")
-                .font(.subheadline)
-                .foregroundStyle(PocketLedgerTheme.textSecondary)
-
+        Section("Recovery") {
             Button {
                 isShowingRecoveryConfirmation = true
             } label: {
                 Label("Restore last-good snapshot", systemImage: "arrow.uturn.backward")
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glass)
-            .tint(PocketLedgerTheme.accent)
             .disabled(isProcessingTransfer)
-
             Button(role: .destructive) {
                 isShowingRecoveryDeletionConfirmation = true
             } label: {
                 Label("Delete recovery snapshot", systemImage: "trash")
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glass)
-            .tint(PocketLedgerTheme.warning)
             .disabled(isProcessingTransfer)
+            DisclosureGroup("About recovery") {
+                Text("Pocket Ledger keeps a local recovery copy before resetting or replacing the ledger. It can contain ledger details and receipt files. Delete it here to remove the copy from app storage.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .pocketCard()
     }
 
     private var importCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Import or restore a backup", systemImage: "arrow.down.doc")
-                .font(.title3.weight(.bold))
-
-            Text("Choose a Pocket Ledger full backup (.pocketledger) or JSON backup to review and restore your ledger. CSV, TSV, Excel, and SQLite files such as Money Manager's .mmbak open the column-mapping importer.")
-                .font(.subheadline)
-                .foregroundStyle(PocketLedgerTheme.textSecondary)
-
+        Section("Import") {
             Button {
                 isShowingImporter = true
             } label: {
-                Label("Choose import file", systemImage: "folder")
-                    .frame(maxWidth: .infinity)
+                Label("Choose file", systemImage: "folder")
             }
-            .buttonStyle(.glassProminent)
             .disabled(isProcessingTransfer)
-
-            Text("Supported spreadsheet input is .xlsx. Legacy binary .xls files should be exported as .xlsx, CSV, or TSV first.")
-                .font(.footnote)
-                .foregroundStyle(PocketLedgerTheme.textTertiary)
+            DisclosureGroup("Supported files") {
+                Text("Restore a .pocketledger or JSON backup, or import CSV, TSV, Excel (.xlsx), and SQLite files such as Money Manager’s .mmbak. Export legacy .xls files as .xlsx, CSV, or TSV first. Files are read on this device and never uploaded; review the import before saving.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .pocketCard()
     }
 
     private var transferProgressCard: some View {
@@ -330,8 +270,7 @@ struct DataTransferView: View {
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .pocketGroupedSurface(cornerRadius: 14)
+        .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
     }
 

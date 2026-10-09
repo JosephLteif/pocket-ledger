@@ -9,13 +9,8 @@ struct TemplatesView: View {
     @State private var isCreatingTemplate = false
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Reuse repeat expenses, income, and transfers")
-                            .font(.subheadline)
-                            .foregroundStyle(PocketLedgerTheme.textSecondary)
-                    }
+        List {
+            Group {
 
                     if store.data.templates.isEmpty {
                         VStack(spacing: 10) {
@@ -35,18 +30,17 @@ struct TemplatesView: View {
                             .tint(PocketLedgerTheme.accent)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 42)
+                        .padding(.vertical, 16)
                         .padding(.horizontal, 20)
-                        .pocketGroupedSurface(cornerRadius: 20)
                     } else {
                         ForEach(store.data.templates) { template in
                             templateCard(template)
                         }
                     }
             }
-            .padding(16)
         }
-        .pocketScreen()
+        .listStyle(.insetGrouped)
+        .pocketListSurface()
         .navigationTitle("Templates")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
@@ -99,26 +93,21 @@ struct TemplatesView: View {
             }
 
             HStack(spacing: 8) {
-                Button("Edit", systemImage: "pencil") { templateToEdit = template }
-                    .buttonStyle(.bordered)
-                Button("Use", systemImage: "arrow.turn.down.right") { templateToUse = template }
-                    .buttonStyle(.glassProminent)
-                    .tint(PocketLedgerTheme.accent)
-                    .frame(maxWidth: .infinity)
-                Button(role: .destructive) { templateToDelete = template } label: {
-                    Image(systemName: "trash")
+                Menu {
+                    Button("Edit", systemImage: "pencil") { templateToEdit = template }
+                    Button("Delete", systemImage: "trash", role: .destructive) { templateToDelete = template }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .frame(minWidth: 44, minHeight: 44)
                 }
-                .buttonStyle(.borderless)
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel("Delete template")
+                .accessibilityLabel("Template actions")
+                Button("Use", systemImage: "arrow.turn.down.right") { templateToUse = template }
+                    .buttonStyle(.borderless)
+                    .tint(PocketLedgerTheme.accent)
+
             }
         }
-        .padding(16)
-        .pocketGroupedSurface(cornerRadius: 20)
-        .overlay {
-            RoundedRectangle(cornerRadius: 20)
-                .stroke(PocketLedgerTheme.divider, lineWidth: 1)
-        }
+        .padding(.vertical, 4)
     }
 }
 
@@ -147,6 +136,7 @@ struct TemplateNameEditor: View {
             }
             .pocketListSurface()
             .navigationTitle("Save template")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

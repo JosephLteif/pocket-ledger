@@ -239,14 +239,10 @@ struct AssetPurchaseEditor: View {
                             Button("Create account", systemImage: "plus") { isCreatingAccount = true }
                         } header: {
                             Text("Choose an account")
-                        } footer: {
-                            Text(accountType == .physicalAsset
-                                 ? "Gold and silver purchases move money into the asset account as a transfer. Other assets use manual valuations and sale tracking."
-                                 : "A purchase moves money into an investment account. It is a transfer and does not count as spending.")
                         }
                     }
                     .pocketListSurface()
-                    .navigationTitle(accountType == .physicalAsset ? "Physical asset purchase" : "Investment purchase")
+                    .navigationTitle(accountType == .physicalAsset ? "Asset purchase" : "Investment purchase")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -288,7 +284,6 @@ private struct InvestmentPurchaseEditor: View {
                     LabeledContent("Investment account", value: account.name)
                     CurrencyInputField("Amount invested", text: $amount, currency: account.currency)
                     DatePicker("Purchase date", selection: $date, in: ...Date(), displayedComponents: .date)
-                    TextField("Note (optional)", text: $note)
                 }
                 Section {
                     Picker("Paid from", selection: $fundingID) {
@@ -298,7 +293,17 @@ private struct InvestmentPurchaseEditor: View {
                 } header: {
                     Text("Funding")
                 } footer: {
-                    Text("Moves money from a cash or bank account in \(account.currency.rawValue) into this investment. This is a transfer, not an expense. Update gain/loss separately from the investment account.")
+                    Text("Recorded as a transfer, excluded from spending.")
+                }
+                Section {
+                    DisclosureGroup("More details") {
+                        LabeledContent("Note") {
+                            TextField("Optional", text: $note)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        Text("Update gain or loss from the investment account.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
             }
             .pocketListSurface()
@@ -306,7 +311,10 @@ private struct InvestmentPurchaseEditor: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: save)
+                        .disabled(Money.parse(amount, currency: account.currency).map { $0.minorUnits > 0 } != true || fundingID == nil)
+                }
             }
             .errorMessageAlert(title: "Purchase not saved", message: $errorMessage)
         }
@@ -956,14 +964,19 @@ private struct MetalPurchaseEditor: View {
                     } else {
                         LabeledContent("Metal", value: metal.displayName)
                     }
-                    TextField("Description (optional)", text: $description)
-                    DatePicker("Purchase date", selection: $date, in: ...Date(), displayedComponents: .date)
-                    TextField("Quantity", text: $quantity).keyboardType(.decimalPad)
-                    TextField("Weight per item", text: $weight).keyboardType(.decimalPad)
+                    LabeledContent("Quantity") {
+                        TextField("Quantity", text: $quantity).keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Weight per item") {
+                        TextField("Weight", text: $weight).keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
                     Picker("Weight unit", selection: $unit) {
                         ForEach(MetalWeightUnit.allCases) { Text($0.displayName).tag($0) }
                     }
                     CurrencyInputField("Total paid including fees", text: $totalCost, currency: account.currency)
+                    DatePicker("Purchase date", selection: $date, in: ...Date(), displayedComponents: .date)
                 }
                 Section("Purity") {
                     if metal == .gold {
@@ -983,9 +996,10 @@ private struct MetalPurchaseEditor: View {
                             Button("800") { purity = "800" }
                         }
                     }
-                    TextField("Fineness out of 1,000", text: $purity).keyboardType(.decimalPad)
-                    Text("Pure metal weight is total weight multiplied by fineness / 1,000. For example, 18K gold has fineness 750.")
-                        .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
+                    LabeledContent("Fineness / 1,000") {
+                        TextField("Fineness", text: $purity).keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
                 }
                 Section("Funding") {
                     Toggle("Historical holding", isOn: $historical)
@@ -997,13 +1011,21 @@ private struct MetalPurchaseEditor: View {
                             Text("Choose account").tag(Optional<UUID>.none)
                             ForEach(fundingAccounts) { Text($0.name).tag(Optional($0.id)) }
                         }
-                        Text("Only active cash and bank accounts in \(account.currency.rawValue) are available.")
-                            .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                     }
                     if account.tracking?.metalPurchases.isEmpty != false {
                         Toggle("Reconcile recorded balance to tracked cost", isOn: $reconcile)
-                        Text("Setup replaces this physical account's recorded balance with tracked purchase cost, avoiding double counting. Add all existing holdings before relying on totals.")
+                        Text("Replaces the recorded balance with tracked purchase cost.")
                             .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
+                    }
+                }
+                Section {
+                    DisclosureGroup("More details") {
+                        LabeledContent("Description") {
+                            TextField("Optional", text: $description)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        Text("Pure weight = total weight × fineness / 1,000. 18K gold has fineness 750.")
+                            .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -1011,10 +1033,19 @@ private struct MetalPurchaseEditor: View {
             .navigationTitle("Add \(metal.displayName.lowercased()) purchase").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
+                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).disabled(!canSave) }
             }
             .errorMessageAlert(title: "Purchase not saved", message: $errorMessage)
         }
+    }
+
+    private var canSave: Bool {
+        assetDecimal(quantity).map { $0 > 0 } == true
+            && assetDecimal(weight).map { $0 > 0 } == true
+            && assetDecimal(purity).map { $0 > 0 && $0 <= 1000 } == true
+            && Money.parse(totalCost, currency: account.currency).map { $0.minorUnits > 0 } == true
+            && (historical || fundingID != nil)
+            && date <= Date()
     }
 
     private func save() {
@@ -1061,7 +1092,10 @@ private struct MetalSaleEditor: View {
                     Text("Remaining: \(assetNumber(purchase.remainingWeightGrams)) g")
                     Toggle("Sell all remaining", isOn: $sellAll)
                     if !sellAll {
-                        TextField("Weight sold", text: $weight).keyboardType(.decimalPad)
+                        LabeledContent("Weight sold") {
+                            TextField("Weight", text: $weight).keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                        }
                         Picker("Weight unit", selection: $unit) {
                             ForEach(MetalWeightUnit.allCases) { Text($0.displayName).tag($0) }
                         }
@@ -1271,8 +1305,10 @@ private struct OtherAssetSaleEditor: View {
                         ProtectedAmountText(value: store.valuation(for: account).formatted, isRevealed: true)
                             .monospacedDigit()
                     }
-                    TextField("Percent of remaining asset", text: $sharePercent)
-                        .keyboardType(.decimalPad)
+                    LabeledContent("Percent sold") {
+                        TextField("Percent of remaining asset", text: $sharePercent)
+                            .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                    }
                     if let costBasis {
                         LabeledContent("Allocated cost basis", value: costBasis.formatted)
                     }

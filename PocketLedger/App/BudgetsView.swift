@@ -13,11 +13,8 @@ struct BudgetsView: View {
     @State private var isShowingProUpgrade = false
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 16) {
-                    Text("Keep monthly spending intentional")
-                        .font(.subheadline)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+        List {
+            Group {
 
                     Text(proAccess.hasProAccess
                          ? "\(store.data.budgets.count) budgets"
@@ -49,18 +46,17 @@ struct BudgetsView: View {
                                 .tint(PocketLedgerTheme.accent)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 42)
+                        .padding(.vertical, 16)
                         .padding(.horizontal, 20)
-                        .pocketGroupedSurface(cornerRadius: 20)
                     } else {
                         ForEach(budgetSummaries) { summary in
                             budgetCard(summary)
                         }
                     }
             }
-            .padding(16)
         }
-        .pocketScreen()
+        .listStyle(.insetGrouped)
+        .pocketListSurface()
         .navigationTitle("Budgets")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
@@ -120,14 +116,11 @@ struct BudgetsView: View {
         let projectedOver = summary.isProjectedOver
 
         return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(summary.categoryPath).font(.headline)
-                    Text("This month · \(budget.currency.rawValue)")
-                        .font(.caption)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-                }
-                Spacer()
+            VStack(alignment: .leading, spacing: 3) {
+                Text(summary.categoryPath).font(.headline)
+                Text("This month · \(budget.currency.rawValue)")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
                 Text("\(spent.formatted) / \(allowance.formatted)")
                     .font(.subheadline.weight(.semibold).monospacedDigit())
                     .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.textPrimary)
@@ -163,22 +156,19 @@ struct BudgetsView: View {
                 } label: {
                     Label("View transactions", systemImage: "list.bullet")
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.borderless)
                 .tint(PocketLedgerTheme.accent)
                 Spacer()
-                Button("Edit") { editingBudget = budget; isPresentingEditor = true }
-                    .buttonStyle(.borderless)
-                Button(role: .destructive) { budgetToDelete = budget } label: {
-                    Image(systemName: "trash")
+                Menu {
+                    Button("Edit", systemImage: "pencil") { editingBudget = budget; isPresentingEditor = true }
+                    Button("Delete", systemImage: "trash", role: .destructive) { budgetToDelete = budget }
+                } label: {
+                    Image(systemName: "ellipsis").frame(minWidth: 44, minHeight: 44)
                 }
-                .buttonStyle(.borderless)
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel("Delete budget")
+                .accessibilityLabel("Budget actions")
             }
         }
-        .padding(16)
-        .pocketGroupedSurface(cornerRadius: 20)
-        .overlay { RoundedRectangle(cornerRadius: 20).stroke(PocketLedgerTheme.divider, lineWidth: 1) }
+        .padding(.vertical, 4)
     }
 
     private func presentNewBudget() {
@@ -236,7 +226,6 @@ private struct BudgetEditor: View {
                         LabeledContent("Category") {
                             HStack(spacing: 6) {
                                 Text(selectedCategoryPath)
-                                    .lineLimit(1)
                                     .foregroundStyle(PocketLedgerTheme.textSecondary)
                                 Image(systemName: "chevron.up.chevron.down")
                                     .font(.caption.weight(.semibold))
@@ -247,7 +236,7 @@ private struct BudgetEditor: View {
                     .buttonStyle(.plain)
                     .accessibilityHint("Search categories or browse the category hierarchy")
                     CurrencyInputField("Monthly limit", text: $amount, currency: $currency)
-                    if !canSave {
+                    if !amount.isEmpty && !canSave {
                         Label(
                             categoryID == nil ? "Choose a category to save this budget." : "Enter a positive monthly limit to save.",
                             systemImage: "info.circle"
@@ -268,6 +257,7 @@ private struct BudgetEditor: View {
             }
             .pocketListSurface()
             .navigationTitle(budget == nil ? "New budget" : "Edit budget")
+            .navigationBarTitleDisplayMode(.inline)
             .interactiveDismissDisabled(hasUnsavedChanges)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: cancel) }

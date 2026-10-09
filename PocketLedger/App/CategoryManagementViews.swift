@@ -8,61 +8,43 @@ struct CategoriesView: View {
     @State private var editingCategory: LedgerCategory?
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 18) {
-                screenSubtitle
-
+        List {
+            Section {
                 if store.rootCategories.isEmpty {
-                    Text("Add a top-level category to organize your transactions.")
-                        .font(.subheadline)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .pocketCard()
+                    ContentUnavailableView("No categories", systemImage: "tag", description: Text("Add a category to organize transactions."))
                 } else {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-                        ForEach(store.rootCategories) { parent in
-                            NavigationLink {
-                                CategorySubcategoriesView(store: store, parent: parent)
-                            } label: {
-                                categoryRootTile(parent)
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button("Edit", systemImage: "pencil") {
-                                    presentCategory(parent)
-                                }
-                                Button("Archive", systemImage: "archivebox") {
-                                    _ = store.setCategoryArchived(categoryID: parent.id, isArchived: true)
-                                }
+                    ForEach(store.rootCategories) { parent in
+                        NavigationLink {
+                            CategorySubcategoriesView(store: store, parent: parent)
+                        } label: {
+                            categoryRootTile(parent)
+                        }
+                        .swipeActions(allowsFullSwipe: false) {
+                            Button("Edit", systemImage: "pencil") { presentCategory(parent) }
+                            Button("Archive", systemImage: "archivebox") {
+                                _ = store.setCategoryArchived(categoryID: parent.id, isArchived: true)
                             }
                         }
                     }
-                }
-
-                if !archivedCategories.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Archived")
-                            .font(.title3.weight(.bold))
-                        ForEach(archivedCategories) { category in
-                            HStack {
-                                Label(category.name, systemImage: category.systemImage)
-                                Spacer()
-                                Button("Restore") {
-                                    _ = store.setCategoryArchived(categoryID: category.id, isArchived: false)
-                                }
-                                .buttonStyle(.borderless)
-                            }
-                            .font(.subheadline)
-                        }
-                    }
-                    .pocketCard()
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 24)
+            if !archivedCategories.isEmpty {
+                Section("Archived") {
+                    ForEach(archivedCategories) { category in
+                        HStack {
+                            Label(category.name, systemImage: category.systemImage)
+                            Spacer()
+                            Button("Restore") {
+                                _ = store.setCategoryArchived(categoryID: category.id, isArchived: false)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+            }
         }
-        .pocketScreen()
+        .listStyle(.insetGrouped)
+        .pocketListSurface()
         .navigationTitle("Categories")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
@@ -81,37 +63,20 @@ struct CategoriesView: View {
         }
     }
 
-    private var screenSubtitle: some View {
-        Text("Make every expense easy to understand")
-            .font(.subheadline)
-            .foregroundStyle(PocketLedgerTheme.textSecondary)
-    }
-
     private func categoryRootTile(_ parent: LedgerCategory) -> some View {
         let children = store.data.categories.filter { $0.parentID == parent.id && !$0.isArchived }
-
-        return VStack(alignment: .leading, spacing: 12) {
-            PocketIcon(systemImage: parent.systemImage, tint: PocketLedgerTheme.accent, size: 42)
-            Spacer(minLength: 0)
+        return HStack(spacing: 12) {
+            Image(systemName: parent.systemImage)
+                .foregroundStyle(PocketLedgerTheme.accent)
+                .frame(width: 28)
             Text(parent.name)
-                .font(.headline)
-                .foregroundStyle(PocketLedgerTheme.textPrimary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-            HStack(spacing: 6) {
-                Text(children.isEmpty ? "No subcategories" : "\(children.count) subcategories")
-                    .font(.caption)
-                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(PocketLedgerTheme.textTertiary)
+            Spacer()
+            if !children.isEmpty {
+                Text("\(children.count)")
+                    .foregroundStyle(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 132, alignment: .leading)
-        .padding(14)
-        .pocketGroupedSurface(cornerRadius: 18)
+        .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
         .accessibilityHint("Opens subcategories")
     }
@@ -134,40 +99,28 @@ private struct CategorySubcategoriesView: View {
     @State private var editingCategory: LedgerCategory?
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Subcategories in \(parent.name)")
-                    .font(.subheadline)
-                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-
-                if subcategories.isEmpty {
-                    ContentUnavailableView(
-                        "No subcategories",
-                        systemImage: parent.systemImage,
-                        description: Text("Add subcategories to make expenses easier to organize.")
-                    )
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 24)
-                    .pocketCard()
-                } else {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-                        ForEach(subcategories) { category in
-                            CategoryTile(
-                                category: category,
-                                onEdit: { presentCategory(category) },
-                                onArchive: {
-                                    _ = store.setCategoryArchived(categoryID: category.id, isArchived: true)
-                                }
-                            )
+        List {
+            if subcategories.isEmpty {
+                ContentUnavailableView("No subcategories", systemImage: parent.systemImage, description: Text("Add a subcategory to organize expenses."))
+            } else {
+                ForEach(subcategories) { category in
+                    Button {
+                        presentCategory(category)
+                    } label: {
+                        Label(category.name, systemImage: category.systemImage)
+                            .foregroundStyle(PocketLedgerTheme.textPrimary)
+                            .frame(minHeight: 44)
+                    }
+                    .swipeActions(allowsFullSwipe: false) {
+                        Button("Archive", systemImage: "archivebox") {
+                            _ = store.setCategoryArchived(categoryID: category.id, isArchived: true)
                         }
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 24)
         }
-        .pocketScreen()
+        .listStyle(.insetGrouped)
+        .pocketListSurface()
         .navigationTitle(parent.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -196,34 +149,6 @@ private struct CategorySubcategoriesView: View {
     private func presentCategory(_ category: LedgerCategory?) {
         editingCategory = category
         isPresentingCategory = true
-    }
-}
-
-private struct CategoryTile: View {
-    let category: LedgerCategory
-    let onEdit: () -> Void
-    let onArchive: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            PocketIcon(systemImage: category.systemImage, tint: PocketLedgerTheme.accent, size: 38)
-            Text(category.name)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(PocketLedgerTheme.textPrimary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
-        .padding(14)
-        .pocketGroupedSurface(cornerRadius: 18)
-        .contextMenu {
-            Button("Edit", systemImage: "pencil", action: onEdit)
-            Button("Archive", systemImage: "archivebox", action: onArchive)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(category.name)
-        .accessibilityHint("Hold for category actions")
     }
 }
 
@@ -266,15 +191,13 @@ private struct CategoryEditor: View {
         NavigationStack {
             Form {
                 Section("Category") {
-                    TextField("Name", text: $name)
+                    LabeledContent("Name") { TextField("Name", text: $name).multilineTextAlignment(.trailing) }
                     Picker("Parent category", selection: $parentID) {
                         Text("Top-level category").tag(UUID?.none)
                         ForEach(store.rootCategories.filter { $0.id != self.category?.id }) { parent in
                             Text(parent.name).tag(Optional(parent.id))
                         }
                     }
-                    Label("Preview", systemImage: systemImage)
-                        .font(.subheadline.weight(.medium))
                     Picker("Icon", selection: $systemImage) {
                         ForEach(availableSystemImages, id: \.self) { symbol in
                             Label(symbol.replacingOccurrences(of: ".", with: " "), systemImage: symbol)
@@ -283,11 +206,13 @@ private struct CategoryEditor: View {
                     }
                     .pickerStyle(.menu)
                     Toggle("Include in totals and metrics", isOn: $includeInTotals)
+                    DisclosureGroup("About totals") {
                     Text(includeInTotals
                          ? "Expenses in this category count toward totals and metrics."
                          : "Expenses in this category are kept in the ledger but excluded from totals and metrics.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    }
                 }
             }
             .pocketListSurface()
@@ -300,6 +225,7 @@ private struct CategoryEditor: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: save)
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .alert("Category not saved", isPresented: errorPresented) {

@@ -180,7 +180,6 @@ struct MetricsView: View {
         ScrollView(showsIndicators: false) {
             PocketGlassContainer(spacing: 14) {
                 VStack(alignment: .leading, spacing: 0) {
-                    screenSubtitle
                     periodControls
                     periodNavigator
                     totalsHeader(snapshot)
@@ -194,7 +193,7 @@ struct MetricsView: View {
             }
         }
         .pocketScreen()
-        .navigationTitle("Metrics")
+        .navigationTitle("Insights")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
@@ -299,15 +298,6 @@ struct MetricsView: View {
                 .pocketGlassSurface(cornerRadius: 10, tint: PocketLedgerTheme.surfaceElevated.opacity(0.22))
             }
 
-            if !proAccess.hasProAccess {
-                ProUpgradeButton(feature: .historicalMetrics) {
-                    Label("Custom date ranges · Pro", systemImage: "lock")
-                        .font(.footnote.weight(.semibold))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.bordered)
-            }
-
             Button {
                 isShowingBreakdownFilters = true
             } label: {
@@ -352,6 +342,13 @@ struct MetricsView: View {
                             }
                             .pickerStyle(.menu)
                         }
+                        if !proAccess.hasProAccess {
+                            Section {
+                                ProUpgradeButton(feature: .historicalMetrics) {
+                                    Label("Custom date ranges · Pro", systemImage: "lock")
+                                }
+                            }
+                        }
                     }
                     .pocketListSurface()
                     .navigationTitle("Breakdown")
@@ -365,12 +362,6 @@ struct MetricsView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
             }
-        }
-        .padding(4)
-        .pocketGlassSurface(cornerRadius: 13)
-        .overlay {
-            RoundedRectangle(cornerRadius: 13)
-                .stroke(PocketLedgerTheme.divider, lineWidth: 1)
         }
     }
 
@@ -425,9 +416,11 @@ struct MetricsView: View {
                 }
             }
 
-            Text(intervalLabel)
-                .font(.caption)
-                .foregroundStyle(PocketLedgerTheme.textTertiary)
+            if period == .custom {
+                Text(intervalLabel)
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textTertiary)
+            }
         }
         .foregroundStyle(PocketLedgerTheme.textPrimary)
         .padding(.vertical, 12)
@@ -487,7 +480,8 @@ struct MetricsView: View {
                 }
             }
         }
-        .pocketCard()
+        .padding(16)
+        .pocketGroupedSurface(cornerRadius: 12)
     }
 
     private var emptySpendingChart: some View {
@@ -500,7 +494,7 @@ struct MetricsView: View {
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 46)
+        .padding(.vertical, 16)
     }
 
     private func categorySpendingChart(_ snapshot: MetricsSnapshot) -> some View {

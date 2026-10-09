@@ -9,11 +9,8 @@ struct SavingsGoalsView: View {
     @State private var goalToDelete: SavingsGoal?
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                Text("Track savings targets without changing account balances.")
-                    .font(.subheadline)
-                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+        List {
+            Group {
 
                 if store.data.savingsGoals.isEmpty {
                     VStack(spacing: 10) {
@@ -30,18 +27,17 @@ struct SavingsGoalsView: View {
                             .tint(PocketLedgerTheme.accent)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 42)
+                    .padding(.vertical, 16)
                     .padding(.horizontal, 20)
-                    .pocketGroupedSurface(cornerRadius: 20)
                 } else {
                     ForEach(store.data.savingsGoals) { goal in
                         goalCard(goal)
                     }
                 }
             }
-            .padding(16)
         }
-        .pocketScreen()
+        .listStyle(.insetGrouped)
+        .pocketListSurface()
         .navigationTitle("Savings goals")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
@@ -109,17 +105,15 @@ struct SavingsGoalsView: View {
                 Spacer()
                 Button("Update") { editingGoal = goal; isPresentingEditor = true }
                     .buttonStyle(.borderless)
-                Button(role: .destructive) { goalToDelete = goal } label: {
-                    Image(systemName: "trash")
+                Menu {
+                    Button("Delete", systemImage: "trash", role: .destructive) { goalToDelete = goal }
+                } label: {
+                    Image(systemName: "ellipsis").frame(minWidth: 44, minHeight: 44)
                 }
-                .buttonStyle(.borderless)
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel("Delete \(goal.name)")
+                .accessibilityLabel("Actions for \(goal.name)")
             }
         }
-        .padding(16)
-        .pocketGroupedSurface(cornerRadius: 20)
-        .overlay { RoundedRectangle(cornerRadius: 20).stroke(PocketLedgerTheme.divider, lineWidth: 1) }
+        .padding(.vertical, 4)
         .accessibilityElement(children: .contain)
     }
 
@@ -157,7 +151,7 @@ private struct SavingsGoalEditor: View {
         NavigationStack {
             Form {
                 Section("Goal") {
-                    TextField("Name", text: $name)
+                    LabeledContent("Name") { TextField("Name", text: $name).multilineTextAlignment(.trailing) }
                     Picker("Currency", selection: $currency) {
                         ForEach(LedgerCurrency.allCases) { currency in
                             Text(currency.rawValue).tag(currency)
@@ -169,13 +163,16 @@ private struct SavingsGoalEditor: View {
                     if includesTargetDate {
                         DatePicker("Target date", selection: $targetDate, displayedComponents: .date)
                     }
-                    Text("Changing currency clears both amounts. Progress is tracked manually and does not change account balances.")
+                    DisclosureGroup("About savings goals") {
+                        Text("Changing currency clears both amounts. Progress is tracked manually and does not change account balances.")
                         .font(.footnote)
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    }
                 }
             }
             .pocketListSurface()
-            .navigationTitle(goal == nil ? "New savings goal" : "Edit savings goal")
+            .navigationTitle(goal == nil ? "New goal" : "Edit goal")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

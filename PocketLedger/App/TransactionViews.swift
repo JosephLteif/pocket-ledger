@@ -331,10 +331,12 @@ struct TransactionsView: View {
 
     var body: some View {
         List {
-            screenSubtitle
-                .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 2, trailing: 16))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+            if drilldownCategoryID != nil || drilldownAccountID != nil {
+                screenSubtitle
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
 
             if isSelectingTransactions {
                 selectionToolbar
@@ -876,34 +878,22 @@ struct TransactionsView: View {
             totals = [("spent", listSnapshot.expenseTotals, PocketLedgerTheme.warning)]
         }
 
-        return VStack(alignment: .leading, spacing: 13) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(selectedPeriod.rawValue)
-                        .font(.headline)
-                    Text("Filtered overview")
-                        .font(.caption)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-                }
+        let currencies = drilldownReportingCurrency.map { [$0] } ?? LedgerCurrency.allCases
+        let primaryCurrency = currencies.first { currency in
+            totals.first?.1[currency] != nil && totals.first?.1[currency] != 0
+        } ?? currencies.first
 
-                Spacer()
-
-                Text("\(listSnapshot.filteredTransactions.count) \(listSnapshot.filteredTransactions.count == 1 ? "transaction" : "transactions")")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-            }
-
-            if selectedFilter == .transfer {
-                Text("Transfers move money between accounts and are excluded from income and expense totals.")
-                    .font(.caption)
-                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-            } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-                    ForEach(totals.indices, id: \.self) { totalIndex in
-                        let total = totals[totalIndex]
-                    ForEach(drilldownReportingCurrency.map { [$0] } ?? LedgerCurrency.allCases) { currency in
+        return DisclosureGroup {
+            VStack(spacing: 8) {
+                ForEach(currencies) { currency in
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(currency.rawValue)
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        ForEach(totals.indices, id: \.self) { index in
+                            let total = totals[index]
                             transactionSummaryMetric(
-                                title: "\(currency.rawValue) \(total.0)",
+                                title: total.0.capitalized,
                                 value: Money(currency: currency, minorUnits: total.1[currency] ?? 0).formatted,
                                 tint: total.2
                             )
@@ -911,13 +901,38 @@ struct TransactionsView: View {
                     }
                 }
             }
+            .padding(.top, 8)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("\(listSnapshot.filteredTransactions.count) transactions")
+                    Spacer()
+                    Text(selectedPeriod.rawValue)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                }
+                if let primaryCurrency, let primary = totals.first {
+                    HStack {
+                        Text("\(primaryCurrency.rawValue) \(primary.0)")
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        Spacer()
+                        ProtectedAmountText(
+                            value: Money(currency: primaryCurrency, minorUnits: primary.1[primaryCurrency] ?? 0).formatted,
+                            isRevealed: areBalancesRevealed
+                        )
+                        .foregroundStyle(primary.2)
+                        .monospacedDigit()
+                    }
+                }
+            }
+            .font(.subheadline)
         }
-        .pocketCard()
+        .padding(12)
+        .pocketGroupedSurface(cornerRadius: 12)
     }
 
     private func transactionSummaryMetric(title: String, value: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
+            Text(title)
                 .font(.caption2.weight(.bold))
                 .tracking(0.5)
                 .foregroundStyle(PocketLedgerTheme.textTertiary)
@@ -928,34 +943,13 @@ struct TransactionsView: View {
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(11)
-        .pocketGroupedSurface(cornerRadius: 14)
     }
 
     private func dayHeader(_ day: TransactionDay) -> some View {
-        HStack(spacing: 11) {
-            VStack(spacing: 0) {
-                Text(day.date.formatted(.dateTime.day()))
-                    .font(.title3.weight(.bold))
-                Text(day.date.formatted(.dateTime.weekday(.abbreviated)))
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-            }
-            .frame(width: 46, height: 46)
-            .pocketGlassSurface(cornerRadius: 13, tint: PocketLedgerTheme.surfaceElevated.opacity(0.22))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(day.date, style: .date)
-                    .font(.subheadline.weight(.semibold))
-                Text("\(day.transactions.count) \(day.transactions.count == 1 ? "transaction" : "transactions")")
-                    .font(.caption)
-                    .foregroundStyle(PocketLedgerTheme.textTertiary)
-            }
-
-            Spacer()
-        }
-        .padding(.top, 4)
-        .padding(.bottom, 8)
+        Text(day.date, style: .date)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(PocketLedgerTheme.textSecondary)
+            .padding(.vertical, 4)
     }
 }
 
@@ -1358,7 +1352,7 @@ struct TransactionRow: View {
                 .lineLimit(2)
         }
         .padding(.vertical, 11)
-        .frame(minHeight: 72)
+        .frame(minHeight: 44)
         .contentShape(Rectangle())
     }
 

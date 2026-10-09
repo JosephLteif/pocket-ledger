@@ -39,18 +39,6 @@ struct ScheduledTransactionsView: View {
 
     var body: some View {
         List {
-            Text("Manage bills, subscriptions, income, and recurring transfers")
-                .font(.subheadline)
-                .foregroundStyle(PocketLedgerTheme.textSecondary)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-
-            Text("Due entries are added to Transactions when Pocket Ledger opens or returns to the foreground.")
-                .font(.footnote)
-                .foregroundStyle(PocketLedgerTheme.textSecondary)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-
             Text(proAccess.hasProAccess
                  ? "\(enabledScheduleCount) enabled schedules"
                  : "\(enabledScheduleCount) of \(PocketLedgerTierPolicy.freeEnabledScheduleLimit) enabled schedules")
@@ -70,14 +58,17 @@ struct ScheduledTransactionsView: View {
                 .listRowSeparator(.hidden)
             }
 
-            reminderSettings
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+            Section("Reminders") {
+                reminderSettings
+                DisclosureGroup("How schedules work") {
+                    Text("Due entries are added to Transactions when Pocket Ledger opens or returns to the foreground.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             if !recurringExpenseAnnualTotals.isEmpty {
-                recurringExpenseSummary
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+                Section { recurringExpenseSummary }
             }
 
             if schedules.isEmpty {
@@ -85,14 +76,14 @@ struct ScheduledTransactionsView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             } else {
-                ForEach(schedules) { schedule in
-                    scheduleCard(schedule)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+                Section("Schedules") {
+                    ForEach(schedules) { schedule in
+                        scheduleCard(schedule)
+                    }
                 }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
         .pocketScreen()
@@ -187,12 +178,6 @@ struct ScheduledTransactionsView: View {
     private var reminderSettings: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Label("Reminders", systemImage: "bell.badge")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(PocketLedgerTheme.textPrimary)
-
-                Spacer(minLength: 4)
-
                 Menu {
                     ForEach(ScheduledReminderTiming.allCases) { timing in
                         Button {
@@ -209,8 +194,7 @@ struct ScheduledTransactionsView: View {
                     HStack(spacing: 5) {
                         Text("Default · \(globalReminderTiming.title)")
                             .font(.caption.weight(.semibold))
-                            .lineLimit(1)
-                        Image(systemName: "chevron.down")
+                                    Image(systemName: "chevron.down")
                             .font(.caption2.weight(.bold))
                     }
                     .foregroundStyle(PocketLedgerTheme.accent)
@@ -218,6 +202,7 @@ struct ScheduledTransactionsView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Default reminder timing: \(globalReminderTiming.title)")
 
+                Spacer(minLength: 8)
                 if !schedules.isEmpty {
                     Button {
                         Task {
@@ -250,8 +235,7 @@ struct ScheduledTransactionsView: View {
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
             }
         }
-        .padding(14)
-        .pocketGroupedSurface(cornerRadius: 18)
+        .padding(.vertical, 4)
     }
 
     private var schedules: [ScheduledTransaction] {
@@ -298,12 +282,13 @@ struct ScheduledTransactionsView: View {
                 )
                     .font(.subheadline.weight(.semibold).monospacedDigit())
             }
-            Text("Estimates use each schedule’s frequency. Price changes are matched by exact transaction name and currency.")
-                .font(.footnote)
-                .foregroundStyle(PocketLedgerTheme.textTertiary)
+            DisclosureGroup("About estimates") {
+                Text("Estimates use each schedule’s frequency. Price changes are matched by exact transaction name and currency.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .padding(16)
-        .pocketGroupedSurface(cornerRadius: 18)
+        .padding(.vertical, 4)
     }
 
     private var emptyState: some View {
@@ -325,16 +310,14 @@ struct ScheduledTransactionsView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 44)
         .padding(.horizontal, 20)
-        .pocketGroupedSurface(cornerRadius: 20)
     }
 
     private func scheduleCard(_ schedule: ScheduledTransaction) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(schedule.note.isEmpty ? schedule.kind.displayName : schedule.note)
                         .font(.headline)
-                        .lineLimit(2)
                     Text(store.transactionSummary(schedule.transactionTemplate))
                         .font(.subheadline.weight(.semibold).monospacedDigit())
                         .foregroundStyle(PocketLedgerTheme.textPrimary)
@@ -357,8 +340,7 @@ struct ScheduledTransactionsView: View {
                 if schedule.kind == .expense {
                     Text("·")
                     Text(store.categoryPath(for: schedule.categoryID))
-                        .lineLimit(1)
-                }
+                        }
             }
             .font(.caption)
             .foregroundStyle(PocketLedgerTheme.textSecondary)
@@ -366,7 +348,6 @@ struct ScheduledTransactionsView: View {
             Label(scheduleAccountSummary(for: schedule), systemImage: "wallet.pass")
                 .font(.caption)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
-                .lineLimit(1)
 
             if isRecurringExpense(schedule), !chargeAmounts(for: schedule).isEmpty {
                 recurringExpenseDetails(schedule)
@@ -390,18 +371,8 @@ struct ScheduledTransactionsView: View {
 
                 Spacer(minLength: 8)
 
-                Button {
-                    editorRoute = .edit(schedule)
-                } label: {
-                    Image(systemName: "pencil")
-                        .frame(width: 20, height: 20)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(PocketLedgerTheme.accent)
-                .accessibilityLabel("Edit scheduled transaction")
-
                 Menu {
+                    Button("Edit", systemImage: "pencil") { editorRoute = .edit(schedule) }
                     Button(
                         schedule.isEnabled ? "Pause schedule" : "Enable schedule",
                         systemImage: schedule.isEnabled ? "pause.circle" : "play.circle"
@@ -449,19 +420,13 @@ struct ScheduledTransactionsView: View {
                     .tint(.red)
                 } label: {
                     Image(systemName: "ellipsis")
-                        .frame(width: 20, height: 20)
+                        .frame(minWidth: 44, minHeight: 44)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.borderless)
                 .accessibilityLabel("More scheduled transaction actions")
             }
         }
-        .padding(16)
-        .pocketGroupedSurface(cornerRadius: 20)
-        .overlay {
-            RoundedRectangle(cornerRadius: 20)
-                .stroke(PocketLedgerTheme.divider, lineWidth: 1)
-        }
+        .padding(.vertical, 4)
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if schedule.isEnabled {
                 PocketCircularSwipeAction(

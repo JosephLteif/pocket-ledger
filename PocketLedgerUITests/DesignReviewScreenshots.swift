@@ -71,6 +71,11 @@ final class DesignReviewScreenshots: XCTestCase {
         selectTab("tab-search", title: "Search", app: app)
         XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 10))
         capture("13-search", app: app)
+        let searchField = app.searchFields.firstMatch
+        XCTAssertTrue(searchField.waitForExistence(timeout: 10))
+        searchField.typeText("groceries")
+        app.keyboards.buttons["Search"].tap()
+        capture("13a-search-results", app: app)
 
         selectTab("tab-transactions", title: "Transactions", app: app)
         XCTAssertTrue(app.navigationBars["Transactions"].waitForExistence(timeout: 10))

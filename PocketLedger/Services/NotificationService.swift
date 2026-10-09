@@ -6,6 +6,8 @@ enum NotificationService {
     private static let loanPrefix = "pocket-ledger-loan-"
     private static let dailyTransactionReminderIdentifier = "pocket-ledger-daily-transaction-reminder"
     static let globalReminderKey = "pocketLedger.scheduledReminderTiming"
+    static let scheduledTransactionRemindersEnabledKey =
+        "pocketLedger.scheduledTransactionRemindersEnabled"
     static let scheduledLiveActivityEnabledKey = "pocketLedger.scheduledLiveActivityEnabled"
     static let dailyTransactionReminderEnabledKey = "pocketLedger.dailyTransactionReminderEnabled"
     static let dailyTransactionReminderMinutesKey = "pocketLedger.dailyTransactionReminderMinutes"
@@ -94,8 +96,25 @@ enum NotificationService {
             return "Notification permission has an unknown status."
         }
 
+        setScheduledTransactionRemindersEnabled(true)
         await refreshScheduledTransactionNotifications(schedules: schedules)
         return "Scheduled-entry reminders are enabled with a \(globalReminderTiming.title.lowercased()) default."
+    }
+
+    static func scheduledTransactionRemindersEnabled() async -> Bool {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return UserDefaults.standard.object(forKey: scheduledTransactionRemindersEnabledKey) as? Bool ?? true
+        case .notDetermined, .denied:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    static func setScheduledTransactionRemindersEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: scheduledTransactionRemindersEnabledKey)
     }
 
     static func requestLoanNotifications(loans: [Loan]) async -> String {
@@ -205,6 +224,15 @@ enum NotificationService {
         let existingIDs = pending
             .map(\.identifier)
             .filter { $0.hasPrefix(scheduledPrefix) }
+
+        if UserDefaults.standard.object(forKey: scheduledTransactionRemindersEnabledKey) as? Bool == false {
+            center.removePendingNotificationRequests(withIdentifiers: existingIDs)
+            let delivered = await center.deliveredNotifications()
+            let deliveredIDs = delivered.map(\.request.identifier).filter { $0.hasPrefix(scheduledPrefix) }
+            center.removeDeliveredNotifications(withIdentifiers: deliveredIDs)
+            return
+        }
+
         center.removePendingNotificationRequests(withIdentifiers: existingIDs)
 
         let calendar = Calendar.current

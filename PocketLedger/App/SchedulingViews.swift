@@ -31,7 +31,9 @@ struct ScheduledTransactionsView: View {
     @State private var reminderStatus: String?
     @State private var recordStatus: String?
     @State private var recordUndoReceipt: ScheduleRecordUndoReceipt?
-    @State private var isRequestingReminderPermission = false
+    @State private var isUpdatingScheduledReminders = false
+    @State private var scheduledRemindersEnabled = false
+    @State private var isShowingScheduleHelp = false
     @State private var isShowingProUpgrade = false
     @State private var recurringCostIsYearly = false
     @AppStorage(NotificationService.globalReminderKey)
@@ -39,25 +41,32 @@ struct ScheduledTransactionsView: View {
 
     var body: some View {
         List {
-            Text("Manage bills, subscriptions, income, and recurring transfers")
-                .font(.subheadline)
-                .foregroundStyle(PocketLedgerTheme.textSecondary)
+            Text("Reminders")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(PocketLedgerTheme.textPrimary)
+                .padding(.top, 12)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
-            Text("Due entries are added to Transactions when Pocket Ledger opens or returns to the foreground.")
-                .font(.footnote)
-                .foregroundStyle(PocketLedgerTheme.textSecondary)
+            reminderSettings
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
-            Text(proAccess.hasProAccess
-                 ? "\(enabledScheduleCount) enabled schedules"
-                 : "\(enabledScheduleCount) of \(PocketLedgerTierPolicy.freeEnabledScheduleLimit) enabled schedules")
-                .font(.caption)
-                .foregroundStyle(PocketLedgerTheme.textTertiary)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+            HStack {
+                Text("Schedules")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(PocketLedgerTheme.textPrimary)
+                Spacer()
+                Text(proAccess.hasProAccess
+                     ? "\(enabledScheduleCount) enabled schedules"
+                     : "\(enabledScheduleCount) of \(PocketLedgerTierPolicy.freeEnabledScheduleLimit) enabled schedules")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textTertiary)
+                    .monospacedDigit()
+            }
+            .padding(.top, 12)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
 
             if !proAccess.hasProAccess,
                enabledScheduleCount >= PocketLedgerTierPolicy.freeEnabledScheduleLimit {
@@ -70,16 +79,6 @@ struct ScheduledTransactionsView: View {
                 .listRowSeparator(.hidden)
             }
 
-            reminderSettings
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-
-            if !recurringExpenseAnnualTotals.isEmpty {
-                recurringExpenseSummary
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-
             if schedules.isEmpty {
                 emptyState
                     .listRowBackground(Color.clear)
@@ -90,6 +89,12 @@ struct ScheduledTransactionsView: View {
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 }
+            }
+
+            if !recurringExpenseAnnualTotals.isEmpty {
+                recurringExpenseSummary
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)
@@ -174,6 +179,17 @@ struct ScheduledTransactionsView: View {
                 await NotificationService.refreshLoanNotifications(loans: store.data.loans)
             }
         }
+        .task {
+            let remindersEnabled = await NotificationService
+                .scheduledTransactionRemindersEnabled()
+            guard !isUpdatingScheduledReminders else { return }
+            scheduledRemindersEnabled = remindersEnabled
+        }
+        .alert("How schedules work", isPresented: $isShowingScheduleHelp) {
+            Button("Got it", role: .cancel) {}
+        } message: {
+            Text("Due entries are added to Transactions when Pocket Ledger opens or returns to the foreground.")
+        }
     }
 
     private var globalReminderTiming: ScheduledReminderTiming {
@@ -185,14 +201,8 @@ struct ScheduledTransactionsView: View {
     }
 
     private var reminderSettings: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Label("Reminders", systemImage: "bell.badge")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(PocketLedgerTheme.textPrimary)
-
-                Spacer(minLength: 4)
-
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
                 Menu {
                     ForEach(ScheduledReminderTiming.allCases) { timing in
                         Button {
@@ -219,30 +229,36 @@ struct ScheduledTransactionsView: View {
                 .accessibilityLabel("Default reminder timing: \(globalReminderTiming.title)")
 
                 if !schedules.isEmpty {
-                    Button {
-                        Task {
-                            isRequestingReminderPermission = true
-                            defer { isRequestingReminderPermission = false }
-                            reminderStatus = await NotificationService
-                                .requestScheduledTransactionNotifications(schedules: schedules)
-                        }
-                    } label: {
-                        if isRequestingReminderPermission {
-                            ProgressView()
-                                .frame(width: 18, height: 18)
-                        } else {
-                            Label("Enable", systemImage: "bell.badge")
-                                .labelStyle(.titleAndIcon)
-                                .fixedSize()
-                        }
+                    Toggle(isOn: scheduledRemindersBinding) {
+                        Label("Enable", systemImage: "bell.badge")
+                            .font(.subheadline.weight(.medium))
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .tint(PocketLedgerTheme.accent)
-                    .disabled(isRequestingReminderPermission)
                     .accessibilityLabel("Enable scheduled reminders")
+                    .tint(PocketLedgerTheme.accent)
+                    .disabled(isUpdatingScheduledReminders)
                 }
             }
+
+            Rectangle()
+                .fill(PocketLedgerTheme.divider)
+                .frame(height: 1)
+
+            Button {
+                isShowingScheduleHelp = true
+            } label: {
+                HStack {
+                    Text("How schedules work")
+                        .font(.subheadline)
+                        .foregroundStyle(PocketLedgerTheme.textPrimary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                }
+                .frame(minHeight: 32)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
 
             if let reminderStatus {
                 Text(reminderStatus)
@@ -252,6 +268,34 @@ struct ScheduledTransactionsView: View {
         }
         .padding(14)
         .pocketGroupedSurface(cornerRadius: 18)
+    }
+
+    private var scheduledRemindersBinding: Binding<Bool> {
+        Binding(
+            get: { scheduledRemindersEnabled },
+            set: { isEnabled in
+                guard !isUpdatingScheduledReminders,
+                      isEnabled != scheduledRemindersEnabled else { return }
+                scheduledRemindersEnabled = isEnabled
+                isUpdatingScheduledReminders = true
+
+                Task {
+                    defer { isUpdatingScheduledReminders = false }
+                    if isEnabled {
+                        reminderStatus = await NotificationService
+                            .requestScheduledTransactionNotifications(schedules: schedules)
+                        scheduledRemindersEnabled = await NotificationService
+                            .scheduledTransactionRemindersEnabled()
+                    } else {
+                        NotificationService.setScheduledTransactionRemindersEnabled(false)
+                        await NotificationService.refreshScheduledTransactionNotifications(
+                            schedules: schedules
+                        )
+                        reminderStatus = "Scheduled-entry reminders are paused."
+                    }
+                }
+            }
+        )
     }
 
     private var schedules: [ScheduledTransaction] {

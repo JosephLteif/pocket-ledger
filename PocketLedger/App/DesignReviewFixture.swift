@@ -21,6 +21,19 @@ enum DesignReviewFixture {
             currency: .lbp,
             openingBalance: Money(currency: .lbp, minorUnits: 1_500_000)
         )
+        let gold = Account(
+            name: "Gold holdings",
+            type: .physicalAsset,
+            currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 0),
+            tracking: AccountTracking(physicalAssetSubtype: .gold)
+        )
+        let brokerage = Account(
+            name: "Brokerage",
+            type: .investment,
+            currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 0)
+        )
         let groceries = LedgerCategory(name: "Groceries", systemImage: "basket.fill")
         let dining = LedgerCategory(name: "Dining", systemImage: "fork.knife")
         let home = LedgerCategory(name: "Home", systemImage: "house.fill")
@@ -102,13 +115,39 @@ enum DesignReviewFixture {
                 inflows: []
             )
         ]
-        let nextMonth = calendar.date(byAdding: .month, value: 1, to: today) ?? today
         let nextWeek = calendar.date(byAdding: .day, value: 7, to: today) ?? today
+        let loanID = UUID()
+        let loanFundingID = UUID()
+        let loanAmount = Money(currency: .usd, minorUnits: 45_000)
+        let loan = Loan(
+            id: loanID,
+            counterparty: "Alex Morgan",
+            direction: .lent,
+            currency: .usd,
+            startingAmount: loanAmount,
+            startedAt: date(15),
+            dueDate: nextWeek,
+            settlementAccountID: checking.id,
+            fundingTransactionID: loanFundingID
+        )
+        let loanFunding = LedgerTransaction(
+            id: loanFundingID,
+            date: date(15),
+            note: "Loan to Alex Morgan",
+            kind: .transfer,
+            categoryID: nil,
+            outflows: [MoneyMovement(accountID: checking.id, money: loanAmount)],
+            inflows: [],
+            loanID: loanID,
+            loanActivity: .funding,
+            loanPrincipalAmount: loanAmount
+        )
 
         return FinanceData(
-            accounts: [checking, savings, cash],
+            accounts: [checking, savings, cash, gold, brokerage],
             categories: [groceries, dining, home, income],
-            transactions: transactions,
+            transactions: transactions + [loanFunding],
+            loans: [loan],
             scheduledTransactions: [ScheduledTransaction(
                 nextRunDate: nextWeek,
                 frequency: .monthly,
@@ -121,6 +160,11 @@ enum DesignReviewFixture {
                 )],
                 inflows: []
             )],
+            exchangeRates: [ExchangeRate(
+                baseCurrency: .usd,
+                quoteCurrency: .lbp,
+                quoteUnitsPerBaseUnit: Decimal(89_500)
+            )],
             budgets: [LedgerBudget(
                 categoryID: groceries.id,
                 currency: .usd,
@@ -131,7 +175,7 @@ enum DesignReviewFixture {
                 name: "Emergency fund",
                 targetAmount: Money(currency: .usd, minorUnits: 1_000_000),
                 currentAmount: Money(currency: .usd, minorUnits: 325_000),
-                targetDate: nextMonth
+                targetDate: calendar.date(byAdding: .month, value: 1, to: today) ?? today
             )],
             templates: [LedgerTemplate(name: "Weekly groceries", transaction: transactions[1])]
         )

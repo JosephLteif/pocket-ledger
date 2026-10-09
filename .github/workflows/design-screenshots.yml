@@ -39,6 +39,10 @@ jobs:
           set -euo pipefail
           SIMULATOR_ID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ && $2 ~ /^[A-Fa-f0-9-]+$/ { print $2; exit }')"
           test -n "$SIMULATOR_ID" || { echo "No available iPhone simulator found"; exit 1; }
+          if ! xcrun simctl list devices available | grep -F "$SIMULATOR_ID" | grep -F "(Booted)" > /dev/null; then
+            xcrun simctl boot "$SIMULATOR_ID"
+          fi
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
           xcrun simctl ui "$SIMULATOR_ID" appearance light
 
           xcodebuild \

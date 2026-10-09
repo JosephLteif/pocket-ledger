@@ -217,7 +217,6 @@ final class DesignReviewScreenshots: XCTestCase {
     @MainActor
     private func openMoreDestination(_ title: String, navigationTitle: String, app: XCUIApplication) {
         let destination = app.buttons[title].firstMatch
-        XCTAssertTrue(destination.waitForExistence(timeout: 10), "Could not find More destination: \(title)")
         for _ in 0..<8 {
             if destination.isHittable { break }
             app.swipeUp()

@@ -49,9 +49,9 @@ final class DesignReviewScreenshots: XCTestCase {
         XCTAssertTrue(app.navigationBars["Add gold purchase"].waitForExistence(timeout: 10))
         capture("09-gold-purchase-editor", app: app)
         app.buttons["Gold karat presets"].tap()
-        XCTAssertTrue(app.buttons["24K · 999"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.menuItems["24K · 999"].waitForExistence(timeout: 10))
         capture("09a-gold-karat-menu", app: app)
-        app.buttons["24K · 999"].tap()
+        app.menuItems["24K · 999"].tap()
         app.buttons["Cancel"].tap()
 
         app.buttons["more-transaction-actions"].tap()

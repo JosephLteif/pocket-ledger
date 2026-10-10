@@ -1293,6 +1293,7 @@ private struct MetricsTransactionDetailView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
     let transactionID: UUID
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     @State private var editingTransaction: LedgerTransaction?
 
@@ -1357,10 +1358,21 @@ private struct MetricsTransactionDetailView: View {
                 Text(transaction.kind.displayName)
                     .font(.headline.weight(.semibold))
                 if !transaction.note.isEmpty {
-                    Text(transaction.note)
+                    if transaction.loanID != nil {
+                        ProtectedText(
+                            value: transaction.note,
+                            isRevealed: areBalancesRevealed,
+                            hiddenAccessibilityLabel: "Hidden loan description"
+                        )
                         .font(.subheadline)
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                         .lineLimit(2)
+                    } else {
+                        Text(transaction.note)
+                            .font(.subheadline)
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                            .lineLimit(2)
+                    }
                 }
                 Text(transaction.date.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
                     .font(.caption)

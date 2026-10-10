@@ -192,6 +192,7 @@ struct DashboardView: View {
     @ObservedObject var security: AppSecurityService
     let onAddExpense: () -> Void
     let onShowTransactions: () -> Void
+    let onShowHome: () -> Void
     let onAddAction: (AddAction) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var presentedSheet: DashboardSheet?
@@ -282,7 +283,8 @@ struct DashboardView: View {
                         onAddExpense: onAddExpense,
                         security: security,
                         initialFilter: .all,
-                        initialPeriod: .thisMonth
+                        initialPeriod: .thisMonth,
+                        onBackToHome: returnToHome
                     )
                 case .topCategory:
                     TransactionsView(
@@ -291,7 +293,8 @@ struct DashboardView: View {
                         security: security,
                         initialFilter: .expense,
                         initialPeriod: .thisMonth,
-                        initialSearch: snapshot.topCategory ?? ""
+                        initialSearch: snapshot.topCategory ?? "",
+                        onBackToHome: returnToHome
                     )
                 }
             }
@@ -973,6 +976,11 @@ struct DashboardView: View {
             .padding(14)
             .pocketGroupedSurface(cornerRadius: 17)
         }
+    }
+
+    private func returnToHome() {
+        navigationPath.removeAll()
+        onShowHome()
     }
 
     @ViewBuilder

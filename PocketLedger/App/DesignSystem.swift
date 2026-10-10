@@ -274,15 +274,25 @@ struct PocketIcon: View {
     }
 }
 
-struct ProtectedAmountText: View {
+struct ProtectedText: View {
     let value: String
     let isRevealed: Bool
+    var hiddenAccessibilityLabel = "Hidden information"
 
     var body: some View {
         Text(value)
             .blur(radius: isRevealed ? 0 : 8)
             .privacySensitive()
-            .accessibilityLabel(isRevealed ? value : "Hidden amount")
+            .accessibilityLabel(isRevealed ? value : hiddenAccessibilityLabel)
+    }
+}
+
+struct ProtectedAmountText: View {
+    let value: String
+    let isRevealed: Bool
+
+    var body: some View {
+        ProtectedText(value: value, isRevealed: isRevealed, hiddenAccessibilityLabel: "Hidden amount")
     }
 }
 
@@ -308,14 +318,14 @@ struct BalanceVisibilityControl: View {
         }
         .buttonStyle(.plain)
         .disabled(isAuthenticating)
-        .accessibilityLabel(isRevealed ? "Hide financial amounts" : "Reveal financial amounts")
+        .accessibilityLabel(isRevealed ? "Hide financial amounts and loan names" : "Reveal financial amounts and loan names")
         .accessibilityHint(isRevealed
-            ? "Hides financial amounts across the app."
-            : "Requires \(security.availableBiometry?.displayName ?? "Face ID") to reveal financial amounts across the app.")
+            ? "Hides financial amounts and loan names across the app."
+            : "Requires \(security.availableBiometry?.displayName ?? "Face ID") to reveal financial amounts and loan names across the app.")
         .alert("Biometrics unavailable", isPresented: $isShowingBiometryUnavailable) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Set up Face ID or Touch ID on this device to reveal balance amounts.")
+            Text("Set up Face ID or Touch ID on this device to reveal financial amounts and loan names.")
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { conceal() }

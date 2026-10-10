@@ -261,6 +261,7 @@ struct TransactionsView: View {
     @ObservedObject var store: LedgerStore
     let onAddExpense: () -> Void
     private let onAddAction: ((AddAction) -> Void)?
+    private let onBackToHome: (() -> Void)?
     private let security: AppSecurityService
     @State private var selectedFilter: TransactionFilter
     @State private var selectedPeriod: TransactionPeriod
@@ -300,11 +301,13 @@ struct TransactionsView: View {
         initialAccountID: UUID? = nil,
         initialReportingCurrency: LedgerCurrency? = nil,
         initialCustomStartDate: Date? = nil,
-        initialCustomEndDate: Date? = nil
+        initialCustomEndDate: Date? = nil,
+        onBackToHome: (() -> Void)? = nil
     ) {
         _store = ObservedObject(wrappedValue: store)
         self.onAddExpense = onAddExpense
         self.onAddAction = onAddAction
+        self.onBackToHome = onBackToHome
         self.security = security
         _selectedFilter = State(initialValue: initialFilter)
         _selectedPeriod = State(initialValue: initialPeriod)
@@ -420,8 +423,19 @@ struct TransactionsView: View {
         .transactionActionAlert(message: $transactionDeletionError)
         .navigationTitle("Transactions")
         .navigationBarTitleDisplayMode(.large)
+        .navigationBarBackButtonHidden(onBackToHome != nil)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
+            if let onBackToHome {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: onBackToHome) {
+                        Label("Home", systemImage: "chevron.backward")
+                    }
+                    .accessibilityIdentifier("transactions-back-home")
+                    .accessibilityHint("Returns to Home")
+                }
+            }
+
             if let onAddAction {
                 AddTransactionToolbar(store: store, onAction: onAddAction)
             } else {
@@ -1129,7 +1143,15 @@ struct TransactionRow: View {
                 Button("Delete", role: .destructive, action: onDelete)
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text(transaction.note)
+                if transaction.loanID != nil {
+                    ProtectedText(
+                        value: transaction.note,
+                        isRevealed: areBalancesRevealed,
+                        hiddenAccessibilityLabel: "Hidden loan description"
+                    )
+                } else {
+                    Text(transaction.note)
+                }
             }
     }
 
@@ -1164,7 +1186,7 @@ struct TransactionRow: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(transaction.note), \(displaySubtitle), \(areBalancesRevealed ? displayAmountText : "Hidden amount")"
+            "\(accessibleNote), \(displaySubtitle), \(areBalancesRevealed ? displayAmountText : "Hidden amount")"
         )
         .accessibilityHint(isSelectionMode && canSelectTransaction
             ? "Toggles transaction selection"
@@ -1309,9 +1331,19 @@ struct TransactionRow: View {
                 .background(accentColor.opacity(0.12), in: Circle())
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(transaction.note)
+                if transaction.loanID != nil {
+                    ProtectedText(
+                        value: transaction.note,
+                        isRevealed: areBalancesRevealed,
+                        hiddenAccessibilityLabel: "Hidden loan description"
+                    )
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
+                } else {
+                    Text(transaction.note)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                }
                 Text(displaySubtitle)
                     .font(.caption)
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
@@ -1359,6 +1391,10 @@ struct TransactionRow: View {
         .padding(.vertical, 11)
         .frame(minHeight: 72)
         .contentShape(Rectangle())
+    }
+
+    private var accessibleNote: String {
+        transaction.loanID != nil && !areBalancesRevealed ? "Hidden loan description" : transaction.note
     }
 
     private var rowSubtitle: String {

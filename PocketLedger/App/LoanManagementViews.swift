@@ -281,7 +281,11 @@ private struct LoanRow: View {
                 size: 36
             )
             VStack(alignment: .leading, spacing: 3) {
-                Text(loan.counterparty)
+                ProtectedText(
+                    value: loan.counterparty,
+                    isRevealed: areBalancesRevealed,
+                    hiddenAccessibilityLabel: "Hidden name"
+                )
                     .font(.subheadline.weight(.semibold))
                 HStack(spacing: 5) {
                     Text(loan.direction.displayName)
@@ -821,7 +825,7 @@ struct LoanDetailView: View {
                 ContentUnavailableView("Loan unavailable", systemImage: "arrow.left.arrow.right.circle")
             }
         }
-        .navigationTitle(loan?.counterparty ?? "Loan")
+        .navigationTitle(areBalancesRevealed ? (loan?.counterparty ?? "Loan") : "Loan")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if showsCloseButton {
@@ -885,7 +889,11 @@ struct LoanDetailView: View {
                                 .font(.caption.weight(.bold))
                                 .foregroundStyle(PocketLedgerTheme.accent)
                         }
-                        Text(loan.counterparty)
+                        ProtectedText(
+                            value: loan.counterparty,
+                            isRevealed: areBalancesRevealed,
+                            hiddenAccessibilityLabel: "Hidden name"
+                        )
                             .font(.title3.weight(.semibold))
                         ProtectedAmountText(value: loan.outstandingAmount.formatted, isRevealed: areBalancesRevealed)
                             .font(.largeTitle.weight(.bold).monospacedDigit())

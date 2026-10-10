@@ -178,6 +178,7 @@ struct ContentView: View {
                     security: security,
                     onAddExpense: { addAction = .expense },
                     onShowTransactions: { selectedTabBinding.wrappedValue = .transactions },
+                    onShowHome: { selectedTabBinding.wrappedValue = .overview },
                     onAddAction: { addAction = $0 }
                 )
             }

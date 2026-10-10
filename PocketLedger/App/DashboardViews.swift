@@ -284,7 +284,7 @@ struct DashboardView: View {
                         security: security,
                         initialFilter: .all,
                         initialPeriod: .thisMonth,
-                        onBackToHome: returnToHome
+                        showsBalanceVisibilityControl: true
                     )
                 case .topCategory:
                     TransactionsView(
@@ -294,7 +294,7 @@ struct DashboardView: View {
                         initialFilter: .expense,
                         initialPeriod: .thisMonth,
                         initialSearch: snapshot.topCategory ?? "",
-                        onBackToHome: returnToHome
+                        showsBalanceVisibilityControl: true
                     )
                 }
             }
@@ -326,8 +326,14 @@ struct DashboardView: View {
             }
             .onChange(of: dashboardPreferences) { _, preferences in preferences.save() }
         }
+        .onChange(of: navigationPath) { oldPath, newPath in
+            guard !oldPath.isEmpty, newPath.isEmpty else { return }
+            onShowHome()
+        }
         .toolbar {
-            BalanceVisibilityToolbarItem(security: security)
+            if navigationPath.isEmpty {
+                BalanceVisibilityToolbarItem(security: security)
+            }
         }
     }
 
@@ -976,11 +982,6 @@ struct DashboardView: View {
             .padding(14)
             .pocketGroupedSurface(cornerRadius: 17)
         }
-    }
-
-    private func returnToHome() {
-        navigationPath.removeAll()
-        onShowHome()
     }
 
     @ViewBuilder

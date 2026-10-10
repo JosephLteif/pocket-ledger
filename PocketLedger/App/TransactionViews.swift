@@ -261,7 +261,7 @@ struct TransactionsView: View {
     @ObservedObject var store: LedgerStore
     let onAddExpense: () -> Void
     private let onAddAction: ((AddAction) -> Void)?
-    private let onBackToHome: (() -> Void)?
+    private let showsBalanceVisibilityControl: Bool
     private let security: AppSecurityService
     @State private var selectedFilter: TransactionFilter
     @State private var selectedPeriod: TransactionPeriod
@@ -302,12 +302,12 @@ struct TransactionsView: View {
         initialReportingCurrency: LedgerCurrency? = nil,
         initialCustomStartDate: Date? = nil,
         initialCustomEndDate: Date? = nil,
-        onBackToHome: (() -> Void)? = nil
+        showsBalanceVisibilityControl: Bool = false
     ) {
         _store = ObservedObject(wrappedValue: store)
         self.onAddExpense = onAddExpense
         self.onAddAction = onAddAction
-        self.onBackToHome = onBackToHome
+        self.showsBalanceVisibilityControl = showsBalanceVisibilityControl
         self.security = security
         _selectedFilter = State(initialValue: initialFilter)
         _selectedPeriod = State(initialValue: initialPeriod)
@@ -423,17 +423,10 @@ struct TransactionsView: View {
         .transactionActionAlert(message: $transactionDeletionError)
         .navigationTitle("Transactions")
         .navigationBarTitleDisplayMode(.large)
-        .navigationBarBackButtonHidden(onBackToHome != nil)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            if let onBackToHome {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(action: onBackToHome) {
-                        Label("Home", systemImage: "chevron.backward")
-                    }
-                    .accessibilityIdentifier("transactions-back-home")
-                    .accessibilityHint("Returns to Home")
-                }
+            if showsBalanceVisibilityControl {
+                BalanceVisibilityToolbarItem(security: security)
             }
 
             if let onAddAction {

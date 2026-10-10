@@ -194,10 +194,11 @@ struct ContentView: View {
                         )
                         .searchFocused($isSearchFieldFocused)
                         .toolbar {
-                            PocketLedgerToolbar(security: security) {
-                                AddTransactionToolbar(store: store, onAction: { addAction = $0 })
-                            }
+                            AddTransactionToolbar(store: store, onAction: { addAction = $0 })
                         }
+                }
+                .toolbar {
+                    BalanceVisibilityToolbarItem(security: security)
                 }
             }
             .accessibilityIdentifier("tab-search")
@@ -215,6 +216,9 @@ struct ContentView: View {
                         security: security
                     )
                 }
+                .toolbar {
+                    BalanceVisibilityToolbarItem(security: security)
+                }
             }
             .accessibilityIdentifier("tab-transactions")
 
@@ -229,6 +233,9 @@ struct ContentView: View {
                         security: security,
                         onAddAction: { addAction = $0 }
                     )
+                }
+                .toolbar {
+                    BalanceVisibilityToolbarItem(security: security)
                 }
             }
             .accessibilityIdentifier("tab-accounts")
@@ -379,7 +386,6 @@ struct AddTransactionToolbar: ToolbarContent {
     @ObservedObject var store: LedgerStore
     @AppStorage("pocketLedger.recentTemplateIDs") private var recentTemplateIDsValue = ""
     let onAction: (AddAction) -> Void
-    var systemImage = "plus"
 
     private var recentTemplateIDs: [UUID] {
         recentTemplateIDsValue.split(separator: ",").compactMap { UUID(uuidString: String($0)) }
@@ -398,7 +404,7 @@ struct AddTransactionToolbar: ToolbarContent {
             Button {
                 onAction(.expense)
             } label: {
-                Image(systemName: systemImage)
+                Image(systemName: "plus")
             }
             .accessibilityLabel("Add expense")
             .accessibilityHint("Opens a new expense")

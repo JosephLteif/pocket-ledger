@@ -89,27 +89,21 @@ struct AccountsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            PocketLedgerToolbar(security: security) {
-                AddTransactionToolbar(
-                    store: store,
-                    onAction: onAddAction,
-                    systemImage: "plus.circle"
-                )
-                ToolbarItem(placement: .primaryAction) {
-                    if !proAccess.hasProAccess,
-                       store.activeAccounts.count >= PocketLedgerTierPolicy.freeAccountLimit {
-                        ProUpgradeButton(feature: .accounts) {
-                            Image(systemName: "person.crop.circle.badge.plus")
-                        }
-                        .accessibilityLabel("Unlock more accounts with Pro")
-                    } else {
-                        Button {
-                            presentAccount(nil)
-                        } label: {
-                            Image(systemName: "person.crop.circle.badge.plus")
-                        }
-                        .accessibilityLabel("Add account")
+            AddTransactionToolbar(store: store, onAction: onAddAction)
+            ToolbarItem(placement: .primaryAction) {
+                if !proAccess.hasProAccess,
+                   store.activeAccounts.count >= PocketLedgerTierPolicy.freeAccountLimit {
+                    ProUpgradeButton(feature: .accounts) {
+                        Image(systemName: "person.crop.circle.badge.plus")
                     }
+                    .accessibilityLabel("Unlock more accounts with Pro")
+                } else {
+                    Button {
+                        presentAccount(nil)
+                    } label: {
+                        Image(systemName: "person.crop.circle.badge.plus")
+                    }
+                    .accessibilityLabel("Add account")
                 }
             }
         }

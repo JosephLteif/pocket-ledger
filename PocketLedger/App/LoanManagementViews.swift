@@ -129,15 +129,13 @@ struct LoansView: View {
         .navigationTitle("Loans")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            PocketLedgerToolbar(security: security) {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        isPresentingLoanEditor = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("Add loan")
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    isPresentingLoanEditor = true
+                } label: {
+                    Image(systemName: "plus")
                 }
+                .accessibilityLabel("Add loan")
             }
         }
         .sheet(isPresented: $isPresentingLoanEditor) {

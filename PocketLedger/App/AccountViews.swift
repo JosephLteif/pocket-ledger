@@ -126,16 +126,14 @@ struct AccountDetailView: View {
             .navigationTitle(account?.name ?? "Account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                PocketLedgerToolbar(security: security) {
-                    if account != nil {
-                        ToolbarItem(placement: .primaryAction) {
-                            Button {
-                                isPresentingAccountEditor = true
-                            } label: {
-                                Image(systemName: "pencil")
-                            }
-                            .accessibilityLabel("Edit account")
+                if account != nil {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            isPresentingAccountEditor = true
+                        } label: {
+                            Image(systemName: "pencil")
                         }
+                        .accessibilityLabel("Edit account")
                     }
                 }
             }

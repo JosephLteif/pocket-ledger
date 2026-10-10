@@ -132,13 +132,11 @@ struct ScheduledTransactionsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            PocketLedgerToolbar(security: security) {
-                ToolbarItem(placement: .primaryAction) {
-                    Button(action: presentNewSchedule) {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("Add scheduled transaction")
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: presentNewSchedule) {
+                    Image(systemName: "plus")
                 }
+                .accessibilityLabel("Add scheduled transaction")
             }
         }
         .background {

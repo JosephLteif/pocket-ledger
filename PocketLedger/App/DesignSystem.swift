@@ -301,9 +301,10 @@ struct BalanceVisibilityControl: View {
                 isRevealed ? "Hide" : "Reveal",
                 systemImage: isRevealed ? "eye.slash" : "eye"
             )
-            .font(.caption.weight(.semibold))
+            .labelStyle(.iconOnly)
+            .font(.body.weight(.semibold))
             .foregroundStyle(PocketLedgerTheme.accent)
-            .frame(minWidth: 44, minHeight: 44)
+            .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
         .disabled(isAuthenticating)
@@ -361,30 +362,22 @@ struct BalanceVisibilityToolbarItem: ToolbarContent {
     @ObservedObject var security: AppSecurityService
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var isRevealed = false
 
+    private var control: some View {
+        BalanceVisibilityControl(security: security, isRevealed: $isRevealed)
+            .accessibilityIdentifier("balance-visibility-control")
+    }
+
+    @ToolbarContentBuilder
     var body: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            BalanceVisibilityControl(security: security, isRevealed: $isRevealed)
-                .accessibilityIdentifier("balance-visibility-control")
+        if #available(iOS 27, *) {
+            ToolbarItem(placement: .topBarPinnedTrailing) {
+                control
+            }
+        } else {
+            ToolbarItem(placement: .topBarTrailing) {
+                control
+            }
         }
-    }
-}
-
-@MainActor
-struct PocketLedgerToolbar<Content: ToolbarContent>: ToolbarContent {
-    let security: AppSecurityService
-    private let content: Content
-
-    init(
-        security: AppSecurityService,
-        @ToolbarContentBuilder content: () -> Content
-    ) {
-        self.security = security
-        self.content = content()
-    }
-
-    var body: some ToolbarContent {
-        BalanceVisibilityToolbarItem(security: security)
-        content
     }
 }
 

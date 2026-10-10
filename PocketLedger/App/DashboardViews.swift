@@ -146,9 +146,7 @@ struct MoreView: View {
             .navigationTitle("More")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                PocketLedgerToolbar(security: security) {
-                    AddTransactionToolbar(store: store, onAction: onAddAction)
-                }
+                AddTransactionToolbar(store: store, onAction: onAddAction)
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
@@ -162,6 +160,9 @@ struct MoreView: View {
             .sheet(isPresented: $isShowingSetup) {
                 SetupWizardView(store: store)
             }
+        }
+        .toolbar {
+            BalanceVisibilityToolbarItem(security: security)
         }
     }
 }
@@ -255,18 +256,16 @@ struct DashboardView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar(.visible, for: .navigationBar)
             .toolbar {
-                PocketLedgerToolbar(security: security) {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            presentedSheet = .customization
-                        } label: {
-                            Image(systemName: "slider.horizontal.3")
-                        }
-                        .accessibilityLabel("Customize dashboard")
-                        .accessibilityHint("Choose which widgets appear and reorder them")
-                        .accessibilityIdentifier("dashboard-customize")
+                AddTransactionToolbar(store: store, onAction: onAddAction)
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        presentedSheet = .customization
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
                     }
-                    AddTransactionToolbar(store: store, onAction: onAddAction)
+                    .accessibilityLabel("Customize dashboard")
+                    .accessibilityHint("Choose which widgets appear and reorder them")
+                    .accessibilityIdentifier("dashboard-customize")
                 }
             }
             .sheet(item: $presentedSheet) { sheet in
@@ -296,6 +295,9 @@ struct DashboardView: View {
                 }
             }
             .onChange(of: dashboardPreferences) { _, preferences in preferences.save() }
+        }
+        .toolbar {
+            BalanceVisibilityToolbarItem(security: security)
         }
     }
 

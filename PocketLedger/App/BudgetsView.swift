@@ -65,22 +65,20 @@ struct BudgetsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            PocketLedgerToolbar(security: security) {
-                ToolbarItem(placement: .primaryAction) {
-                    if !proAccess.hasProAccess,
-                       store.data.budgets.count >= PocketLedgerTierPolicy.freeBudgetLimit {
-                        ProUpgradeButton(feature: .budgets) {
-                            Image(systemName: "plus")
-                        }
-                        .accessibilityLabel("Unlock more budgets with Pro")
-                        .accessibilityHint("Creates a new monthly budget")
-                    } else {
-                        Button(action: presentNewBudget) {
-                            Image(systemName: "plus")
-                        }
-                        .accessibilityLabel("Add budget")
-                        .accessibilityHint("Creates a new monthly budget")
+            ToolbarItem(placement: .primaryAction) {
+                if !proAccess.hasProAccess,
+                   store.data.budgets.count >= PocketLedgerTierPolicy.freeBudgetLimit {
+                    ProUpgradeButton(feature: .budgets) {
+                        Image(systemName: "plus")
                     }
+                    .accessibilityLabel("Unlock more budgets with Pro")
+                    .accessibilityHint("Creates a new monthly budget")
+                } else {
+                    Button(action: presentNewBudget) {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Add budget")
+                    .accessibilityHint("Creates a new monthly budget")
                 }
             }
         }

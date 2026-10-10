@@ -46,13 +46,11 @@ struct SavingsGoalsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            PocketLedgerToolbar(security: security) {
-                ToolbarItem(placement: .primaryAction) {
-                    Button(action: presentNewGoal) {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("Add savings goal")
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: presentNewGoal) {
+                    Image(systemName: "plus")
                 }
+                .accessibilityLabel("Add savings goal")
             }
         }
         .sheet(isPresented: $isPresentingEditor, onDismiss: { editingGoal = nil }) {

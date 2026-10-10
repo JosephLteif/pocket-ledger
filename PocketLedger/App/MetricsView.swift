@@ -198,22 +198,20 @@ struct MetricsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            PocketLedgerToolbar(security: security) {
-                ToolbarItem(placement: .primaryAction) {
-                    if proAccess.hasProAccess {
-                        Button {
-                            isExportOptionsPresented = true
-                        } label: {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                        .accessibilityLabel("Share metrics PDF report")
-                        .accessibilityHint("Creates a shareable PDF report")
-                    } else {
-                        ProUpgradeButton(feature: .pdfReports) {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                        .accessibilityLabel("Unlock PDF reports with Pro")
+            ToolbarItem(placement: .primaryAction) {
+                if proAccess.hasProAccess {
+                    Button {
+                        isExportOptionsPresented = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
                     }
+                    .accessibilityLabel("Share metrics PDF report")
+                    .accessibilityHint("Creates a shareable PDF report")
+                } else {
+                    ProUpgradeButton(feature: .pdfReports) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .accessibilityLabel("Unlock PDF reports with Pro")
                 }
             }
         }
@@ -1334,14 +1332,12 @@ private struct MetricsTransactionDetailView: View {
         .navigationTitle("Transaction")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            PocketLedgerToolbar(security: security) {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Edit", systemImage: "pencil") {
-                        editingTransaction = transaction
-                    }
-                    .disabled(transaction == nil)
-                    .accessibilityIdentifier("metrics-transaction-edit")
+            ToolbarItem(placement: .primaryAction) {
+                Button("Edit", systemImage: "pencil") {
+                    editingTransaction = transaction
                 }
+                .disabled(transaction == nil)
+                .accessibilityIdentifier("metrics-transaction-edit")
             }
         }
         .sheet(item: $editingTransaction) { transaction in

@@ -422,34 +422,33 @@ struct TransactionsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            PocketLedgerToolbar(security: security) {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    if isSelectingTransactions {
-                        Button("Done") {
-                            isSelectingTransactions = false
-                            selectedTransactionIDs.removeAll()
-                        }
-                    } else {
-                        Button {
-                            isSelectingTransactions = true
-                        } label: {
-                            Image(systemName: "checklist")
-                        }
-                        .accessibilityLabel("Select transactions")
-                        .accessibilityIdentifier("select-transactions")
+            if let onAddAction {
+                AddTransactionToolbar(store: store, onAction: onAddAction)
+            } else {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        isPresentingBillScanner = true
+                    } label: {
+                        Image(systemName: "doc.viewfinder")
                     }
+                    .accessibilityLabel("Scan bill")
                 }
-                if let onAddAction {
-                    AddTransactionToolbar(store: store, onAction: onAddAction)
-                } else {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            isPresentingBillScanner = true
-                        } label: {
-                            Image(systemName: "doc.viewfinder")
-                        }
-                        .accessibilityLabel("Scan bill")
+            }
+
+            ToolbarItemGroup(placement: .primaryAction) {
+                if isSelectingTransactions {
+                    Button("Done") {
+                        isSelectingTransactions = false
+                        selectedTransactionIDs.removeAll()
                     }
+                } else {
+                    Button {
+                        isSelectingTransactions = true
+                    } label: {
+                        Image(systemName: "checklist")
+                    }
+                    .accessibilityLabel("Select transactions")
+                    .accessibilityIdentifier("select-transactions")
                 }
             }
         }

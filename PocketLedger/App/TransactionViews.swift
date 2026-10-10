@@ -261,7 +261,6 @@ struct TransactionsView: View {
     @ObservedObject var store: LedgerStore
     let onAddExpense: () -> Void
     private let onAddAction: ((AddAction) -> Void)?
-    private let showsBalanceVisibilityControl: Bool
     private let security: AppSecurityService
     @State private var selectedFilter: TransactionFilter
     @State private var selectedPeriod: TransactionPeriod
@@ -301,13 +300,11 @@ struct TransactionsView: View {
         initialAccountID: UUID? = nil,
         initialReportingCurrency: LedgerCurrency? = nil,
         initialCustomStartDate: Date? = nil,
-        initialCustomEndDate: Date? = nil,
-        showsBalanceVisibilityControl: Bool = false
+        initialCustomEndDate: Date? = nil
     ) {
         _store = ObservedObject(wrappedValue: store)
         self.onAddExpense = onAddExpense
         self.onAddAction = onAddAction
-        self.showsBalanceVisibilityControl = showsBalanceVisibilityControl
         self.security = security
         _selectedFilter = State(initialValue: initialFilter)
         _selectedPeriod = State(initialValue: initialPeriod)
@@ -425,10 +422,6 @@ struct TransactionsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            if showsBalanceVisibilityControl {
-                BalanceVisibilityToolbarItem(security: security)
-            }
-
             if let onAddAction {
                 AddTransactionToolbar(store: store, onAction: onAddAction)
             } else {

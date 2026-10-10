@@ -283,8 +283,7 @@ struct DashboardView: View {
                         onAddExpense: onAddExpense,
                         security: security,
                         initialFilter: .all,
-                        initialPeriod: .thisMonth,
-                        showsBalanceVisibilityControl: true
+                        initialPeriod: .thisMonth
                     )
                 case .topCategory:
                     TransactionsView(
@@ -293,8 +292,7 @@ struct DashboardView: View {
                         security: security,
                         initialFilter: .expense,
                         initialPeriod: .thisMonth,
-                        initialSearch: snapshot.topCategory ?? "",
-                        showsBalanceVisibilityControl: true
+                        initialSearch: snapshot.topCategory ?? ""
                     )
                 }
             }
@@ -331,9 +329,7 @@ struct DashboardView: View {
             onShowHome()
         }
         .toolbar {
-            if navigationPath.isEmpty {
-                BalanceVisibilityToolbarItem(security: security)
-            }
+            BalanceVisibilityToolbarItem(security: security)
         }
     }
 

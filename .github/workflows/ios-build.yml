@@ -8,6 +8,11 @@ on:
         required: false
         default: false
         type: boolean
+      include_sandbox:
+        description: Build and package the sandbox iPhone and Watch app variant
+        required: false
+        default: true
+        type: boolean
   push:
     tags:
       - "v*"
@@ -17,7 +22,7 @@ permissions:
 
 jobs:
   build-and-package:
-    name: Build two complete sideload IPAs
+    name: Build and package sideload IPAs
     needs: test-ios
     if: always() && (needs.test-ios.result == 'success' || needs.test-ios.result == 'skipped')
     runs-on: xcode-27
@@ -91,6 +96,7 @@ jobs:
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-watch-normal.log"
 
       - name: Build sandbox iPhone app and widget
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.include_sandbox }}
         run: |
           set -o pipefail
           xcodebuild \
@@ -116,6 +122,7 @@ jobs:
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-sandbox.log"
 
       - name: Build sandbox Apple Watch app and complication
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.include_sandbox }}
         run: |
           set -o pipefail
           xcodebuild \
@@ -137,20 +144,25 @@ jobs:
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-watch-sandbox.log"
 
-      - name: Stage the two app variants
+      - name: Stage app variants
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/sideload/normal" "$RUNNER_TEMP/sideload/sandbox"
+          mkdir -p "$RUNNER_TEMP/sideload/normal"
           ditto "$RUNNER_TEMP/NormalDerivedData/Build/Products/Release-iphoneos/PocketLedger.app" \
             "$RUNNER_TEMP/sideload/normal/PocketLedger.app"
           ditto "$RUNNER_TEMP/NormalWatchDerivedData/Build/Products/Release-watchos/PocketLedgerWatch.app" \
             "$RUNNER_TEMP/sideload/normal/PocketLedgerWatch.app"
-          ditto "$RUNNER_TEMP/SandboxDerivedData/Build/Products/Release-iphoneos/PocketLedger.app" \
-            "$RUNNER_TEMP/sideload/sandbox/PocketLedger.app"
-          ditto "$RUNNER_TEMP/SandboxWatchDerivedData/Build/Products/Release-watchos/PocketLedgerWatch.app" \
-            "$RUNNER_TEMP/sideload/sandbox/PocketLedgerWatch.app"
+          if [ "$BUILD_SANDBOX" = "true" ]; then
+            mkdir -p "$RUNNER_TEMP/sideload/sandbox"
+            ditto "$RUNNER_TEMP/SandboxDerivedData/Build/Products/Release-iphoneos/PocketLedger.app" \
+              "$RUNNER_TEMP/sideload/sandbox/PocketLedger.app"
+            ditto "$RUNNER_TEMP/SandboxWatchDerivedData/Build/Products/Release-watchos/PocketLedgerWatch.app" \
+              "$RUNNER_TEMP/sideload/sandbox/PocketLedgerWatch.app"
+          fi
+        env:
+          BUILD_SANDBOX: ${{ github.event_name != 'workflow_dispatch' || inputs.include_sandbox }}
 
-      - name: Package and verify the two iPhone, Watch, and widget IPAs
+      - name: Package and verify the requested iPhone, Watch, and widget IPAs
         run: |
           set -euo pipefail
 
@@ -264,11 +276,18 @@ jobs:
           }
 
           package_ipa normal "com.josephlteif.pocketledger" "Pocket Ledger" "Pocket Ledger Balance" "Pocket Ledger" "Pocket Ledger Complication" "PocketLedger-normal-build-$GITHUB_RUN_NUMBER.ipa"
-          package_ipa sandbox "com.josephlteif.pocketledger.sandbox" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Balance" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Complication" "PocketLedger-sandbox-build-$GITHUB_RUN_NUMBER.ipa"
+          if [ "$BUILD_SANDBOX" = "true" ]; then
+            package_ipa sandbox "com.josephlteif.pocketledger.sandbox" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Balance" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Complication" "PocketLedger-sandbox-build-$GITHUB_RUN_NUMBER.ipa"
+          fi
 
-          test "$(find "$GITHUB_WORKSPACE" -maxdepth 1 -name '*.ipa' -type f | wc -l | tr -d '[:space:]')" = "2"
+          expected_ipa_count=1
+          if [ "$BUILD_SANDBOX" = "true" ]; then expected_ipa_count=2; fi
+          actual_ipa_count=$(find "$GITHUB_WORKSPACE" -maxdepth 1 -name '*.ipa' -type f | wc -l | tr -d '[:space:]')
+          test "$actual_ipa_count" = "$expected_ipa_count"
+        env:
+          BUILD_SANDBOX: ${{ github.event_name != 'workflow_dispatch' || inputs.include_sandbox }}
 
-      - name: Upload the two IPA files
+      - name: Upload the IPA files
         uses: actions/upload-artifact@v7
         with:
           name: PocketLedger-build-${{ github.run_number }}

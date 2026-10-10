@@ -181,6 +181,11 @@ private enum DashboardSheet: Identifiable {
     }
 }
 
+private enum DashboardNavigationDestination: Hashable {
+    case monthTransactions
+    case topCategory
+}
+
 @MainActor
 struct DashboardView: View {
     @ObservedObject var store: LedgerStore
@@ -190,6 +195,7 @@ struct DashboardView: View {
     let onAddAction: (AddAction) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var presentedSheet: DashboardSheet?
+    @State private var navigationPath: [DashboardNavigationDestination] = []
     @State private var transactionToTemplate: LedgerTransaction?
     @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
     @State private var transactionDeletionError: String?
@@ -204,7 +210,7 @@ struct DashboardView: View {
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             PocketGlassContainer(spacing: 14) {
                 List {
                     dashboardListRow(dashboardDateHeader, top: 12, bottom: 0)
@@ -266,6 +272,27 @@ struct DashboardView: View {
                     .accessibilityLabel("Customize dashboard")
                     .accessibilityHint("Choose which widgets appear and reorder them")
                     .accessibilityIdentifier("dashboard-customize")
+                }
+            }
+            .navigationDestination(for: DashboardNavigationDestination.self) { destination in
+                switch destination {
+                case .monthTransactions:
+                    TransactionsView(
+                        store: store,
+                        onAddExpense: onAddExpense,
+                        security: security,
+                        initialFilter: .all,
+                        initialPeriod: .thisMonth
+                    )
+                case .topCategory:
+                    TransactionsView(
+                        store: store,
+                        onAddExpense: onAddExpense,
+                        security: security,
+                        initialFilter: .expense,
+                        initialPeriod: .thisMonth,
+                        initialSearch: snapshot.topCategory ?? ""
+                    )
                 }
             }
             .sheet(item: $presentedSheet) { sheet in
@@ -913,15 +940,7 @@ struct DashboardView: View {
             sectionHeader(title: "This month", detail: Date.now.formatted(.dateTime.month(.wide).year()))
 
             HStack(spacing: 10) {
-                NavigationLink {
-                    TransactionsView(
-                        store: store,
-                        onAddExpense: onAddExpense,
-                        security: security,
-                        initialFilter: .all,
-                        initialPeriod: .thisMonth
-                    )
-                } label: {
+                NavigationLink(value: DashboardNavigationDestination.monthTransactions) {
                     snapshotMetric(
                         title: "Transactions",
                         value: "\(snapshot.monthTransactionCount)",
@@ -931,16 +950,7 @@ struct DashboardView: View {
                 }
                 .buttonStyle(.plain)
 
-                NavigationLink {
-                    TransactionsView(
-                        store: store,
-                        onAddExpense: onAddExpense,
-                        security: security,
-                        initialFilter: .expense,
-                        initialPeriod: .thisMonth,
-                        initialSearch: snapshot.topCategory ?? ""
-                    )
-                } label: {
+                NavigationLink(value: DashboardNavigationDestination.topCategory) {
                     snapshotMetric(
                         title: "Top category",
                         value: snapshot.topCategory ?? "No activity",

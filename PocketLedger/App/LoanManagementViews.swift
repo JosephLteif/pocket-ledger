@@ -480,25 +480,41 @@ struct LoanEditor: View {
     let loan: Loan?
     let onSave: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
-    @State private var counterparty: String
+    @State private var selectedContactID: UUID?
+    @State private var isAddingContact = false
+    @State private var newContactName = ""
     @State private var direction: LoanDirection
     @State private var amountText: String
-    @State private var fundedAmountText: String
     @State private var loanCurrency: LedgerCurrency
     @State private var startedAt: Date
     @State private var hasDueDate: Bool
     @State private var dueDate: Date
     @State private var selectedAccountID: UUID?
     @State private var errorMessage: String?
+    @State private var errorTitle = "Loan not saved"
+    @FocusState private var isNewContactNameFocused: Bool
 
     init(store: LedgerStore, loan: Loan? = nil, onSave: (() -> Void)? = nil) {
         _store = ObservedObject(wrappedValue: store)
         self.loan = loan
         self.onSave = onSave
-        _counterparty = State(initialValue: loan?.counterparty ?? "")
+        let initialContactID = loan.flatMap { currentLoan in
+            if let contactID = currentLoan.counterpartyContactID,
+               store.data.loanContacts.contains(where: { $0.id == contactID }) {
+                return contactID
+            }
+            if let contactID = store.data.loanContacts.first(where: {
+                $0.name.caseInsensitiveCompare(currentLoan.counterparty) == .orderedSame
+            })?.id {
+                return contactID
+            }
+            return store.data.loans.first(where: {
+                $0.counterparty.caseInsensitiveCompare(currentLoan.counterparty) == .orderedSame
+            }).map { $0.counterpartyContactID ?? $0.id } ?? currentLoan.id
+        }
+        _selectedContactID = State(initialValue: initialContactID)
         _direction = State(initialValue: loan?.direction ?? .borrowed)
         _amountText = State(initialValue: "")
-        _fundedAmountText = State(initialValue: "")
         _startedAt = State(initialValue: loan?.startedAt ?? .now)
         _hasDueDate = State(initialValue: loan?.dueDate != nil)
         _dueDate = State(initialValue: loan?.dueDate ?? .now)
@@ -523,17 +539,43 @@ struct LoanEditor: View {
                             }
                         }
                     }
-                    TextField(loan?.direction.counterpartyLabel ?? direction.counterpartyLabel, text: $counterparty)
+                    Picker(direction.counterpartyLabel, selection: $selectedContactID) {
+                        Text(loan?.counterparty ?? "Choose a person or entity")
+                            .tag(nil as UUID?)
+                        ForEach(savedContacts) { contact in
+                            Text(contact.name).tag(Optional(contact.id))
+                        }
+                    }
+                    .accessibilityIdentifier("loan-counterparty-picker")
+
+                    if isAddingContact {
+                        TextField("Person or entity name", text: $newContactName)
+                            .textInputAutocapitalization(.words)
+                            .submitLabel(.done)
+                            .focused($isNewContactNameFocused)
+                            .onSubmit(addContact)
+                            .accessibilityIdentifier("loan-contact-name")
+                        HStack {
+                            Button("Cancel", action: cancelAddingContact)
+                            Spacer()
+                            Button("Add", action: addContact)
+                                .disabled(newContactName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    } else {
+                        Button("Add person or entity", systemImage: "plus") {
+                            newContactName = ""
+                            isAddingContact = true
+                            isNewContactNameFocused = true
+                        }
+                        .accessibilityIdentifier("add-loan-contact")
+                    }
+
                     if loan == nil {
-                        CurrencyInputField("Total amount owed", text: $amountText, currency: $loanCurrency)
                         CurrencyInputField(
                             direction == .lent ? "Amount given" : "Amount received",
-                            text: $fundedAmountText,
+                            text: $amountText,
                             currency: $loanCurrency
                         )
-                        Text("Leave the funded amount blank to use the total owed. The total can include manually entered interest.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
                         DatePicker("Started", selection: $startedAt, in: Date.distantPast...Date.now, displayedComponents: .date)
                     }
                     Toggle("Add due date", isOn: $hasDueDate)
@@ -585,7 +627,7 @@ struct LoanEditor: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
             }
-            .alert("Loan not saved", isPresented: errorPresented) {
+            .alert(errorTitle, isPresented: errorPresented) {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
@@ -606,13 +648,31 @@ struct LoanEditor: View {
         return store.exchangeRate(base: loanCurrency, quote: selectedAccount.currency)
     }
 
+    private var savedContacts: [LoanContact] {
+        var contacts = store.data.loanContacts
+        for loan in store.data.loans {
+            let name = loan.counterparty.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty,
+                  !contacts.contains(where: {
+                      $0.id == (loan.counterpartyContactID ?? loan.id)
+                          || $0.name.caseInsensitiveCompare(name) == .orderedSame
+                  }) else { continue }
+            contacts.append(LoanContact(id: loan.counterpartyContactID ?? loan.id, name: name))
+        }
+        return contacts.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private var selectedContact: LoanContact? {
+        savedContacts.first { $0.id == selectedContactID }
+    }
+
     private var needsFundingRate: Bool {
         selectedAccount.map { $0.currency != loanCurrency } ?? false
     }
 
     private var cashMovementAmount: Money? {
         guard let selectedAccount,
-              let principalAmount = fundingAmount,
+              let principalAmount = loanAmount,
               let minorUnits = financeConvertedMinorUnits(
                   principalAmount,
                   to: selectedAccount.currency,
@@ -621,13 +681,7 @@ struct LoanEditor: View {
         return Money(currency: selectedAccount.currency, minorUnits: minorUnits)
     }
 
-    private var fundingAmount: Money? {
-        guard let totalOwed = Money.parse(amountText, currency: loanCurrency) else { return nil }
-        let fundedValue = fundedAmountText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return fundedValue.isEmpty
-            ? totalOwed
-            : Money.parse(fundedValue, currency: loanCurrency)
-    }
+    private var loanAmount: Money? { Money.parse(amountText, currency: loanCurrency) }
 
     private var selectedAccountBinding: Binding<UUID?> {
         Binding(get: { selectedAccountID }, set: { selectedAccountID = $0 })
@@ -638,13 +692,22 @@ struct LoanEditor: View {
     }
 
     private func save() {
-        let party = counterparty.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !party.isEmpty else {
-            errorMessage = "Enter the person or organization for this loan."
+        errorTitle = "Loan not saved"
+        let partyName = (selectedContact?.name ?? loan?.counterparty ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !partyName.isEmpty else {
+            errorMessage = "Select or add a person or entity for this loan."
             return
         }
         if var existing = loan {
-            existing.counterparty = party
+            guard let contact = store.addLoanContact(name: partyName) else {
+                errorTitle = "Person or entity not saved"
+                errorMessage = store.lastActionStatus ?? "The person or entity could not be saved."
+                return
+            }
+            selectedContactID = contact.id
+            existing.counterparty = contact.name
+            existing.counterpartyContactID = contact.id
             existing.dueDate = hasDueDate ? dueDate : nil
             guard store.updateLoan(existing) else {
                 errorMessage = store.lastActionStatus ?? "The loan could not be updated."
@@ -656,10 +719,8 @@ struct LoanEditor: View {
         }
 
         guard let account = selectedAccount,
-              let amount = Money.parse(amountText, currency: loanCurrency),
+              let amount = loanAmount,
               amount.minorUnits > 0,
-              let fundingAmount,
-              fundingAmount.minorUnits > 0,
               let cashMovementAmount,
               cashMovementAmount.minorUnits > 0 else {
             errorMessage = needsFundingRate && fundingRate == nil
@@ -667,6 +728,13 @@ struct LoanEditor: View {
                 : "Enter a positive amount and choose a cash or bank account."
             return
         }
+        guard let contact = store.addLoanContact(name: partyName) else {
+            errorTitle = "Person or entity not saved"
+            errorMessage = store.lastActionStatus ?? "The person or entity could not be saved."
+            return
+        }
+        selectedContactID = contact.id
+        let party = contact.name
         let dueDate = hasDueDate ? self.dueDate : nil
 
         let loanID = UUID()
@@ -674,6 +742,7 @@ struct LoanEditor: View {
         let loan = Loan(
             id: loanID,
             counterparty: party,
+            counterpartyContactID: contact.id,
             direction: direction,
             currency: amount.currency,
             startingAmount: amount,
@@ -694,7 +763,7 @@ struct LoanEditor: View {
             exchangeRate: fundingRate,
             loanID: loanID,
             loanActivity: .funding,
-            loanPrincipalAmount: fundingAmount
+            loanPrincipalAmount: amount
         )
         guard store.addLoan(loan, fundingTransaction: transaction) else {
             errorMessage = store.lastActionStatus ?? "The loan could not be saved."
@@ -702,6 +771,24 @@ struct LoanEditor: View {
         }
         onSave?()
         dismiss()
+    }
+
+    private func addContact() {
+        let name = newContactName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        guard let contact = store.addLoanContact(name: name) else {
+            errorTitle = "Person or entity not saved"
+            errorMessage = store.lastActionStatus ?? "The person or entity could not be saved."
+            return
+        }
+        selectedContactID = contact.id
+        cancelAddingContact()
+    }
+
+    private func cancelAddingContact() {
+        isAddingContact = false
+        newContactName = ""
+        isNewContactNameFocused = false
     }
 }
 

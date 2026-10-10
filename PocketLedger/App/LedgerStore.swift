@@ -696,6 +696,26 @@ final class LedgerStore: ObservableObject {
     }
 
     @discardableResult
+    func addLoanContact(name: String) -> LoanContact? {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return nil }
+        if let existing = data.loanContacts.first(where: {
+            $0.name.caseInsensitiveCompare(name) == .orderedSame
+        }) {
+            return existing
+        }
+
+        var updated = data
+        let contact = LoanContact(name: name)
+        updated.loanContacts.append(contact)
+        guard FinanceDataValidator.validate(updated) == nil else {
+            lastActionStatus = "The person or entity could not be saved."
+            return nil
+        }
+        return persist(updated, successMessage: nil) ? contact : nil
+    }
+
+    @discardableResult
     func addLoan(_ loan: Loan, fundingTransaction: LedgerTransaction) -> Bool {
         guard !data.loans.contains(where: { $0.id == loan.id }),
               loan.legacyAccountID == nil,

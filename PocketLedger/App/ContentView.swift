@@ -198,9 +198,6 @@ struct ContentView: View {
                             AddTransactionToolbar(store: store, onAction: { addAction = $0 })
                         }
                 }
-                .toolbar {
-                    BalanceVisibilityToolbarItem(security: security)
-                }
             }
             .accessibilityIdentifier("tab-search")
 

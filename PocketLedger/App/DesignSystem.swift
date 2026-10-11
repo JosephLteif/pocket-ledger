@@ -300,6 +300,7 @@ struct ProtectedAmountText: View {
 struct BalanceVisibilityControl: View {
     @ObservedObject var security: AppSecurityService
     @Binding var isRevealed: Bool
+    var showsTitle = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var isAuthenticating = false
     @State private var isShowingBiometryUnavailable = false
@@ -307,14 +308,24 @@ struct BalanceVisibilityControl: View {
 
     var body: some View {
         Button(action: toggle) {
-            Label(
-                isRevealed ? "Hide" : "Reveal",
-                systemImage: isRevealed ? "eye.slash" : "eye"
-            )
-            .labelStyle(.iconOnly)
+            Group {
+                if showsTitle {
+                    Label(
+                        isRevealed ? "Hide" : "Reveal",
+                        systemImage: isRevealed ? "eye.slash" : "eye"
+                    )
+                    .labelStyle(.titleAndIcon)
+                } else {
+                    Label(
+                        isRevealed ? "Hide" : "Reveal",
+                        systemImage: isRevealed ? "eye.slash" : "eye"
+                    )
+                    .labelStyle(.iconOnly)
+                }
+            }
             .font(.body.weight(.semibold))
             .foregroundStyle(PocketLedgerTheme.accent)
-            .frame(width: 44, height: 44)
+            .frame(minWidth: showsTitle ? 88 : 44, minHeight: 44)
         }
         .buttonStyle(.plain)
         .disabled(isAuthenticating)

@@ -139,163 +139,203 @@ struct GlobalSearchView: View {
     }
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            PocketGlassContainer(spacing: 14) {
-                VStack(alignment: .leading, spacing: 16) {
-                    if !query.isEmpty {
-                        Button {
-                            saveSearches(savedSearches + [query])
-                        } label: {
-                            Label(isSearchSaved ? "Search saved" : "Save search", systemImage: isSearchSaved ? "checkmark" : "bookmark")
-                        }
-                        .buttonStyle(.glass)
-                        .disabled(isSearchSaved)
-                    }
-                    if query.isEmpty {
-                        ContentUnavailableView(
-                            "Search your ledger",
-                            systemImage: "magnifyingglass",
-                            description: Text("Find accounts, transactions, descriptions, categories, amounts, and currencies.")
-                        )
-                        .padding(.top, 18)
-                        if !savedSearches.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Saved searches")
-                                    .font(.headline)
-                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-                                VStack(spacing: 8) {
-                                    ForEach(savedSearches, id: \.self) { term in
-                                        HStack(spacing: 8) {
-                                            Button {
-                                                searchText = term
-                                            } label: {
-                                                Label(term, systemImage: "magnifyingglass")
-                                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                            }
-                                            .accessibilityLabel("Search for \(term)")
-                                            Button {
-                                                saveSearches(savedSearches.filter { $0 != term })
-                                            } label: {
-                                                Image(systemName: "xmark")
-                                                    .frame(minWidth: 44, minHeight: 44)
-                                            }
-                                            .foregroundStyle(PocketLedgerTheme.textSecondary)
-                                            .accessibilityLabel("Remove saved search \(term)")
-                                        }
-                                        .buttonStyle(.plain)
-                                        .padding(.horizontal, 14)
-                                        .pocketGroupedSurface(cornerRadius: 18)
-                                    }
-                                }
-                            }
-                            .padding(.top, 8)
-                        } else {
-                            Text("Enter a search, then tap Save search to reuse it later.")
-                                .font(.footnote)
-                                .foregroundStyle(PocketLedgerTheme.textSecondary)
-                        }
-                    } else if results.isEmpty {
-                        ContentUnavailableView(
-                            "No results",
-                            systemImage: "magnifyingglass",
-                            description: Text("Try another name, description, category, amount, or currency.")
-                        )
-                        .padding(.top, 18)
-                    } else {
-                        if !results.accounts.isEmpty {
-                            resultsSection(title: "Accounts", count: results.accounts.count) {
-                                ForEach(results.accounts) { account in
-                                    NavigationLink {
-                                        AccountDetailView(store: store, security: security, accountID: account.id)
-                                    } label: {
-                                        SearchAccountRow(
-                                            account: account,
-                                            balance: store.balance(for: account),
-                                            areBalancesRevealed: areBalancesRevealed
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    if account.id != results.accounts.last?.id {
-                                        Divider().overlay(PocketLedgerTheme.divider)
-                                    }
-                                }
-                            }
-                        }
-
-                        if !results.categories.isEmpty {
-                            resultsSection(title: "Categories", count: results.categories.count) {
-                                ForEach(results.categories) { category in
-                                    NavigationLink {
-                                        TransactionsView(
-                                            store: store,
-                                            security: security,
-                                            initialCategoryID: category.id
-                                        )
-                                    } label: {
-                                        SearchCategoryRow(
-                                            category: category,
-                                            path: store.categoryPath(for: category.id)
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    if category.id != results.categories.last?.id {
-                                        Divider().overlay(PocketLedgerTheme.divider)
-                                    }
-                                }
-                            }
-                        }
-
-                        if !results.transactions.isEmpty {
-                            resultsSection(title: "Transactions", count: results.transactionCount) {
-                                ForEach(results.transactions) { transaction in
-                                    TransactionRow(
-                                        transaction: transaction,
-                                        store: store,
-                                        onEdit: { editingTransaction = transaction },
-                                        onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
-                                        onDelete: {
-                                            if store.deleteTransaction(id: transaction.id) {
-                                                deletedTransactionsForUndo.append(transaction)
-                                            } else {
-                                                transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
-                                            }
-                                        },
-                                        onSaveTemplate: { transactionToTemplate = transaction },
-                                        allowsActions: true,
-                                        subtitleOverride: transactionSubtitle(transaction),
-                                        usesScrollSwipeActions: true
-                                    )
-                                    if transaction.id != results.transactions.last?.id {
-                                        Divider().overlay(PocketLedgerTheme.divider)
-                                    }
-                                }
-
-                                if results.transactionCount > results.transactions.count {
-                                    NavigationLink {
-                                        TransactionsView(
-                                            store: store,
-                                            security: security,
-                                            initialSearch: query
-                                        )
-                                    } label: {
-                                        Label("See all matching transactions", systemImage: "arrow.right")
-                                            .font(.subheadline.weight(.semibold))
-                                            .foregroundStyle(PocketLedgerTheme.accent)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .padding(.vertical, 12)
-                                    }
-                                }
-                            }
-                        }
-                    }
+        List {
+            if !query.isEmpty {
+                Button {
+                    saveSearches(savedSearches + [query])
+                } label: {
+                    Label(isSearchSaved ? "Search saved" : "Save search", systemImage: isSearchSaved ? "checkmark" : "bookmark")
                 }
-                .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
-                .padding(.top, 12)
-                .padding(.bottom, 24)
+                .buttonStyle(.glass)
+                .disabled(isSearchSaved)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+
+            if query.isEmpty {
+                ContentUnavailableView(
+                    "Search your ledger",
+                    systemImage: "magnifyingglass",
+                    description: Text("Find accounts, transactions, descriptions, categories, amounts, and currencies.")
+                )
+                .padding(.top, 18)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+                if !savedSearches.isEmpty {
+                    Section {
+                        ForEach(Array(savedSearches.enumerated()), id: \.offset) { item in
+                            let index = item.offset
+                            let term = item.element
+                            HStack(spacing: 8) {
+                                Button {
+                                    searchText = term
+                                } label: {
+                                    Label(term, systemImage: "magnifyingglass")
+                                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                }
+                                .accessibilityLabel("Search for \(term)")
+                                Button {
+                                    saveSearches(savedSearches.filter { $0 != term })
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .frame(minWidth: 44, minHeight: 44)
+                                }
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                .accessibilityLabel("Remove saved search \(term)")
+                            }
+                            .buttonStyle(.plain)
+                            .pocketGroupedListRow(index: index, count: savedSearches.count)
+                        }
+                    } header: {
+                        resultsSectionHeader(title: "Saved searches")
+                    }
+                    .listSectionSeparator(.hidden)
+                } else {
+                    Text("Enter a search, then tap Save search to reuse it later.")
+                        .font(.footnote)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+            } else if results.isEmpty {
+                ContentUnavailableView(
+                    "No results",
+                    systemImage: "magnifyingglass",
+                    description: Text("Try another name, description, category, amount, or currency.")
+                )
+                .padding(.top, 18)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            } else {
+                if !results.accounts.isEmpty {
+                    Section {
+                        ForEach(Array(results.accounts.enumerated()), id: \.element.id) { item in
+                            let index = item.offset
+                            let account = item.element
+                            NavigationLink {
+                                AccountDetailView(store: store, security: security, accountID: account.id)
+                            } label: {
+                                SearchAccountRow(
+                                    account: account,
+                                    balance: store.balance(for: account),
+                                    areBalancesRevealed: areBalancesRevealed
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .pocketGroupedListRow(index: index, count: results.accounts.count)
+                        }
+                    } header: {
+                        resultsSectionHeader(title: "Accounts", count: results.accounts.count)
+                    }
+                    .listSectionSeparator(.hidden)
+                }
+
+                if !results.categories.isEmpty {
+                    Section {
+                        ForEach(Array(results.categories.enumerated()), id: \.element.id) { item in
+                            let index = item.offset
+                            let category = item.element
+                            NavigationLink {
+                                TransactionsView(
+                                    store: store,
+                                    security: security,
+                                    initialCategoryID: category.id
+                                )
+                            } label: {
+                                SearchCategoryRow(
+                                    category: category,
+                                    path: store.categoryPath(for: category.id)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .pocketGroupedListRow(index: index, count: results.categories.count)
+                        }
+                    } header: {
+                        resultsSectionHeader(title: "Categories", count: results.categories.count)
+                    }
+                    .listSectionSeparator(.hidden)
+                }
+
+                if !results.transactions.isEmpty {
+                    let hasMoreTransactions = results.transactionCount > results.transactions.count
+                    let transactionRowCount = results.transactions.count + (hasMoreTransactions ? 1 : 0)
+                    Section {
+                        ForEach(Array(results.transactions.enumerated()), id: \.element.id) { item in
+                            let index = item.offset
+                            let transaction = item.element
+                            TransactionRow(
+                                transaction: transaction,
+                                store: store,
+                                onEdit: { editingTransaction = transaction },
+                                onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
+                                onDelete: {
+                                    if store.deleteTransaction(id: transaction.id) {
+                                        deletedTransactionsForUndo.append(transaction)
+                                    } else {
+                                        transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
+                                    }
+                                },
+                                onSaveTemplate: { transactionToTemplate = transaction },
+                                allowsActions: true,
+                                subtitleOverride: transactionSubtitle(transaction)
+                            )
+                            .pocketGroupedListRow(index: index, count: transactionRowCount)
+                        }
+
+                        if hasMoreTransactions {
+                            NavigationLink {
+                                TransactionsView(
+                                    store: store,
+                                    security: security,
+                                    initialSearch: query
+                                )
+                            } label: {
+                                Label("See all matching transactions", systemImage: "arrow.right")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(PocketLedgerTheme.accent)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.vertical, 12)
+                            }
+                            .buttonStyle(.plain)
+                            .pocketGroupedListRow(index: results.transactions.count, count: transactionRowCount)
+                        }
+                    } header: {
+                        resultsSectionHeader(title: "Transactions", count: results.transactionCount)
+                    }
+                    .listSectionSeparator(.hidden)
+                }
             }
         }
-        .pocketSwipeActionsContainer()
+        .listStyle(.plain)
+        .listSectionSpacing(16)
+        .scrollContentBackground(.hidden)
+        .scrollIndicators(.hidden)
         .pocketScreen()
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack {
+                Spacer()
+                BalanceVisibilityControl(
+                    security: security,
+                    isRevealed: $areBalancesRevealed,
+                    showsTitle: true
+                )
+                .padding(.horizontal, 12)
+                .background {
+                    Capsule()
+                        .fill(PocketLedgerTheme.surface)
+                        .overlay {
+                            Capsule().stroke(PocketLedgerTheme.divider.opacity(0.65), lineWidth: 0.75)
+                        }
+                }
+                .accessibilityIdentifier("balance-visibility-control")
+            }
+            .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity)
+            .background(PocketLedgerTheme.background)
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !deletedTransactionsForUndo.isEmpty {
                 TransactionUndoBanner(
@@ -327,29 +367,22 @@ struct GlobalSearchView: View {
         }
     }
 
-    private func resultsSection<Content: View>(
-        title: String,
-        count: Int,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack {
-                Text(title)
-                    .font(.title3.weight(.bold))
-                Spacer()
+    private func resultsSectionHeader(title: String, count: Int? = nil) -> some View {
+        HStack {
+            Text(title)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(PocketLedgerTheme.textPrimary)
+            Spacer()
+            if let count {
                 Text("\(count)")
                     .font(.caption.weight(.semibold).monospacedDigit())
                     .foregroundStyle(PocketLedgerTheme.textTertiary)
             }
-
-            LazyVStack(spacing: 0, content: content)
-                .padding(.horizontal, 14)
-                .pocketGroupedSurface(cornerRadius: 18)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18)
-                        .stroke(PocketLedgerTheme.divider, lineWidth: 1)
-                }
         }
+        .textCase(nil)
+        .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
     }
 
     private func refreshResults(for query: String) async {

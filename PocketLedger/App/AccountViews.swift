@@ -243,6 +243,7 @@ struct AccountDetailView: View {
                             TransactionRow(
                                 transaction: transaction,
                                 store: store,
+                                security: security,
                                 onEdit: { editingTransaction = transaction },
                                 onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
                                 onDelete: {

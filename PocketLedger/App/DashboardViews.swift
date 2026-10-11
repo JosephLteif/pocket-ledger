@@ -1206,6 +1206,7 @@ struct DashboardView: View {
                     TransactionRow(
                         transaction: transaction,
                         store: store,
+                        security: security,
                         onEdit: { presentedSheet = .transaction(transaction) },
                         onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
                         onDelete: {

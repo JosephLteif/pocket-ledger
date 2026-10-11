@@ -624,6 +624,7 @@ struct TransactionsView: View {
         TransactionRow(
             transaction: transaction,
             store: store,
+            security: security,
             onEdit: {
                 if isSelectingTransactions {
                     toggleSelection(for: transaction)
@@ -1021,6 +1022,7 @@ extension View {
 struct TransactionRow: View {
     let transaction: LedgerTransaction
     @ObservedObject var store: LedgerStore
+    let security: AppSecurityService
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @Environment(\.layoutDirection) private var layoutDirection
     @State private var isShowingDeleteConfirmation = false
@@ -1047,6 +1049,7 @@ struct TransactionRow: View {
     init(
         transaction: LedgerTransaction,
         store: LedgerStore,
+        security: AppSecurityService,
         onEdit: @escaping () -> Void,
         onDuplicate: @escaping () -> Void,
         onDelete: @escaping () -> Void,
@@ -1065,6 +1068,7 @@ struct TransactionRow: View {
     ) {
         self.transaction = transaction
         self.store = store
+        self.security = security
         self.onEdit = onEdit
         self.onDuplicate = onDuplicate
         self.onDelete = onDelete

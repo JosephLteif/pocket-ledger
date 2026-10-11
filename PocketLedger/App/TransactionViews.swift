@@ -451,6 +451,7 @@ struct TransactionsView: View {
                     .accessibilityIdentifier("select-transactions")
                 }
             }
+            BalanceVisibilityToolbarItem(security: security)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !deletedTransactionsForUndo.isEmpty {
@@ -1192,7 +1193,12 @@ struct TransactionRow: View {
         .sheet(isPresented: $isShowingLoanDetails) {
             if let loanID = transaction.loanID {
                 NavigationStack {
-                    LoanDetailView(store: store, loanID: loanID, showsCloseButton: true)
+                    LoanDetailView(
+                        store: store,
+                        security: security,
+                        loanID: loanID,
+                        showsCloseButton: true
+                    )
                 }
             }
         }

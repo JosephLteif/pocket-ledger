@@ -138,6 +138,7 @@ struct ScheduledTransactionsView: View {
                 }
                 .accessibilityLabel("Add scheduled transaction")
             }
+            BalanceVisibilityToolbarItem(security: security)
         }
         .background {
             Color.clear.sheet(isPresented: $isShowingProUpgrade) {

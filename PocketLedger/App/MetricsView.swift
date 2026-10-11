@@ -214,6 +214,7 @@ struct MetricsView: View {
                     .accessibilityLabel("Unlock PDF reports with Pro")
                 }
             }
+            BalanceVisibilityToolbarItem(security: security)
         }
         .onAppear(perform: refreshSnapshot)
         .onChange(of: period) { _, _ in refreshSnapshot() }
@@ -1044,6 +1045,9 @@ private struct CategoryMetricsDetailView: View {
         .transactionActionAlert(message: $transactionDeletionError)
         .navigationTitle(categoryTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            BalanceVisibilityToolbarItem(security: security)
+        }
         .navigationDestination(isPresented: $isShowingTransactionDetail) {
             if let transactionToOpenID {
                 MetricsTransactionDetailView(
@@ -1340,6 +1344,7 @@ private struct MetricsTransactionDetailView: View {
                 .disabled(transaction == nil)
                 .accessibilityIdentifier("metrics-transaction-edit")
             }
+            BalanceVisibilityToolbarItem(security: security)
         }
         .sheet(item: $editingTransaction) { transaction in
             TransactionEditor(store: store, transaction: transaction)

@@ -52,6 +52,7 @@ struct SavingsGoalsView: View {
                 }
                 .accessibilityLabel("Add savings goal")
             }
+            BalanceVisibilityToolbarItem(security: security)
         }
         .sheet(isPresented: $isPresentingEditor, onDismiss: { editingGoal = nil }) {
             SavingsGoalEditor(store: store, goal: editingGoal)

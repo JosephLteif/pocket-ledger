@@ -147,6 +147,7 @@ struct MoreView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 AddTransactionToolbar(store: store, onAction: onAddAction)
+                BalanceVisibilityToolbarItem(security: security)
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
@@ -160,9 +161,6 @@ struct MoreView: View {
             .sheet(isPresented: $isShowingSetup) {
                 SetupWizardView(store: store)
             }
-        }
-        .toolbar {
-            BalanceVisibilityToolbarItem(security: security)
         }
     }
 }
@@ -274,6 +272,7 @@ struct DashboardView: View {
                     .accessibilityHint("Choose which widgets appear and reorder them")
                     .accessibilityIdentifier("dashboard-customize")
                 }
+                BalanceVisibilityToolbarItem(security: security)
             }
             .navigationDestination(for: DashboardNavigationDestination.self) { destination in
                 switch destination {
@@ -327,9 +326,6 @@ struct DashboardView: View {
         .onChange(of: navigationPath) { oldPath, newPath in
             guard !oldPath.isEmpty, newPath.isEmpty else { return }
             onShowHome()
-        }
-        .toolbar {
-            BalanceVisibilityToolbarItem(security: security)
         }
     }
 

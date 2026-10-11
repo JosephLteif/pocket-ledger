@@ -92,7 +92,7 @@ struct LoansView: View {
                 } else {
                     ForEach(filteredLoans) { loan in
                         NavigationLink {
-                            LoanDetailView(store: store, loanID: loan.id)
+                            LoanDetailView(store: store, security: security, loanID: loan.id)
                         } label: {
                             LoanRow(
                                 loan: loan,
@@ -137,6 +137,7 @@ struct LoansView: View {
                 }
                 .accessibilityLabel("Add loan")
             }
+            BalanceVisibilityToolbarItem(security: security)
         }
         .sheet(isPresented: $isPresentingLoanEditor) {
             LoanEditor(store: store)
@@ -799,6 +800,7 @@ struct LoanEditor: View {
 @MainActor
 struct LoanDetailView: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject var security: AppSecurityService
     let loanID: UUID
     let showsCloseButton: Bool
     @Environment(\.dismiss) private var dismiss
@@ -809,8 +811,14 @@ struct LoanDetailView: View {
     @State private var errorMessage: String?
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
-    init(store: LedgerStore, loanID: UUID, showsCloseButton: Bool = false) {
+    init(
+        store: LedgerStore,
+        security: AppSecurityService,
+        loanID: UUID,
+        showsCloseButton: Bool = false
+    ) {
         _store = ObservedObject(wrappedValue: store)
+        _security = ObservedObject(wrappedValue: security)
         self.loanID = loanID
         self.showsCloseButton = showsCloseButton
     }
@@ -841,6 +849,7 @@ struct LoanDetailView: View {
                 }
                 .accessibilityLabel("Edit loan")
             }
+            BalanceVisibilityToolbarItem(security: security)
         }
         .sheet(isPresented: $isEditingLoan) {
             if let loan { LoanEditor(store: store, loan: loan) }

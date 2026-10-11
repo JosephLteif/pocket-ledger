@@ -81,6 +81,7 @@ struct BudgetsView: View {
                     .accessibilityHint("Creates a new monthly budget")
                 }
             }
+            BalanceVisibilityToolbarItem(security: security)
         }
         .sheet(isPresented: $isPresentingEditor, onDismiss: { editingBudget = nil }) {
             BudgetEditor(store: store, budget: editingBudget)

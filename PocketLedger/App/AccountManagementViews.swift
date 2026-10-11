@@ -106,6 +106,7 @@ struct AccountsView: View {
                     .accessibilityLabel("Add account")
                 }
             }
+            BalanceVisibilityToolbarItem(security: security)
         }
         .background {
             Color.clear.sheet(isPresented: $isShowingProUpgrade) {

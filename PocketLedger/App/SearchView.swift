@@ -313,29 +313,6 @@ struct GlobalSearchView: View {
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
         .pocketScreen()
-        .safeAreaInset(edge: .top, spacing: 0) {
-            HStack {
-                Spacer()
-                BalanceVisibilityControl(
-                    security: security,
-                    isRevealed: $areBalancesRevealed,
-                    showsTitle: true
-                )
-                .padding(.horizontal, 12)
-                .background {
-                    Capsule()
-                        .fill(PocketLedgerTheme.surface)
-                        .overlay {
-                            Capsule().stroke(PocketLedgerTheme.divider.opacity(0.65), lineWidth: 0.75)
-                        }
-                }
-                .accessibilityIdentifier("balance-visibility-control")
-            }
-            .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
-            .padding(.vertical, 4)
-            .frame(maxWidth: .infinity)
-            .background(PocketLedgerTheme.background)
-        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !deletedTransactionsForUndo.isEmpty {
                 TransactionUndoBanner(

@@ -196,6 +196,7 @@ struct ContentView: View {
                         .searchFocused($isSearchFieldFocused)
                         .toolbar {
                             AddTransactionToolbar(store: store, onAction: { addAction = $0 })
+                            BalanceVisibilityToolbarItem(security: security)
                         }
                 }
             }
@@ -214,9 +215,6 @@ struct ContentView: View {
                         security: security
                     )
                 }
-                .toolbar {
-                    BalanceVisibilityToolbarItem(security: security)
-                }
             }
             .accessibilityIdentifier("tab-transactions")
 
@@ -231,9 +229,6 @@ struct ContentView: View {
                         security: security,
                         onAddAction: { addAction = $0 }
                     )
-                }
-                .toolbar {
-                    BalanceVisibilityToolbarItem(security: security)
                 }
             }
             .accessibilityIdentifier("tab-accounts")

@@ -136,6 +136,7 @@ struct AccountDetailView: View {
                         .accessibilityLabel("Edit account")
                     }
                 }
+                BalanceVisibilityToolbarItem(security: security)
             }
             .sheet(isPresented: $isPresentingAccountEditor) {
                 if let account {

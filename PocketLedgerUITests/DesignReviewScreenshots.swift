@@ -2,6 +2,27 @@ import XCTest
 
 final class DesignReviewScreenshots: XCTestCase {
     @MainActor
+    func testTransactionAmountsStayHiddenInEditor() {
+        let app = XCUIApplication()
+        app.launchArguments.append("-DesignReviewMode")
+        app.launch()
+        selectTab("tab-transactions", title: "Transactions", app: app)
+
+        let groceries = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Weekly groceries,")
+        ).firstMatch
+        XCTAssertTrue(groceries.waitForExistence(timeout: 10))
+        groceries.press(forDuration: 1)
+        app.buttons["Edit"].tap()
+
+        XCTAssertTrue(app.staticTexts["Reveal amounts to view or edit this transaction’s financial details."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Hidden amount"].exists)
+        XCTAssertFalse(app.textFields["Amount"].exists)
+        XCTAssertTrue(app.buttons["balance-visibility-control"].exists)
+        app.buttons["Cancel"].tap()
+    }
+
+    @MainActor
     func testCapturePrimaryNavigationAndEditors() {
         let app = XCUIApplication()
         app.launchArguments.append("-DesignReviewMode")

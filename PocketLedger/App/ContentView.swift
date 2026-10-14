@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var isShowingSetup = false
     @State private var isShowingImportWizardUITest = false
     @State private var isUnlocked = false
+    @State private var needsForegroundRefresh = true
     @SceneStorage("pocketLedger.selectedTab") private var selectedTabRawValue = AppTab.overview.rawValue
     @AppStorage(SetupWizardView.completedKey) private var setupCompleted = false
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
@@ -34,8 +35,11 @@ struct ContentView: View {
                     .zIndex(1)
             }
         }
+        .environmentObject(security)
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                guard needsForegroundRefresh else { return }
+                needsForegroundRefresh = false
                 security.refresh()
                 store.reload()
                 Task { await proAccess.refreshEntitlements() }
@@ -54,6 +58,7 @@ struct ContentView: View {
                     isUnlocked = false
                 }
             } else if phase == .background {
+                needsForegroundRefresh = true
                 areBalancesRevealed = false
                 if security.isPasscodeEnabled {
                     isUnlocked = false
@@ -73,8 +78,8 @@ struct ContentView: View {
             openPendingVisualBillScan()
         }
         .task {
-            await proAccess.refreshEntitlements()
             areBalancesRevealed = false
+            await proAccess.refreshEntitlements()
             openPendingIntentSearch()
             if ProcessInfo.processInfo.arguments.contains("-ImportWizardUITest") {
                 isShowingImportWizardUITest = true

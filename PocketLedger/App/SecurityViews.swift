@@ -504,7 +504,12 @@ struct AppLockView: View {
     }
 
     private func requestBiometricUnlockIfPossible() {
-        guard scenePhase == .active, !isUnlocked, !isAuthenticating else { return }
+        guard scenePhase == .active else {
+            shouldRetryBiometricsOnActivation = true
+            return
+        }
+        guard !isUnlocked, !isAuthenticating else { return }
+        shouldRetryBiometricsOnActivation = false
         Task {
             await unlockWithBiometrics()
         }

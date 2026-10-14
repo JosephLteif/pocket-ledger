@@ -86,6 +86,7 @@ private struct MovementLineEditor: View {
     let amountPlaceholder: String
     let allowsArchivedAccount: Bool
     var focusAmountOnAppear = false
+    var isAmountRevealed = true
 
     var body: some View {
         let availableCurrencies = LedgerCurrency.allCases.filter { currency in
@@ -107,7 +108,8 @@ private struct MovementLineEditor: View {
                     }
                 ),
                 selectableCurrencies: availableCurrencies,
-                focusOnAppear: focusAmountOnAppear
+                focusOnAppear: focusAmountOnAppear,
+                isRevealed: isAmountRevealed
             )
             if !line.amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                let amount = Money.parse(line.amount, currency: line.currency), amount.minorUnits <= 0 {
@@ -183,6 +185,8 @@ struct TransactionEditor: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject private var proAccess = ProEntitlementStore.shared
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var security: AppSecurityService
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @State private var note = ""
     @State private var templateName = ""
     @State private var date = Date.now
@@ -414,6 +418,13 @@ struct TransactionEditor: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !canEditAmounts {
+                    Section {
+                        Text("Reveal amounts to view or edit this transaction’s financial details.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Section {
                     Picker("Type", selection: transactionEditorTypeBinding) {
                         ForEach(availableTransactionEditorTypes) { editorType in
@@ -421,6 +432,7 @@ struct TransactionEditor: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .disabled(!canEditAmounts)
                 } header: {
                     Text("Transaction type")
                 }
@@ -459,6 +471,7 @@ struct TransactionEditor: View {
 
                 if kind == .expense {
                     expensePaymentsSection
+                        .disabled(!canEditAmounts)
                     detailsSection
                     expenseDateSection
                     moreDetailsSection
@@ -467,8 +480,12 @@ struct TransactionEditor: View {
                     detailsSection
                     attachmentSection
                     outgoingMovementSection
+                        .disabled(!canEditAmounts)
                     receivingMovementSection
-                    exchangeRateSection
+                        .disabled(!canEditAmounts)
+                    if canEditAmounts {
+                        exchangeRateSection
+                    }
                 }
 
             }
@@ -525,6 +542,7 @@ struct TransactionEditor: View {
             .navigationBarTitleDisplayMode(.inline)
             .sensoryFeedback(.success, trigger: saveFeedbackTrigger)
             .toolbar {
+                BalanceVisibilityToolbarItem(security: security)
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: cancel)
                 }
@@ -725,7 +743,8 @@ struct TransactionEditor: View {
                             line: $outflows[index],
                             amountPlaceholder: index == 0 ? "Amount" : "Amount for this payment",
                             allowsArchivedAccount: allowsArchivedMovementAccounts,
-                            focusAmountOnAppear: index == 0 && outflows[index].amount.isEmpty
+                            focusAmountOnAppear: index == 0 && outflows[index].amount.isEmpty,
+                            isAmountRevealed: canEditAmounts
                         )
                     }
                     .padding(.vertical, 4)
@@ -764,13 +783,15 @@ struct TransactionEditor: View {
                     expenseScheduleDetails
                     Divider()
                     expenseBillDetails
+                        .disabled(!canEditAmounts)
                     Divider()
                     expenseReturnedMoneyDetails
+                        .disabled(!canEditAmounts)
                     if !attachments.isEmpty || initialAttachmentFileName != nil {
                         Divider()
                         expenseAttachmentDetails
                     }
-                    if selectedCurrencies.count > 1 {
+                    if canEditAmounts && selectedCurrencies.count > 1 {
                         Divider()
                         exchangeRateDetails
                     }
@@ -831,7 +852,7 @@ struct TransactionEditor: View {
             Text("Bill total")
                 .font(.subheadline.weight(.semibold))
 
-            CurrencyInputField("Total due (optional)", text: $amountDue, currency: $dueCurrency)
+            CurrencyInputField("Total due (optional)", text: $amountDue, currency: $dueCurrency, isRevealed: canEditAmounts)
         }
     }
 
@@ -859,7 +880,8 @@ struct TransactionEditor: View {
                             store: store,
                             line: $inflows[index],
                             amountPlaceholder: "Amount returned",
-                            allowsArchivedAccount: allowsArchivedMovementAccounts
+                            allowsArchivedAccount: allowsArchivedMovementAccounts,
+                            isAmountRevealed: canEditAmounts
                         )
                     }
                     .padding(12)
@@ -884,12 +906,13 @@ struct TransactionEditor: View {
                 CurrencyInputField(
                     "Expected change (optional)",
                     text: $requestedChange,
-                    currency: inflows[0].currency
+                    currency: inflows[0].currency,
+                    isRevealed: canEditAmounts
                 )
                 Text("Enter how much change you expected. Pocket Ledger compares it with the returned money above.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                if let preview = shortfallPreview {
+                if canEditAmounts, let preview = shortfallPreview {
                     Text(preview)
                         .font(.footnote)
                         .foregroundStyle(PocketLedgerTheme.warning)
@@ -1013,6 +1036,11 @@ struct TransactionEditor: View {
         editingTemplateID != nil || isCreatingTemplate
     }
 
+    private var canEditAmounts: Bool {
+        areBalancesRevealed || !(hasPrefilledTransactionContent
+            || editingScheduleID != nil || editingTemplateID != nil)
+    }
+
     private var monthlyScheduleDescription: String {
         if monthlyRule == .lastDayOfMonth {
             return "This runs on the last calendar day of each month."
@@ -1029,7 +1057,8 @@ struct TransactionEditor: View {
                         store: store,
                         line: $line,
                         amountPlaceholder: kind == .transfer ? "Amount sent" : "Amount leaving account",
-                        allowsArchivedAccount: allowsArchivedMovementAccounts
+                        allowsArchivedAccount: allowsArchivedMovementAccounts,
+                        isAmountRevealed: canEditAmounts
                     )
                 }
                 .onDelete { outflows.remove(atOffsets: $0) }
@@ -1066,7 +1095,8 @@ struct TransactionEditor: View {
                         store: store,
                         line: $line,
                         amountPlaceholder: kind == .transfer ? "Amount received" : "Amount entering account",
-                        allowsArchivedAccount: allowsArchivedMovementAccounts
+                        allowsArchivedAccount: allowsArchivedMovementAccounts,
+                        isAmountRevealed: canEditAmounts
                     )
                 }
                 .onDelete { inflows.remove(atOffsets: $0) }
@@ -1081,9 +1111,10 @@ struct TransactionEditor: View {
                     CurrencyInputField(
                         "Expected change (optional)",
                         text: $requestedChange,
-                        currency: inflows[0].currency
+                        currency: inflows[0].currency,
+                        isRevealed: canEditAmounts
                     )
-                    if let preview = shortfallPreview {
+                    if canEditAmounts, let preview = shortfallPreview {
                         Text(preview)
                             .font(.footnote)
                             .foregroundStyle(PocketLedgerTheme.warning)

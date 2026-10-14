@@ -282,6 +282,7 @@ struct ProtectedText: View {
     var body: some View {
         Text(value)
             .blur(radius: isRevealed ? 0 : 8)
+            .animation(nil, value: isRevealed)
             .privacySensitive()
             .accessibilityLabel(isRevealed ? value : hiddenAccessibilityLabel)
     }
@@ -436,18 +437,21 @@ struct CurrencyInputField: View {
     @Binding private var currency: LedgerCurrency
     private let selectableCurrencies: [LedgerCurrency]
     private let focusOnAppear: Bool
+    private let isRevealed: Bool
     @FocusState private var isFocused: Bool
 
     init(
         _ title: String,
         text: Binding<String>,
-        currency: LedgerCurrency
+        currency: LedgerCurrency,
+        isRevealed: Bool = true
     ) {
         self.title = title
         _text = text
         _currency = .constant(currency)
         selectableCurrencies = [currency]
         focusOnAppear = false
+        self.isRevealed = isRevealed
     }
 
     init(
@@ -455,7 +459,8 @@ struct CurrencyInputField: View {
         text: Binding<String>,
         currency: Binding<LedgerCurrency>,
         selectableCurrencies: [LedgerCurrency] = LedgerCurrency.allCases,
-        focusOnAppear: Bool = false
+        focusOnAppear: Bool = false,
+        isRevealed: Bool = true
     ) {
         self.title = title
         _text = text
@@ -464,14 +469,21 @@ struct CurrencyInputField: View {
             selectableCurrencies.contains($0) || $0 == currency.wrappedValue
         }
         self.focusOnAppear = focusOnAppear
+        self.isRevealed = isRevealed
     }
 
     var body: some View {
         HStack(spacing: 8) {
-            TextField(title, text: $text)
-                .keyboardType(.decimalPad)
-                .monospacedDigit()
-                .focused($isFocused)
+            if isRevealed {
+                TextField(title, text: $text)
+                    .keyboardType(.decimalPad)
+                    .monospacedDigit()
+                    .focused($isFocused)
+            } else {
+                Text("••••")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityLabel("Hidden amount")
+            }
 
             if selectableCurrencies.count > 1 {
                 CurrencySelectionMenu(currency: $currency, currencies: selectableCurrencies)
@@ -481,9 +493,18 @@ struct CurrencyInputField: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .disabled(!isRevealed)
+        .privacySensitive()
         .onAppear {
             formatText()
-            if focusOnAppear { isFocused = true }
+            if focusOnAppear && isRevealed { isFocused = true }
+        }
+        .onChange(of: isRevealed) { _, revealed in
+            if revealed {
+                formatText()
+            } else {
+                isFocused = false
+            }
         }
         .onChange(of: isFocused) { _, focused in
             if !focused {
@@ -498,6 +519,7 @@ struct CurrencyInputField: View {
     }
 
     private func formatText() {
+        guard isRevealed else { return }
         let formatted = currency.formattedInput(text)
         guard formatted != text else { return }
         text = formatted

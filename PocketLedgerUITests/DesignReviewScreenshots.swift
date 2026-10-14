@@ -2,6 +2,43 @@ import XCTest
 
 final class DesignReviewScreenshots: XCTestCase {
     @MainActor
+    func testTemplateSwipesAndHiddenAmounts() {
+        let app = XCUIApplication()
+        app.launchArguments.append("-DesignReviewMode")
+        app.launch()
+        selectTab("tab-more", title: "More", app: app)
+        openMoreDestination("Templates", navigationTitle: "Templates", app: app)
+
+        let template = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Weekly groceries,")
+        ).firstMatch
+        XCTAssertTrue(template.waitForExistence(timeout: 10))
+        XCTAssertTrue(template.label.contains("Hidden amount"))
+        XCTAssertTrue(app.buttons["balance-visibility-control"].exists)
+
+        template.swipeLeft()
+        app.buttons["Edit"].tap()
+        XCTAssertTrue(app.navigationBars["Edit template"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Hidden amount"].exists)
+        XCTAssertFalse(app.textFields["Amount"].exists)
+        app.buttons["Cancel"].tap()
+
+        XCTAssertTrue(template.waitForExistence(timeout: 10))
+        template.swipeRight()
+        app.buttons["Use"].tap()
+        XCTAssertTrue(app.navigationBars["New transaction"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Hidden amount"].exists)
+        app.buttons["Cancel"].tap()
+
+        XCTAssertTrue(template.waitForExistence(timeout: 10))
+        template.swipeLeft()
+        app.buttons["Delete"].tap()
+        XCTAssertTrue(app.staticTexts["Delete template?"].waitForExistence(timeout: 10))
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(template.exists)
+    }
+
+    @MainActor
     func testTransactionAmountsStayHiddenInEditor() {
         let app = XCUIApplication()
         app.launchArguments.append("-DesignReviewMode")

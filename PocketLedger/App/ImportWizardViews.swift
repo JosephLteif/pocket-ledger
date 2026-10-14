@@ -1033,7 +1033,7 @@ private struct ImportWizardOrganizeStep: View {
                     Image(systemName: draft.selectedCategoryIDs.contains(category.id) ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(draft.selectedCategoryIDs.contains(category.id) ? Color.accentColor : Color.secondary)
                 } else {
-                    Image(systemName: category.systemImage)
+                    CategorySymbol(systemImage: category.systemImage)
                         .foregroundStyle(.tint)
                 }
                 VStack(alignment: .leading, spacing: 3) {

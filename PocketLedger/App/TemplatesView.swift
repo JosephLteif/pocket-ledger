@@ -3,54 +3,61 @@ import SwiftUI
 @MainActor
 struct TemplatesView: View {
     @ObservedObject var store: LedgerStore
+    @EnvironmentObject private var security: AppSecurityService
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @State private var templateToUse: LedgerTemplate?
     @State private var templateToEdit: LedgerTemplate?
     @State private var templateToDelete: LedgerTemplate?
     @State private var isCreatingTemplate = false
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Reuse repeat expenses, income, and transfers")
-                            .font(.subheadline)
-                            .foregroundStyle(PocketLedgerTheme.textSecondary)
-                    }
+        List {
+            Text("Reuse repeat expenses, income, and transfers")
+                .font(.subheadline)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
 
-                    if store.data.templates.isEmpty {
-                        VStack(spacing: 10) {
-                            Image(systemName: "rectangle.stack")
-                                .font(.title2)
-                                .foregroundStyle(PocketLedgerTheme.textTertiary)
-                            Text("No templates yet")
-                                .font(.headline)
-                            Text("Save a transaction as a template from the transaction history context menu.")
-                                .font(.subheadline)
-                                .foregroundStyle(PocketLedgerTheme.textSecondary)
-                                .multilineTextAlignment(.center)
-                            Button("Create template", systemImage: "plus") {
-                                isCreatingTemplate = true
-                            }
-                            .buttonStyle(.glassProminent)
-                            .tint(PocketLedgerTheme.accent)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 42)
-                        .padding(.horizontal, 20)
-                        .pocketGroupedSurface(cornerRadius: 20)
-                    } else {
-                        ForEach(store.data.templates) { template in
-                            templateCard(template)
-                        }
+            if store.data.templates.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "rectangle.stack")
+                        .font(.title2)
+                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+                    Text("No templates yet")
+                        .font(.headline)
+                    Text("Save a transaction as a template from the transaction history context menu.")
+                        .font(.subheadline)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        .multilineTextAlignment(.center)
+                    Button("Create template", systemImage: "plus") {
+                        isCreatingTemplate = true
                     }
+                    .buttonStyle(.glassProminent)
+                    .tint(PocketLedgerTheme.accent)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 42)
+                .padding(.horizontal, 20)
+                .pocketGroupedSurface(cornerRadius: 20)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            } else {
+                ForEach(Array(store.data.templates.enumerated()), id: \.element.id) { entry in
+                    templateRow(entry.element)
+                        .pocketGroupedListRow(index: entry.offset, count: store.data.templates.count)
+                }
             }
-            .padding(16)
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .scrollIndicators(.hidden)
         .pocketScreen()
         .navigationTitle("Templates")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
+            BalanceVisibilityToolbarItem(security: security)
             ToolbarItem(placement: .primaryAction) {
                 Button { isCreatingTemplate = true } label: {
                     Image(systemName: "plus")
@@ -81,43 +88,72 @@ struct TemplatesView: View {
         }
     }
 
-    private func templateCard(_ template: LedgerTemplate) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+    private func templateRow(_ template: LedgerTemplate) -> some View {
+        let amount = store.transactionSummary(template.transactionTemplate)
+        let subtitle = template.kind.displayName
+            + (template.kind == .expense ? " · " + store.categoryPath(for: template.categoryID) : "")
+        let tint: Color = switch template.kind {
+        case .expense: PocketLedgerTheme.warning
+        case .income: PocketLedgerTheme.income
+        case .transfer: PocketLedgerTheme.positive
+        }
+        let icon = template.categoryID != nil
+            ? store.ledgerIndex.categorySystemImage(for: template.categoryID)
+            : template.kind == .expense ? "arrow.up.right"
+                : template.kind == .income ? "arrow.down.left" : "arrow.left.arrow.right"
+
+        return Button {
+            templateToUse = template
+        } label: {
+            HStack(spacing: 12) {
+                CategorySymbol(systemImage: icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 38, height: 38)
+                    .background(tint.opacity(0.12), in: Circle())
                 VStack(alignment: .leading, spacing: 3) {
                     Text(template.name)
-                        .font(.headline)
-                    Text(store.transactionSummary(template.transactionTemplate))
-                        .font(.subheadline.weight(.semibold).monospacedDigit())
-                    Text(template.kind.displayName + (template.kind == .expense ? " · " + store.categoryPath(for: template.categoryID) : ""))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(PocketLedgerTheme.textPrimary)
+                        .lineLimit(2)
+                    Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        .lineLimit(1)
                 }
-                Spacer()
-                Image(systemName: "rectangle.stack")
-                    .foregroundStyle(PocketLedgerTheme.accent)
+                Spacer(minLength: 8)
+                ProtectedAmountText(value: amount, isRevealed: areBalancesRevealed)
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(tint)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
             }
-
-            HStack(spacing: 8) {
-                Button("Edit", systemImage: "pencil") { templateToEdit = template }
-                    .buttonStyle(.bordered)
-                Button("Use", systemImage: "arrow.turn.down.right") { templateToUse = template }
-                    .buttonStyle(.glassProminent)
-                    .tint(PocketLedgerTheme.accent)
-                    .frame(maxWidth: .infinity)
-                Button(role: .destructive) { templateToDelete = template } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel("Delete template")
+            .padding(.vertical, 11)
+            .frame(minHeight: 72)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(template.name), \(subtitle), \(areBalancesRevealed ? amount : "Hidden amount")")
+        .accessibilityHint("Creates a transaction from this template")
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            PocketSwipeActionButton(title: "Delete", systemImage: "trash", tint: .red, role: .destructive) {
+                templateToDelete = template
+            }
+            PocketSwipeActionButton(title: "Edit", systemImage: "pencil", tint: PocketLedgerTheme.warning) {
+                templateToEdit = template
             }
         }
-        .padding(16)
-        .pocketGroupedSurface(cornerRadius: 20)
-        .overlay {
-            RoundedRectangle(cornerRadius: 20)
-                .stroke(PocketLedgerTheme.divider, lineWidth: 1)
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            PocketSwipeActionButton(title: "Use", systemImage: "arrow.turn.down.right", tint: PocketLedgerTheme.accent) {
+                templateToUse = template
+            }
+        }
+        .contextMenu {
+            Button("Use", systemImage: "arrow.turn.down.right") { templateToUse = template }
+            Button("Edit", systemImage: "pencil") { templateToEdit = template }
+            Button("Delete", systemImage: "trash", role: .destructive) { templateToDelete = template }
         }
     }
 }
@@ -125,6 +161,8 @@ struct TemplatesView: View {
 @MainActor
 struct TemplateNameEditor: View {
     @ObservedObject var store: LedgerStore
+    @EnvironmentObject private var security: AppSecurityService
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @Environment(\.dismiss) private var dismiss
     let transaction: LedgerTransaction
     @State private var name: String
@@ -140,7 +178,7 @@ struct TemplateNameEditor: View {
             Form {
                 Section("Template") {
                     TextField("Template name", text: $name)
-                    Text(store.transactionSummary(transaction))
+                    ProtectedAmountText(value: store.transactionSummary(transaction), isRevealed: areBalancesRevealed)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -148,6 +186,7 @@ struct TemplateNameEditor: View {
             .pocketListSurface()
             .navigationTitle("Save template")
             .toolbar {
+                BalanceVisibilityToolbarItem(security: security)
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }

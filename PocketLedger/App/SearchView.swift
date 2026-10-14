@@ -456,7 +456,7 @@ private struct SearchCategoryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: category.systemImage)
+            CategorySymbol(systemImage: category.systemImage)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(PocketLedgerTheme.accent)
                 .frame(width: 36, height: 36)

@@ -662,8 +662,14 @@ struct TransactionsView: View {
                     applyBulkCategory(nil)
                 }
                 ForEach(store.activeCategories) { category in
-                    Button(store.categoryPath(for: category.id), systemImage: category.systemImage) {
+                    Button {
                         applyBulkCategory(category.id)
+                    } label: {
+                        Label {
+                            Text(store.categoryPath(for: category.id))
+                        } icon: {
+                            CategorySymbol(systemImage: category.systemImage)
+                        }
                     }
                 }
             } label: {
@@ -1320,7 +1326,7 @@ struct TransactionRow: View {
                     .accessibilityHidden(true)
             }
 
-            Image(systemName: iconName)
+            CategorySymbol(systemImage: iconName)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(accentColor)
                 .frame(width: 38, height: 38)

@@ -88,7 +88,7 @@ struct CategorySelectionSheet: View {
 
     private func selectionRow(title: String, systemImage: String, id: UUID?) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: systemImage)
+            CategorySymbol(systemImage: systemImage)
                 .foregroundStyle(PocketLedgerTheme.accent)
                 .frame(width: 22)
             Text(title)

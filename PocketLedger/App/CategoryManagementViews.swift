@@ -45,7 +45,11 @@ struct CategoriesView: View {
                             .font(.title3.weight(.bold))
                         ForEach(archivedCategories) { category in
                             HStack {
-                                Label(category.name, systemImage: category.systemImage)
+                                Label {
+                                    Text(category.name)
+                                } icon: {
+                                    CategorySymbol(systemImage: category.systemImage)
+                                }
                                 Spacer()
                                 Button("Restore") {
                                     _ = store.setCategoryArchived(categoryID: category.id, isArchived: false)
@@ -141,11 +145,15 @@ private struct CategorySubcategoriesView: View {
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
 
                 if subcategories.isEmpty {
-                    ContentUnavailableView(
-                        "No subcategories",
-                        systemImage: parent.systemImage,
-                        description: Text("Add subcategories to make expenses easier to organize.")
-                    )
+                    ContentUnavailableView {
+                        Label {
+                            Text("No subcategories")
+                        } icon: {
+                            CategorySymbol(systemImage: parent.systemImage)
+                        }
+                    } description: {
+                        Text("Add subcategories to make expenses easier to organize.")
+                    }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
                     .pocketCard()
@@ -243,6 +251,8 @@ private struct CategoryEditor: View {
     @State private var name = ""
     @State private var parentID: UUID?
     @State private var systemImage = "tag"
+    @State private var usesEmoji = false
+    @State private var emoji = ""
     @State private var includeInTotals = true
     @State private var errorMessage: String?
     @State private var isConfirmingDiscard = false
@@ -258,7 +268,11 @@ private struct CategoryEditor: View {
         self.onSaved = onSaved
         _name = State(initialValue: category?.name ?? "")
         _parentID = State(initialValue: category?.parentID ?? initialParentID)
-        _systemImage = State(initialValue: category?.systemImage ?? "tag")
+        let icon = category?.systemImage ?? "tag"
+        let usesEmoji = LedgerCategory.isEmojiIcon(icon)
+        _systemImage = State(initialValue: usesEmoji ? "tag" : icon)
+        _usesEmoji = State(initialValue: usesEmoji)
+        _emoji = State(initialValue: usesEmoji ? icon : "")
         _includeInTotals = State(initialValue: category?.includeInTotals ?? true)
     }
 
@@ -273,15 +287,34 @@ private struct CategoryEditor: View {
                             Text(parent.name).tag(Optional(parent.id))
                         }
                     }
-                    Label("Preview", systemImage: systemImage)
-                        .font(.subheadline.weight(.medium))
-                    Picker("Icon", selection: $systemImage) {
-                        ForEach(availableSystemImages, id: \.self) { symbol in
-                            Label(symbol.replacingOccurrences(of: ".", with: " "), systemImage: symbol)
-                                .tag(symbol)
-                        }
+                    Label {
+                        Text("Preview")
+                    } icon: {
+                        CategorySymbol(systemImage: selectedIcon.isEmpty
+                            || (usesEmoji && !LedgerCategory.isEmojiIcon(selectedIcon)) ? "tag" : selectedIcon)
                     }
-                    .pickerStyle(.menu)
+                    .font(.subheadline.weight(.medium))
+                    Picker("Icon type", selection: $usesEmoji) {
+                        Text("Symbol").tag(false)
+                        Text("Emoji").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    if usesEmoji {
+                        TextField("Emoji", text: $emoji)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                        Text("Enter one emoji using the emoji keyboard, or paste it here.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Icon", selection: $systemImage) {
+                            ForEach(availableSystemImages, id: \.self) { symbol in
+                                Label(symbol.replacingOccurrences(of: ".", with: " "), systemImage: symbol)
+                                    .tag(symbol)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
                     Toggle("Include in totals and metrics", isOn: $includeInTotals)
                     Text(includeInTotals
                          ? "Expenses in this category count toward totals and metrics."
@@ -325,10 +358,14 @@ private struct CategoryEditor: View {
         Self.categorySymbols + (Self.categorySymbols.contains(systemImage) ? [] : [systemImage])
     }
 
+    private var selectedIcon: String {
+        (usesEmoji ? emoji : systemImage).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var hasUnsavedChanges: Bool {
         name != (category?.name ?? "")
             || parentID != category?.parentID
-            || systemImage != (category?.systemImage ?? "tag")
+            || selectedIcon != (category?.systemImage ?? "tag")
             || includeInTotals != (category?.includeInTotals ?? true)
     }
 
@@ -347,12 +384,15 @@ private struct CategoryEditor: View {
             return
         }
 
-        let trimmedSymbol = systemImage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !usesEmoji || LedgerCategory.isEmojiIcon(selectedIcon) else {
+            errorMessage = "Enter one emoji for the category icon."
+            return
+        }
         let value = LedgerCategory(
             id: category?.id ?? UUID(),
             name: trimmedName,
             parentID: parentID,
-            systemImage: trimmedSymbol.isEmpty ? "tag" : trimmedSymbol,
+            systemImage: selectedIcon.isEmpty ? "tag" : selectedIcon,
             includeInTotals: includeInTotals,
             isArchived: category?.isArchived ?? false
         )

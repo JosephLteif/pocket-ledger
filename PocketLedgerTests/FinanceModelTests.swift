@@ -4,6 +4,23 @@ import CryptoKit
 @testable import PocketLedger
 
 final class FinanceModelTests: XCTestCase {
+    func testCategoryEmojiIconsRoundTrip() throws {
+        for emoji in ["🍕", "❤️", "👍🏽", "👨‍👩‍👧‍👦", "🇱🇧", "1️⃣"] {
+            XCTAssertTrue(LedgerCategory.isEmojiIcon(emoji), emoji)
+            let category = LedgerCategory(name: "Custom", systemImage: emoji)
+            let encoded = try JSONEncoder().encode(category)
+            XCTAssertEqual(try JSONDecoder().decode(LedgerCategory.self, from: encoded), category)
+        }
+        for symbol in ["tag", "fork.knife", "", "1", "a", "🍕🍔", "a\u{20E3}"] {
+            XCTAssertFalse(LedgerCategory.isEmojiIcon(symbol), symbol)
+        }
+        let category = LedgerCategory(name: "Original", systemImage: "fork.knife")
+        XCTAssertEqual(
+            try JSONDecoder().decode(LedgerCategory.self, from: JSONEncoder().encode(category)),
+            category
+        )
+    }
+
     func testLedgerIndexAndMetricsSnapshotPreserveFilteredTotals() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

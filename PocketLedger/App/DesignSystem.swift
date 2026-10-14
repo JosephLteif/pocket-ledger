@@ -260,13 +260,26 @@ enum PocketLedgerTheme {
     static let cardCornerRadius: CGFloat = 20
 }
 
+struct CategorySymbol: View {
+    let systemImage: String
+
+    @ViewBuilder
+    var body: some View {
+        if LedgerCategory.isEmojiIcon(systemImage) {
+            Text(systemImage)
+        } else {
+            Image(systemName: systemImage)
+        }
+    }
+}
+
 struct PocketIcon: View {
     let systemImage: String
     var tint: Color = PocketLedgerTheme.accent
     var size: CGFloat = 38
 
     var body: some View {
-        Image(systemName: systemImage)
+        CategorySymbol(systemImage: systemImage)
             .font(.system(size: size * 0.42, weight: .semibold))
             .foregroundStyle(tint)
             .frame(width: size, height: size)

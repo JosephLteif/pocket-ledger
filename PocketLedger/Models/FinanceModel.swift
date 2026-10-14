@@ -695,6 +695,14 @@ struct ChangeAdjustment: Codable, Equatable {
 }
 
 struct LedgerCategory: Identifiable, Codable, Equatable {
+    static func isEmojiIcon(_ value: String) -> Bool {
+        value.count == 1 && value.unicodeScalars.contains {
+            $0.properties.isEmojiPresentation
+                || ($0.properties.isEmoji && $0.value > 0x7F)
+                || ($0.value == 0x20E3 && value.unicodeScalars.first?.properties.isEmoji == true)
+        }
+    }
+
     let id: UUID
     var name: String
     var parentID: UUID?

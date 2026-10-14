@@ -657,7 +657,7 @@ struct MetricsView: View {
                 .frame(width: 48, height: 30)
                 .background(chartColor(for: colorIndex), in: RoundedRectangle(cornerRadius: 7))
 
-            Image(systemName: icon)
+            CategorySymbol(systemImage: icon)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(chartColor(for: colorIndex))
                 .frame(width: 22)
@@ -1189,7 +1189,7 @@ private struct CategoryMetricsDetailView: View {
 
     private func detailCategoryRow(_ snapshot: CategoryMetricsDetailSnapshot) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: categoryIcon)
+            CategorySymbol(systemImage: categoryIcon)
                 .foregroundStyle(PocketLedgerTheme.accent)
                 .frame(width: 24)
 
@@ -1222,7 +1222,7 @@ private struct CategoryMetricsDetailView: View {
                         isShowingSubcategoryDetail = true
                     } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: store.ledgerIndex.categorySystemImage(for: metric.categoryID))
+                            CategorySymbol(systemImage: store.ledgerIndex.categorySystemImage(for: metric.categoryID))
                                 .foregroundStyle(PocketLedgerTheme.accent)
                                 .frame(width: 24)
 

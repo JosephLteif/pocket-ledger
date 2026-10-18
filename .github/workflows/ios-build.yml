@@ -204,6 +204,7 @@ jobs:
             local watch_path="$app_path/Watch/PocketLedgerWatch.app"
             local ipa_path="$GITHUB_WORKSPACE/$ipa_name"
             local entries="$RUNNER_TEMP/$variant-ipa-entries.txt"
+            local entitlements="$RUNNER_TEMP/$variant-app-groups.entitlements"
             local widget_path="$app_path/PlugIns/PocketLedgerWidget.appex"
             local watch_widget_path="$watch_path/PlugIns/PocketLedgerWatchWidget.appex"
 
@@ -240,6 +241,20 @@ jobs:
               return 1
             fi
 
+            cat > "$entitlements" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>com.apple.security.application-groups</key>
+            <array>
+              <string>$app_group_id</string>
+            </array>
+          </dict>
+          </plist>
+          EOF
+            plutil -lint "$entitlements"
+
             for extension_plist in "$widget_path/Info.plist" "$watch_widget_path/Info.plist"; do
               if /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPrincipalClass' "$extension_plist" >/dev/null 2>&1; then
                 echo "Unexpected NSExtensionPrincipalClass in $extension_plist"
@@ -258,7 +273,7 @@ jobs:
               if ! codesign --display "$bundle" 2>&1; then
                 echo "No existing signature in $variant/$executable"
               fi
-              codesign --force --sign - --timestamp=none "$bundle"
+              codesign --force --sign - --timestamp=none --entitlements "$entitlements" "$bundle"
               codesign --verify --strict "$bundle"
             done
 

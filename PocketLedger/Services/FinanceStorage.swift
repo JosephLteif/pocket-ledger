@@ -1,26 +1,9 @@
 import Foundation
-import Security
 import SwiftData
 
 final class FinanceStorage {
     static var appGroupIdentifier: String {
-        let configuredIdentifier = Bundle.main.object(
-            forInfoDictionaryKey: "PocketLedgerAppGroupIdentifier"
-        ) as? String
-        let signedIdentifiers = SecTaskCreateFromSelf(nil).flatMap {
-            SecTaskCopyValueForEntitlement(
-                $0,
-                "com.apple.security.application-groups" as CFString,
-                nil
-            ) as? [String]
-        } ?? []
-
-        if let configuredIdentifier, signedIdentifiers.contains(configuredIdentifier) {
-            return configuredIdentifier
-        }
-
-        return signedIdentifiers.first
-            ?? configuredIdentifier
+        Bundle.main.object(forInfoDictionaryKey: "PocketLedgerAppGroupIdentifier") as? String
             ?? Bundle.main.bundleIdentifier.map { "group.\($0)" }
             ?? "group.com.josephlteif.pocketledger"
     }

@@ -78,9 +78,17 @@
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.75" y="3.75" width="7" height="7" rx="1.4" stroke="currentColor" stroke-width="1.6"/><rect x="13.25" y="3.75" width="7" height="4.5" rx="1.4" stroke="currentColor" stroke-width="1.6"/><rect x="13.25" y="10.75" width="7" height="9.5" rx="1.4" stroke="currentColor" stroke-width="1.6"/><rect x="3.75" y="13.25" width="7" height="7" rx="1.4" stroke="currentColor" stroke-width="1.6"/></svg>
             <span>Overview</span>
           </a>
+          <a class="nav-link" href="#metrics">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.5 19.25V12m5 7.25V5m5 14.25v-9m5 9V8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M3.5 20.25h17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <span>Metrics</span>
+          </a>
           <a class="nav-link" href="#transactions">
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 4.75h10a2 2 0 0 1 2 2v13l-3-1.8-3 1.8-3-1.8-3 1.8v-13a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 9h6M9 12.5h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
             <span>Transactions</span>
+          </a>
+          <a class="nav-link" href="#schedules">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5.5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M8 3.75v3.5M16 3.75v3.5M4.5 9.5h15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M8 13h3M8 16.5h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <span>Schedules</span>
           </a>
           <a class="nav-link" href="#accounts">
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.75" y="5.25" width="16.5" height="13.5" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M4 9h16M7.5 14h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -106,7 +114,7 @@
           </div>
           <button id="open-entry" class="button button-primary topbar-action" type="button">
             <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-            <span>Add transaction</span>
+            <span>Add entry</span>
           </button>
         </header>
 
@@ -120,7 +128,7 @@
             <span class="updated-label"><span class="status-dot" aria-hidden="true"></span>Live from your iPhone</span>
           </header>
 
-          <section class="summary-layout" aria-label="Monthly summary">
+          <section class="summary-layout" aria-label="Ledger summary">
             <article class="balance-summary">
               <div class="balance-heading">
                 <span class="summary-label">Total balance</span>
@@ -130,23 +138,50 @@
               <div class="balance-foot"><span id="account-count">—</span><span>accounts in your ledger</span></div>
             </article>
             <article class="flow-summary">
-              <div class="flow-summary-heading"><span class="flow-dot income-dot" aria-hidden="true"></span><span class="summary-label">Income this month</span></div>
+              <div class="flow-summary-heading"><span class="flow-dot income-dot" aria-hidden="true"></span><span class="summary-label">Income in period</span></div>
               <p id="month-income" class="flow-value">—</p>
               <span class="flow-caption">Added to your accounts</span>
             </article>
             <article class="flow-summary">
-              <div class="flow-summary-heading"><span class="flow-dot expense-dot" aria-hidden="true"></span><span class="summary-label">Expenses this month</span></div>
+              <div class="flow-summary-heading"><span class="flow-dot expense-dot" aria-hidden="true"></span><span class="summary-label">Expenses in period</span></div>
               <p id="month-expense" class="flow-value">—</p>
               <span class="flow-caption">Across every category</span>
             </article>
           </section>
+
+          <section id="metrics" class="metrics-section" aria-labelledby="metrics-heading">
+            <div class="section-heading metrics-section-heading">
+              <div><h2 id="metrics-heading">Metrics</h2><p>Explore cash flow and category spending.</p></div>
+              <span id="metrics-status" class="section-meta" role="status" aria-live="polite" hidden>Updating…</span>
+            </div>
+            <div class="metrics-controls" aria-label="Metric filters">
+              <label class="filter-field metrics-period-field"><span>Period</span>
+                <select id="metrics-period">
+                  <option value="month">Month</option>
+                  <option value="year">Year</option>
+                  <option value="custom">Custom range</option>
+                </select>
+              </label>
+              <label id="metrics-anchor-field" class="field-group metrics-anchor-field"><span id="metrics-anchor-label">Month</span>
+                <input id="metrics-anchor" type="month" aria-label="Metric month">
+              </label>
+              <label id="metrics-year-field" class="field-group metrics-anchor-field" hidden><span>Year</span>
+                <input id="metrics-year" type="number" min="1900" max="2100" step="1" required aria-label="Metric year">
+              </label>
+              <div id="metrics-range-fields" class="metrics-range-fields" hidden>
+                <label class="field-group"><span>From</span><input id="metrics-start" type="date" required></label>
+                <label class="field-group"><span>Through</span><input id="metrics-end" type="date" required></label>
+              </div>
+              <label class="filter-field"><span>Currency</span><select id="metrics-currency"></select></label>
+              <label class="filter-field metrics-category-field"><span>Category</span><select id="metrics-category"><option value="">All categories</option></select></label>
+            </div>
 
           <div class="insights-grid">
             <section class="panel cashflow-panel" aria-labelledby="cashflow-title">
               <div class="panel-heading">
                 <div>
                   <h2 id="cashflow-title">Cash flow</h2>
-                  <p>Income and expenses by month</p>
+                  <p id="cashflow-subtitle">Income and expenses by month</p>
                 </div>
                 <div class="chart-legend" aria-label="Chart legend">
                   <span><i class="legend-swatch income-swatch" aria-hidden="true"></i>Income</span>
@@ -164,13 +199,15 @@
               <div class="panel-heading">
                 <div>
                   <h2 id="category-title">Where it goes</h2>
-                  <p>Expenses by category this month</p>
+                  <p id="category-subtitle">Expenses by category</p>
                 </div>
               </div>
               <div id="category-empty" class="empty-chart" hidden>No categorized expenses yet.</div>
+              <button id="category-back" class="category-back" type="button" hidden>All categories</button>
               <ol id="category-list" class="category-list"></ol>
             </section>
           </div>
+          </section>
 
           <section id="entry-panel" class="panel entry-panel" aria-labelledby="entry-title" hidden tabindex="-1">
             <div class="panel-heading entry-heading">
@@ -185,15 +222,41 @@
             <p id="no-accounts-message" class="inline-notice" hidden>Add an account in Pocket Ledger on your iPhone before entering a transaction.</p>
             <form id="transaction-form" novalidate>
               <fieldset class="kind-fieldset">
+                <legend>Entry</legend>
+                <div id="entry-mode-switch" class="kind-switch" role="group" aria-label="Entry type">
+                  <button class="kind-option is-selected" type="button" data-mode="transaction" aria-pressed="true">Transaction</button>
+                  <button class="kind-option" type="button" data-mode="schedule" aria-pressed="false">Schedule</button>
+                </div>
+              </fieldset>
+              <fieldset class="kind-fieldset">
                 <legend>Transaction type</legend>
                 <div class="kind-switch" role="group" aria-label="Transaction type">
                   <button class="kind-option is-selected" type="button" data-kind="expense" aria-pressed="true">Expense</button>
                   <button class="kind-option" type="button" data-kind="income" aria-pressed="false">Income</button>
                 </div>
               </fieldset>
+              <div id="schedule-fields" class="form-meta-grid schedule-fields" hidden>
+                <div class="field-group">
+                  <label for="schedule-frequency">Repeats</label>
+                  <select id="schedule-frequency">
+                    <option value="once">Once</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly" selected>Monthly</option>
+                    <option value="yearly">Yearly</option>
+                  </select>
+                </div>
+                <div id="monthly-rule-field" class="field-group">
+                  <label for="schedule-monthly-rule">Monthly timing</label>
+                  <select id="schedule-monthly-rule">
+                    <option value="dayOfMonth">Same day each month</option>
+                    <option value="lastDayOfMonth">Last day of each month</option>
+                  </select>
+                </div>
+              </div>
               <div class="form-meta-grid">
                 <div class="field-group">
-                  <label for="transaction-date">Date</label>
+                  <label id="transaction-date-label" for="transaction-date">Date</label>
                   <input id="transaction-date" name="date" type="date" required>
                 </div>
                 <div class="field-group note-field">
@@ -224,9 +287,27 @@
             <div id="account-list" class="account-list"></div>
           </section>
 
+          <section id="schedules" class="schedules-section" aria-labelledby="schedules-title">
+            <div class="section-heading">
+              <div><h2 id="schedules-title">Scheduled transactions</h2><p>Plan recurring entries and record one early when needed.</p></div>
+              <div class="schedule-heading-actions">
+                <span id="schedule-count" class="section-meta"></span>
+                <button id="add-schedule" class="button button-secondary button-small" type="button">Add schedule</button>
+              </div>
+            </div>
+            <div class="schedule-estimate">
+              <div><strong>Recurring expenses</strong><p id="recurring-expense-total" role="status">No active recurring expenses.</p></div>
+              <div id="schedule-cost-period" class="kind-switch" role="group" aria-label="Recurring expense estimate period">
+                <button class="kind-option is-selected" type="button" data-cost-period="monthly" aria-pressed="true">Monthly</button>
+                <button class="kind-option" type="button" data-cost-period="yearly" aria-pressed="false">Yearly</button>
+              </div>
+            </div>
+            <div id="schedule-list" class="schedule-list"></div>
+          </section>
+
           <section id="transactions" class="panel transactions-panel" aria-labelledby="transactions-title">
             <div class="panel-heading transactions-heading">
-              <div><h2 id="transactions-title">Transactions</h2><p>Your latest ledger activity</p></div>
+              <div><h2 id="transactions-title">Transactions</h2><p>Search and filter activity across your ledger.</p></div>
               <div class="transaction-controls">
                 <label class="search-field">
                   <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="8.7" cy="8.7" r="5.7" stroke="currentColor" stroke-width="1.5"/><path d="m13 13 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -241,6 +322,8 @@
                     <option value="transfer">Transfers</option>
                   </select>
                 </label>
+                <label class="filter-field"><span class="sr-only">Filter by category</span><select id="transaction-category-filter"><option value="">All categories</option></select></label>
+                <label class="filter-field"><span class="sr-only">Filter by account</span><select id="transaction-account-filter"><option value="">All accounts</option></select></label>
               </div>
             </div>
             <div class="table-scroll">
@@ -250,6 +333,7 @@
               </table>
             </div>
             <p id="transaction-empty" class="table-empty" hidden></p>
+            <div class="transaction-footer"><p id="transaction-count" class="section-meta" role="status" aria-live="polite"></p><button id="load-more-transactions" class="button button-secondary button-small" type="button" hidden>Load more transactions</button></div>
           </section>
 
           <footer class="page-footer">Pocket Ledger PC Access <span aria-hidden="true">·</span> Connected to your iPhone</footer>

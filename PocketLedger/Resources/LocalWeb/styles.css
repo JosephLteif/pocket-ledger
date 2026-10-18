@@ -167,6 +167,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .flow-value { margin: 16px 0 5px; font-size: 24px; font-weight: 670; letter-spacing: -0.03em; overflow-wrap: anywhere; }
 .flow-caption { color: var(--ink-muted); font-size: 12px; }
 
+.metrics-section { margin-bottom: 22px; scroll-margin-top: 76px; }
+.metrics-section-heading { margin-bottom: 12px; }
+.metrics-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-bottom: 14px; }
+.metrics-controls .filter-field, .metrics-controls .field-group { min-width: 135px; }
+.metrics-controls .metrics-period-field { min-width: 145px; }
+.metrics-controls .metrics-category-field { min-width: 190px; flex: 1; }
+.metrics-controls .field-group > span, .metrics-controls .filter-field > span:not(.sr-only) { display: block; margin-bottom: 7px; color: var(--ink-soft); font-size: 12px; font-weight: 580; }
+.metrics-controls input, .metrics-controls select { width: 100%; height: 37px; padding: 0 10px; border: 1px solid #ded1c5; border-radius: 9px; background: #fffdfa; color: var(--ink); font-size: 12px; }
+.metrics-range-fields { display: flex; flex: 1; gap: 10px; }
+.metrics-range-fields .field-group { flex: 1; }
+
 .insights-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 15px; margin-bottom: 20px; }
 .panel { min-width: 0; border: 1px solid #e7d9cc; border-radius: var(--radius); background: var(--surface); }
 .cashflow-panel, .category-panel, .transactions-panel { padding: 19px 20px 16px; }
@@ -189,6 +200,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .category-amount { flex: none; color: var(--ink-soft); font-size: 12px; }
 .category-track { height: 5px; overflow: hidden; border-radius: 10px; background: #eee4da; }
 .category-fill { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.category-drilldown { display: grid; width: 100%; gap: 7px; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.category-drilldown:hover .category-name { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.category-drilldown:focus-visible { border-radius: 5px; outline: 3px solid color-mix(in srgb, var(--focus) 42%, transparent); outline-offset: 4px; }
+.category-back { margin-top: 8px; padding: 5px 0; border: 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; font-weight: 620; text-align: left; }
+.category-back:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 .entry-panel { margin: 0 0 21px; padding: 20px; scroll-margin-top: 82px; }
 .entry-heading { align-items: center; margin-bottom: 22px; }
@@ -237,15 +253,36 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .account-balance { flex: none; font-size: 12px; font-weight: 640; }
 .account-empty { grid-column: 1 / -1; margin: 0; padding: 16px; border: 1px dashed #d7c7b8; border-radius: 12px; color: var(--ink-soft); font-size: 12px; }
 
+.schedules-section { margin: 27px 0 21px; scroll-margin-top: 76px; }
+.schedule-heading-actions { display: flex; align-items: center; gap: 12px; }
+.schedule-estimate { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; padding: 12px 14px; border: 1px solid #e7d9cc; border-radius: 12px; background: #fff9f3; }
+.schedule-estimate strong { color: var(--ink); font-size: 12px; font-weight: 650; }
+.schedule-estimate p { margin: 4px 0 0; color: var(--ink-soft); font-size: 12px; }
+.schedule-estimate .kind-option { min-width: 78px; }
+.schedule-list { display: grid; gap: 9px; }
+.schedule-card { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 14px 16px; border: 1px solid #e7d9cc; border-radius: 12px; background: var(--surface); }
+.schedule-copy { min-width: 0; }
+.schedule-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.schedule-title { overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 640; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-status { padding: 3px 7px; border-radius: 6px; background: #e8f0e8; color: #366449; font-size: 11px; font-weight: 620; }
+.schedule-status.is-paused { background: #f2ece4; color: #765a42; }
+.schedule-meta, .schedule-detail { margin: 5px 0 0; color: var(--ink-soft); font-size: 12px; }
+.schedule-detail { overflow: hidden; color: var(--ink-muted); text-overflow: ellipsis; white-space: nowrap; }
+.schedule-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.schedule-actions .button { min-height: 32px; padding: 0 9px; font-size: 12px; }
+.schedule-actions .schedule-delete { color: var(--danger); }
+.schedule-empty { margin: 0; padding: 20px; border: 1px dashed #d7c7b8; border-radius: 12px; color: var(--ink-soft); font-size: 12px; text-align: center; }
+
 .transactions-panel { margin-top: 21px; padding-bottom: 4px; scroll-margin-top: 76px; }
 .transactions-heading { align-items: center; padding-bottom: 17px; }
-.transaction-controls { display: flex; align-items: center; gap: 8px; }
+.transaction-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .search-field { display: flex; width: 210px; height: 36px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid #ded1c5; border-radius: 9px; background: #fffdfa; color: var(--ink-muted); }
 .search-field svg { width: 16px; height: 16px; flex: none; }
 .search-field input { width: 100%; min-width: 0; padding: 0; border: 0; outline: none; background: transparent; color: var(--ink); font-size: 12px; }
 .search-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 20%, transparent); }
 .search-field input:focus-visible { outline: none; }
 .filter-field select { height: 36px; padding: 0 26px 0 9px; border: 1px solid #ded1c5; border-radius: 9px; background-color: #fffdfa; color: var(--ink); font-size: 12px; }
+.transaction-controls .filter-field select { max-width: 155px; }
 .table-scroll { width: 100%; overflow-x: auto; }
 table { width: 100%; min-width: 690px; border-collapse: collapse; text-align: left; }
 thead { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
@@ -270,6 +307,8 @@ th:last-child, td:last-child { padding-right: 2px; }
 .amount-cell.expense { color: #873f2a; }
 .amount-cell.transfer { color: #514879; }
 .table-empty { margin: 0; padding: 28px 14px; color: var(--ink-soft); font-size: 12px; text-align: center; }
+.transaction-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 2px; }
+.transaction-footer p { margin: 0; }
 .page-footer { padding-top: 22px; color: var(--ink-muted); font-size: 12px; text-align: center; }
 .page-footer span { padding: 0 4px; }
 
@@ -280,6 +319,7 @@ th:last-child, td:last-child { padding-right: 2px; }
   .summary-layout { grid-template-columns: minmax(1.2fr, 1.35fr) repeat(2, minmax(160px, 1fr)); }
   .balance-summary, .flow-summary { padding-right: 17px; padding-left: 17px; }
   .flow-value { font-size: 21px; }
+  .metrics-controls .metrics-category-field { flex-basis: 180px; }
   .insights-grid { grid-template-columns: minmax(0, 1.5fr) minmax(250px, 1fr); }
 }
 
@@ -287,8 +327,8 @@ th:last-child, td:last-child { padding-right: 2px; }
   .app-shell { grid-template-columns: minmax(0, 1fr); }
   .sidebar { position: static; height: auto; min-height: 0; flex-direction: row; align-items: center; gap: 20px; padding: 13px 22px; border-right: 0; border-bottom: 1px solid #e9ded3; }
   .sidebar-brand { flex: none; margin: 0; }
-  .primary-nav { display: flex; flex: 1; justify-content: flex-end; gap: 4px; }
-  .nav-link { min-height: 38px; padding: 0 10px; }
+  .primary-nav { display: grid; flex: 1; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+  .nav-link { min-width: 0; min-height: 38px; justify-content: center; padding: 0 8px; }
   .sidebar-bottom { display: none; }
   .topbar { top: 0; min-height: 57px; }
   .insights-grid { grid-template-columns: minmax(0, 1.45fr) minmax(235px, 1fr); }
@@ -302,8 +342,8 @@ th:last-child, td:last-child { padding-right: 2px; }
   .sidebar { flex-wrap: wrap; gap: 10px 16px; padding: 12px 15px 8px; }
   .sidebar-brand { font-size: 14px; }
   .sidebar-brand .brand-mark { width: 32px; height: 32px; }
-  .primary-nav { width: 100%; flex: none; justify-content: space-between; }
-  .nav-link { flex: 1; justify-content: center; gap: 7px; padding: 0 7px; font-size: 12px; }
+  .primary-nav { display: grid; width: 100%; flex: none; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+  .nav-link { min-width: 0; justify-content: center; gap: 5px; padding: 0 4px; font-size: 11px; }
   .nav-link svg { width: 17px; height: 17px; }
   .topbar { min-height: 54px; padding: 0 15px; }
   .topbar-context { gap: 7px; font-size: 12px; }
@@ -318,6 +358,10 @@ th:last-child, td:last-child { padding-right: 2px; }
   .flow-summary { min-height: 114px; }
   .flow-value { margin-top: 11px; font-size: 22px; }
   .insights-grid { grid-template-columns: minmax(0, 1fr); gap: 11px; }
+  .metrics-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .metrics-controls .metrics-category-field, .metrics-range-fields { grid-column: 1 / -1; }
+  .metrics-range-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metrics-controls .metrics-category-field { min-width: 0; }
   .cashflow-panel, .category-panel, .transactions-panel { padding: 16px 14px 13px; }
   .cashflow-chart { height: 200px; }
   .panel-heading { gap: 10px; }
@@ -332,10 +376,15 @@ th:last-child, td:last-child { padding-right: 2px; }
   .form-footer .button { width: 100%; }
   .accounts-section { margin-top: 22px; }
   .account-list { grid-template-columns: minmax(0, 1fr); }
+  .schedule-card { grid-template-columns: minmax(0, 1fr); gap: 11px; padding: 13px; }
+  .schedule-actions { justify-content: flex-start; }
+  .schedule-heading-actions { align-items: flex-end; flex-direction: column; gap: 6px; }
+  .schedule-estimate { align-items: flex-start; flex-direction: column; }
   .transactions-heading { align-items: flex-start; flex-direction: column; }
-  .transaction-controls { width: 100%; }
+  .transaction-controls { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .search-field { width: auto; flex: 1; }
-  .filter-field select { max-width: 118px; }
+  .transaction-controls .search-field { grid-column: 1 / -1; }
+  .transaction-controls .filter-field select { width: 100%; max-width: none; }
   table { min-width: 640px; }
 }
 

@@ -40,6 +40,50 @@ final class LocalWebServer: ObservableObject {
         let splits: [Split]
     }
 
+    private struct ScheduleRequest: Decodable {
+        let nextRunDate: String
+        let frequency: String
+        let monthlyRule: String?
+        let note: String
+        let kind: String
+        let splits: [TransactionRequest.Split]
+    }
+
+    private struct ScheduleActionRequest: Decodable {
+        let id: String
+        let action: String
+    }
+
+    private struct MetricsRequest: Decodable {
+        let startDate: String
+        let endDate: String
+        let currencyCode: String
+        let categoryID: String?
+    }
+
+    private struct MetricsResponse: Encodable {
+        struct Month: Encodable {
+            let month: String
+            let incomeMinorUnits: Int64
+            let expenseMinorUnits: Int64
+        }
+
+        struct CategoryExpense: Encodable {
+            let categoryID: String?
+            let categoryName: String
+            let amountMinorUnits: Int64
+        }
+
+        let currencyCode: String
+        let incomeMinorUnits: Int64
+        let expenseMinorUnits: Int64
+        let selectedCategoryID: String?
+        let selectedCategoryName: String?
+        let selectedCategoryDirectMinorUnits: Int64?
+        let monthly: [Month]
+        let categoryExpenses: [CategoryExpense]
+    }
+
     private struct Bootstrap: Encodable {
         struct Account: Encodable {
             let id: String
@@ -51,6 +95,7 @@ final class LocalWebServer: ObservableObject {
         struct Category: Encodable {
             let id: String
             let name: String
+            let parentID: String?
         }
 
         struct Month: Encodable {
@@ -75,9 +120,11 @@ final class LocalWebServer: ObservableObject {
 
         struct Transaction: Encodable {
             struct Split: Encodable {
+                let accountID: String
                 let amountMinorUnits: Int64
                 let currencyCode: String
                 let accountName: String
+                let categoryID: String?
                 let categoryName: String?
             }
 
@@ -92,11 +139,25 @@ final class LocalWebServer: ObservableObject {
             let splits: [Split]
         }
 
+        struct Schedule: Encodable {
+            let id: String
+            let nextRunDate: String
+            let lastRunDate: String?
+            let frequency: String
+            let monthlyRule: String
+            let recurrenceDay: Int
+            let isEnabled: Bool
+            let note: String
+            let kind: String
+            let splits: [Transaction.Split]
+        }
+
         let currencyCode: String
         let accounts: [Account]
         let categories: [Category]
         let metrics: Metrics
         let transactions: [Transaction]
+        let schedules: [Schedule]
     }
 
     private enum RequestFailure: Error {
@@ -420,7 +481,7 @@ final class LocalWebServer: ObservableObject {
             return
         }
         guard request.headers["content-type"]?.lowercased().hasPrefix("application/json") == true else {
-            sendResponse(status: 415, body: Self.jsonError("Send transaction data as JSON."), on: connection)
+            sendResponse(status: 415, body: Self.jsonError("Send PC Access requests as JSON."), on: connection)
             return
         }
 
@@ -433,6 +494,24 @@ final class LocalWebServer: ObservableObject {
                 return
             }
             addTransaction(request, on: connection)
+        case "/api/schedules":
+            guard hasValidSession(request) else {
+                sendResponse(status: 401, body: Self.jsonError("Pair with the current code from your iPhone."), on: connection)
+                return
+            }
+            addSchedule(request, on: connection)
+        case "/api/schedules/action":
+            guard hasValidSession(request) else {
+                sendResponse(status: 401, body: Self.jsonError("Pair with the current code from your iPhone."), on: connection)
+                return
+            }
+            performScheduleAction(request, on: connection)
+        case "/api/metrics":
+            guard hasValidSession(request) else {
+                sendResponse(status: 401, body: Self.jsonError("Pair with the current code from your iPhone."), on: connection)
+                return
+            }
+            sendMetrics(request, on: connection)
         default:
             sendResponse(status: 404, body: Self.jsonError("Not found."), on: connection)
         }
@@ -552,6 +631,199 @@ final class LocalWebServer: ObservableObject {
         sendResponse(status: 201, body: Data(), contentType: "application/json", on: connection)
     }
 
+    private func addSchedule(_ request: HTTPRequest, on connection: NWConnection) {
+        guard let payload = try? JSONDecoder().decode(ScheduleRequest.self, from: request.body) else {
+            sendResponse(status: 400, body: Self.jsonError("Check the scheduled transaction details and try again."), on: connection)
+            return
+        }
+        let monthlyRule = payload.monthlyRule.flatMap { ScheduleMonthlyRule(rawValue: $0) }
+        guard
+              let kind = TransactionKind(rawValue: payload.kind),
+              kind == .expense || kind == .income,
+              let frequency = ScheduleFrequency(rawValue: payload.frequency),
+              payload.monthlyRule == nil || monthlyRule != nil,
+              payload.note.count <= 200,
+              !payload.splits.isEmpty,
+              payload.splits.count <= 50,
+              let nextRunDate = Self.parseDate(payload.nextRunDate) else {
+            sendResponse(status: 400, body: Self.jsonError("Check the scheduled transaction details and try again."), on: connection)
+            return
+        }
+
+        let accountsByID = Dictionary(uniqueKeysWithValues: store.activeAccounts.map { ($0.id, $0) })
+        let categoriesByID = Dictionary(uniqueKeysWithValues: store.data.categories.filter { !$0.isArchived }.map { ($0.id, $0) })
+        var movements: [MoneyMovement] = []
+        var selectedCurrency: LedgerCurrency?
+        for split in payload.splits {
+            guard let accountID = UUID(uuidString: split.accountID),
+                  let account = accountsByID[accountID] else {
+                sendResponse(status: 422, body: Self.jsonError("Choose an active account for each split."), on: connection)
+                return
+            }
+            guard selectedCurrency == nil || selectedCurrency == account.currency else {
+                sendResponse(status: 422, body: Self.jsonError("All splits in one schedule must use the same currency."), on: connection)
+                return
+            }
+            guard let money = Self.parsePositiveMoney(split.amount, currency: account.currency) else {
+                sendResponse(status: 422, body: Self.jsonError("Enter a positive amount for each split."), on: connection)
+                return
+            }
+            if let categoryID = split.categoryID {
+                guard let id = UUID(uuidString: categoryID), categoriesByID[id] != nil else {
+                    sendResponse(status: 422, body: Self.jsonError("Choose an active category for each split."), on: connection)
+                    return
+                }
+                movements.append(MoneyMovement(accountID: account.id, money: money, categoryID: id))
+            } else {
+                movements.append(MoneyMovement(accountID: account.id, money: money))
+            }
+            selectedCurrency = account.currency
+        }
+
+        let schedule = ScheduledTransaction(
+            nextRunDate: nextRunDate,
+            frequency: frequency,
+            monthlyRule: monthlyRule ?? .dayOfMonth,
+            note: payload.note.trimmingCharacters(in: .whitespacesAndNewlines),
+            kind: kind,
+            categoryID: nil,
+            outflows: kind == .expense ? movements : [],
+            inflows: kind == .income ? movements : []
+        )
+        guard store.addScheduledTransaction(schedule) else {
+            sendResponse(status: 422, body: Self.jsonError(store.lastActionStatus ?? "The scheduled transaction could not be saved."), on: connection)
+            return
+        }
+        sendResponse(status: 201, body: Data(), contentType: "application/json", on: connection)
+    }
+
+    private func performScheduleAction(_ request: HTTPRequest, on connection: NWConnection) {
+        guard let payload = try? JSONDecoder().decode(ScheduleActionRequest.self, from: request.body),
+              let id = UUID(uuidString: payload.id) else {
+            sendResponse(status: 400, body: Self.jsonError("Choose a scheduled transaction and try again."), on: connection)
+            return
+        }
+
+        let succeeded: Bool
+        switch payload.action {
+        case "record":
+            succeeded = store.recordScheduledTransactionNow(id: id) != nil
+        case "pause":
+            succeeded = store.setScheduledTransactionEnabled(id: id, isEnabled: false)
+        case "resume":
+            succeeded = store.setScheduledTransactionEnabled(id: id, isEnabled: true)
+        case "skip":
+            succeeded = store.skipNextScheduledTransaction(id: id)
+        case "delete":
+            succeeded = store.deleteScheduledTransaction(id: id)
+        default:
+            sendResponse(status: 400, body: Self.jsonError("Choose a valid schedule action."), on: connection)
+            return
+        }
+
+        guard succeeded else {
+            sendResponse(status: 422, body: Self.jsonError(store.lastActionStatus ?? "The scheduled transaction could not be updated."), on: connection)
+            return
+        }
+        sendResponse(status: 204, body: Data(), on: connection)
+    }
+
+    private func sendMetrics(_ request: HTTPRequest, on connection: NWConnection) {
+        guard let payload = try? JSONDecoder().decode(MetricsRequest.self, from: request.body),
+              let startDate = Self.parseDate(payload.startDate),
+              let endDate = Self.parseDate(payload.endDate),
+              let currency = LedgerCurrency(rawValue: payload.currencyCode),
+              startDate < endDate,
+              let monthCount = Calendar.current.dateComponents([.month], from: startDate, to: endDate).month,
+              monthCount <= 120 else {
+            sendResponse(status: 400, body: Self.jsonError("Choose a valid date range and currency."), on: connection)
+            return
+        }
+
+        let selectedCategoryID = payload.categoryID.flatMap(UUID.init(uuidString:))
+        if payload.categoryID != nil {
+            guard let selectedCategoryID,
+                  store.activeCategories.contains(where: { $0.id == selectedCategoryID }) else {
+                sendResponse(status: 422, body: Self.jsonError("Choose an active category."), on: connection)
+                return
+            }
+        }
+
+        let interval = DateInterval(start: startDate, end: endDate.addingTimeInterval(-0.001))
+        let snapshot = MetricsSnapshot.make(
+            index: store.ledgerIndex,
+            interval: interval,
+            selectedCurrency: currency,
+            selectedCategoryID: selectedCategoryID
+        )
+        let subcategories = MetricsSnapshot.subcategoryBreakdown(
+            index: store.ledgerIndex,
+            categoryID: selectedCategoryID,
+            interval: interval,
+            selectedCurrency: currency
+        )
+        let categoryExpenses: [MetricsResponse.CategoryExpense]
+        let selectedCategoryDirectMinorUnits: Int64?
+        if selectedCategoryID != nil {
+            categoryExpenses = subcategories.map {
+                MetricsResponse.CategoryExpense(
+                    categoryID: $0.categoryID?.uuidString,
+                    categoryName: $0.title,
+                    amountMinorUnits: $0.amount
+                )
+            }
+            selectedCategoryDirectMinorUnits = max(snapshot.expenses - subcategories.reduce(Int64.zero) { $0 + $1.amount }, 0)
+        } else {
+            categoryExpenses = snapshot.categories.map {
+                MetricsResponse.CategoryExpense(
+                    categoryID: $0.categoryID?.uuidString,
+                    categoryName: $0.title,
+                    amountMinorUnits: $0.amount
+                )
+            }
+            selectedCategoryDirectMinorUnits = nil
+        }
+
+        var monthly: [MetricsResponse.Month] = []
+        let calendar = Calendar.current
+        var monthStart = calendar.dateInterval(of: .month, for: startDate)?.start
+        while let currentMonth = monthStart, currentMonth < endDate, monthly.count < 120,
+              let monthInterval = calendar.dateInterval(of: .month, for: currentMonth) {
+            let bucketStart = max(monthInterval.start, startDate)
+            let bucketEnd = min(monthInterval.end, endDate)
+            if bucketStart < bucketEnd {
+                let bucket = MetricsSnapshot.make(
+                    index: store.ledgerIndex,
+                    interval: DateInterval(start: bucketStart, end: bucketEnd.addingTimeInterval(-0.001)),
+                    selectedCurrency: currency,
+                    selectedCategoryID: selectedCategoryID
+                )
+                let formatter = DateFormatter()
+                formatter.calendar = Calendar(identifier: .gregorian)
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.dateFormat = "yyyy-MM"
+                monthly.append(MetricsResponse.Month(
+                    month: formatter.string(from: monthInterval.start),
+                    incomeMinorUnits: bucket.income,
+                    expenseMinorUnits: bucket.expenses
+                ))
+            }
+            monthStart = calendar.date(byAdding: .month, value: 1, to: currentMonth)
+        }
+
+        let result = MetricsResponse(
+            currencyCode: currency.rawValue,
+            incomeMinorUnits: snapshot.income,
+            expenseMinorUnits: snapshot.expenses,
+            selectedCategoryID: selectedCategoryID?.uuidString,
+            selectedCategoryName: selectedCategoryID.map { store.categoryPath(for: $0) },
+            selectedCategoryDirectMinorUnits: selectedCategoryDirectMinorUnits,
+            monthly: monthly,
+            categoryExpenses: categoryExpenses
+        )
+        sendJSON((try? JSONEncoder().encode(result)) ?? Data("{}".utf8), on: connection)
+    }
+
     private func makeBootstrap() -> Data {
         let calendar = Calendar.current
         let now = Date()
@@ -588,7 +860,8 @@ final class LocalWebServer: ObservableObject {
                 expenseMinorUnits: snapshot.expenses
             )
         }
-        let transactions = store.recentTransactions.prefix(100).map { transaction in
+        // ponytail: full summaries keep local search complete; switch to server-side paging if ledgers grow large.
+        let transactions = store.recentTransactions.map { transaction in
             let movementCurrencies = (transaction.outflows + transaction.inflows).map { $0.money.currency }
             let transactionCurrency = movementCurrencies.contains(currency) ? currency : movementCurrencies.first ?? currency
             let amountMovements: [MoneyMovement]
@@ -627,9 +900,11 @@ final class LocalWebServer: ObservableObject {
                 splits: splitMovements.map { movement in
                     let categoryID = transaction.categoryID(for: movement)
                     return Bootstrap.Transaction.Split(
+                        accountID: movement.accountID.uuidString,
                         amountMinorUnits: movement.money.minorUnits,
                         currencyCode: movement.money.currency.rawValue,
                         accountName: store.data.accounts.first { $0.id == movement.accountID }?.name ?? "Unknown account",
+                        categoryID: categoryID?.uuidString,
                         categoryName: categoryID.map { store.categoryPath(for: $0) }
                     )
                 }
@@ -646,7 +921,11 @@ final class LocalWebServer: ObservableObject {
                 )
             },
             categories: store.activeCategories.map {
-                Bootstrap.Category(id: $0.id.uuidString, name: store.categoryPath(for: $0.id))
+                Bootstrap.Category(
+                    id: $0.id.uuidString,
+                    name: store.categoryPath(for: $0.id),
+                    parentID: $0.parentID?.uuidString
+                )
             },
             metrics: Bootstrap.Metrics(
                 totalBalanceMinorUnits: store.ledgerIndex.availableBalance(for: currency).minorUnits,
@@ -661,7 +940,34 @@ final class LocalWebServer: ObservableObject {
                     )
                 }
             ),
-            transactions: transactions
+            transactions: transactions,
+            schedules: store.data.scheduledTransactions.map { schedule in
+                let movements = schedule.kind == .transfer
+                    ? schedule.outflows + schedule.inflows
+                    : schedule.kind == .expense ? schedule.outflows : schedule.inflows
+                return Bootstrap.Schedule(
+                    id: schedule.id.uuidString,
+                    nextRunDate: Self.iso8601String(schedule.nextRunDate),
+                    lastRunDate: schedule.lastRunDate.map(Self.iso8601String),
+                    frequency: schedule.frequency.rawValue,
+                    monthlyRule: schedule.monthlyRule.rawValue,
+                    recurrenceDay: schedule.recurrenceDay,
+                    isEnabled: schedule.isEnabled,
+                    note: schedule.note,
+                    kind: schedule.kind.rawValue,
+                    splits: movements.map { movement in
+                        let categoryID = schedule.transactionTemplate.categoryID(for: movement)
+                        return Bootstrap.Transaction.Split(
+                            accountID: movement.accountID.uuidString,
+                            amountMinorUnits: movement.money.minorUnits,
+                            currencyCode: movement.money.currency.rawValue,
+                            accountName: store.data.accounts.first { $0.id == movement.accountID }?.name ?? "Unknown account",
+                            categoryID: categoryID?.uuidString,
+                            categoryName: categoryID.map { store.categoryPath(for: $0) }
+                        )
+                    }
+                )
+            }
         )
         return (try? JSONEncoder().encode(result)) ?? Data("{}".utf8)
     }

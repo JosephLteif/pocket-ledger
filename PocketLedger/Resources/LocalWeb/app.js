@@ -7,7 +7,7 @@ const views = {
   dashboard: document.querySelector("#dashboard"),
 };
 
-const state = { ledger: null, kind: "expense", splitSequence: 0 };
+const state = { ledger: null, kind: "expense", entryMode: "transaction", splitSequence: 0, metricData: null, metricsRequestSequence: 0, transactionVisibleLimit: 100, scheduleCostPeriod: "monthly" };
 const currencyDigitsCache = new Map();
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -60,7 +60,8 @@ function validateLedger(data) {
     !data || typeof data.currencyCode !== "string" ||
     !Array.isArray(data.accounts) || !Array.isArray(data.categories) ||
     !data.metrics || !Array.isArray(data.metrics.monthly) ||
-    !Array.isArray(data.metrics.categoryExpenses) || !Array.isArray(data.transactions)
+    !Array.isArray(data.metrics.categoryExpenses) || !Array.isArray(data.transactions) ||
+    !Array.isArray(data.schedules)
   ) {
     throw new Error("Pocket Ledger returned incomplete dashboard data. Update the app and try again.");
   }
@@ -134,12 +135,12 @@ function svgElement(name, attributes = {}, content = "") {
   return element;
 }
 
-function renderCashFlow(ledger) {
+function renderCashFlow(metrics, currencyCode) {
   const chart = $("#cashflow-chart");
   const empty = $("#cashflow-empty");
   const viewport = $("#cashflow-viewport");
   chart.replaceChildren();
-  const months = ledger.metrics.monthly;
+  const months = metrics.monthly;
   if (!months.length) {
     viewport.hidden = true;
     empty.hidden = false;
@@ -162,13 +163,13 @@ function renderCashFlow(ledger) {
   const roundedMax = Math.ceil(max / 4);
   chart.setAttribute("viewBox", `0 0 ${width} ${height}`);
   chart.setAttribute("preserveAspectRatio", "xMinYMin meet");
-  chart.setAttribute("aria-label", `Monthly income and expenses across ${months.length} months`);
+  chart.setAttribute("aria-label", `Income and expenses across ${months.length} months`);
 
   for (let tick = 0; tick <= 4; tick += 1) {
     const value = roundedMax * tick;
     const y = top + plotHeight - (tick / 4) * plotHeight;
     chart.append(svgElement("line", { x1: left, x2: width - right, y1: y, y2: y, class: "chart-gridline" }));
-    chart.append(svgElement("text", { x: left - 9, y: y + 4, "text-anchor": "end", class: "chart-axis-label" }, formatCompactMoney(value, ledger.currencyCode)));
+    chart.append(svgElement("text", { x: left - 9, y: y + 4, "text-anchor": "end", class: "chart-axis-label" }, formatCompactMoney(value, currencyCode)));
   }
 
   const groupWidth = plotWidth / months.length;
@@ -185,31 +186,40 @@ function renderCashFlow(ledger) {
       const x = center + (seriesIndex === 0 ? -barWidth - 2 : 2);
       const y = top + plotHeight - barHeight;
       const bar = svgElement("rect", { x, y, width: barWidth, height: Math.max(barHeight, amount ? 2 : 0), rx: 3, class: entry.className });
-      bar.append(svgElement("title", {}, `${entry.label}: ${formatMoney(amount, ledger.currencyCode)}`));
+      bar.append(svgElement("title", {}, `${entry.label}: ${formatMoney(amount, currencyCode)}`));
       chart.append(bar);
     });
     chart.append(svgElement("text", { x: center, y: height - 12, "text-anchor": "middle", class: "chart-axis-label" }, monthLabel(month.month)));
   });
 
-  const totalIncome = months.reduce((sum, month) => sum + (Number(month.incomeMinorUnits) || 0), 0);
-  const totalExpense = months.reduce((sum, month) => sum + (Number(month.expenseMinorUnits) || 0), 0);
-  $("#cashflow-description").textContent = `${months.length} months shown. Income totals ${formatMoney(totalIncome, ledger.currencyCode)} and expenses total ${formatMoney(totalExpense, ledger.currencyCode)}.`;
+  const totalIncome = Number(metrics.incomeMinorUnits) || 0;
+  const totalExpense = Number(metrics.expenseMinorUnits) || 0;
+  $("#cashflow-description").textContent = `${months.length} months shown. Income totals ${formatMoney(totalIncome, currencyCode)} and expenses total ${formatMoney(totalExpense, currencyCode)}.`;
 }
 
-function renderCategories(ledger) {
+function renderCategories(metrics, currencyCode) {
   const list = $("#category-list");
   const empty = $("#category-empty");
   list.replaceChildren();
-  const categories = [...ledger.metrics.categoryExpenses]
+  const categories = [...(metrics.categoryExpenses || [])]
     .filter((item) => Number(item.amountMinorUnits) > 0)
     .sort((a, b) => Number(b.amountMinorUnits) - Number(a.amountMinorUnits));
+  if (metrics.selectedCategoryID && Number(metrics.selectedCategoryDirectMinorUnits) > 0) {
+    categories.unshift({
+      categoryName: "Directly in this category",
+      amountMinorUnits: metrics.selectedCategoryDirectMinorUnits,
+      isSelectedCategoryDirect: true,
+    });
+  }
+  $("#category-back").hidden = !metrics.selectedCategoryID;
   if (!categories.length) {
     empty.hidden = false;
+    empty.textContent = metrics.selectedCategoryID ? "No spending in this category for this period." : "No categorized expenses for this period.";
     return;
   }
   empty.hidden = true;
   const max = Math.max(...categories.map((item) => Number(item.amountMinorUnits) || 0), 1);
-  categories.slice(0, 6).forEach((item) => {
+  categories.forEach((item) => {
     const row = document.createElement("li");
     row.className = "category-item";
     const line = document.createElement("div");
@@ -219,7 +229,7 @@ function renderCategories(ledger) {
     name.textContent = item.categoryName || "Uncategorized";
     const amount = document.createElement("span");
     amount.className = "category-amount";
-    amount.textContent = formatMoney(item.amountMinorUnits, ledger.currencyCode);
+    amount.textContent = formatMoney(item.amountMinorUnits, currencyCode);
     line.append(name, amount);
     const track = document.createElement("div");
     track.className = "category-track";
@@ -228,7 +238,17 @@ function renderCategories(ledger) {
     bar.className = "category-fill";
     bar.style.width = `${Math.min(100, (Number(item.amountMinorUnits) / max) * 100)}%`;
     track.append(bar);
-    row.append(line, track);
+    if (item.categoryID && !item.isSelectedCategoryDirect) {
+      const drilldown = document.createElement("button");
+      drilldown.type = "button";
+      drilldown.className = "category-drilldown";
+      drilldown.dataset.categoryId = item.categoryID;
+      drilldown.setAttribute("aria-label", `View ${item.categoryName} and its subcategories`);
+      drilldown.append(line, track);
+      row.append(drilldown);
+    } else {
+      row.append(line, track);
+    }
     list.append(row);
   });
 }
@@ -266,11 +286,140 @@ function renderAccounts(ledger) {
   });
 }
 
+function recurringExpenseEstimate(schedules, period) {
+  const multipliers = period === "yearly"
+    ? { daily: 365.2425, weekly: 52.1775, monthly: 12, yearly: 1 }
+    : { daily: 365.2425 / 12, weekly: 52.1775 / 12, monthly: 1, yearly: 1 / 12 };
+  const totals = new Map();
+  schedules.filter((schedule) => schedule.isEnabled && schedule.kind === "expense" && schedule.frequency !== "once")
+    .forEach((schedule) => (Array.isArray(schedule.splits) ? schedule.splits : []).forEach((split) => {
+      const currencyCode = split.currencyCode || "USD";
+      const amount = Math.abs(Number(split.amountMinorUnits) || 0) * (multipliers[schedule.frequency] || 0);
+      totals.set(currencyCode, (totals.get(currencyCode) || 0) + amount);
+    }));
+  return [...totals].map(([currencyCode, amount]) => ({
+    currencyCode,
+    amountMinorUnits: Math.round(amount),
+  })).sort((a, b) => a.currencyCode.localeCompare(b.currencyCode));
+}
+
+function renderSchedules(ledger) {
+  const list = $("#schedule-list");
+  const schedules = [...ledger.schedules].sort((a, b) => String(a.nextRunDate).localeCompare(String(b.nextRunDate)));
+  const enabledCount = schedules.filter((schedule) => schedule.isEnabled).length;
+  const estimate = recurringExpenseEstimate(schedules, state.scheduleCostPeriod);
+  const periodLabel = state.scheduleCostPeriod === "yearly" ? "year" : "month";
+  setText("#recurring-expense-total", estimate.length
+    ? estimate.map((item) => `${item.currencyCode} ${formatMoney(item.amountMinorUnits, item.currencyCode)}`).join(" · ")
+    : "No active recurring expenses.");
+  setText("#schedule-count", `${enabledCount} enabled · ${schedules.length} total`);
+  list.replaceChildren();
+  if (!schedules.length) {
+    const empty = document.createElement("p");
+    empty.className = "schedule-empty";
+    empty.textContent = "No schedules yet. Add a schedule to plan a recurring income or expense.";
+    list.append(empty);
+    return;
+  }
+
+  const frequencyNames = { once: "Once", daily: "Daily", weekly: "Weekly", monthly: "Monthly", yearly: "Yearly" };
+  schedules.forEach((schedule) => {
+    const row = document.createElement("article");
+    row.className = "schedule-card";
+    const copy = document.createElement("div");
+    copy.className = "schedule-copy";
+    const titleRow = document.createElement("div");
+    titleRow.className = "schedule-title-row";
+    const title = document.createElement("strong");
+    title.className = "schedule-title";
+    title.textContent = schedule.note || (schedule.kind === "income" ? "Scheduled income" : schedule.kind === "transfer" ? "Scheduled transfer" : "Scheduled expense");
+    const completed = schedule.frequency === "once" && Boolean(schedule.lastRunDate);
+    const status = document.createElement("span");
+    status.className = `schedule-status${schedule.isEnabled ? "" : " is-paused"}`;
+    status.textContent = schedule.isEnabled ? "Enabled" : completed ? "Completed" : "Paused";
+    titleRow.append(title, status);
+    const meta = document.createElement("p");
+    meta.className = "schedule-meta";
+    meta.textContent = `${frequencyNames[schedule.frequency] || "Repeats"} · ${schedule.isEnabled ? "Next" : completed ? "Recorded" : "Next"} ${formatDate(completed ? schedule.lastRunDate : schedule.nextRunDate)}`;
+    const detail = document.createElement("p");
+    detail.className = "schedule-detail";
+    const splits = Array.isArray(schedule.splits) ? schedule.splits : [];
+    const splitDetails = splits.map((split) => [
+      formatMoney(Math.abs(Number(split.amountMinorUnits) || 0), split.currencyCode || ledger.currencyCode),
+      split.accountName,
+      split.categoryName,
+    ].filter(Boolean).join(" · ")).join(" / ") || "Account unavailable";
+    const scheduleEstimate = recurringExpenseEstimate([schedule], state.scheduleCostPeriod);
+    const estimateDetails = scheduleEstimate.map((item) => `${item.currencyCode} ${formatMoney(item.amountMinorUnits, item.currencyCode)} / ${periodLabel}`).join(" · ");
+    detail.textContent = estimateDetails ? `${splitDetails} · ≈ ${estimateDetails}` : splitDetails;
+    copy.append(titleRow, meta, detail);
+
+    const actions = document.createElement("div");
+    actions.className = "schedule-actions";
+    if (!completed) {
+      actions.append(scheduleActionButton(schedule, schedule.isEnabled ? "Pause" : "Resume", schedule.isEnabled ? "pause" : "resume"));
+    }
+    if (schedule.isEnabled) {
+      actions.append(scheduleActionButton(schedule, "Skip next", "skip"));
+      actions.append(scheduleActionButton(schedule, "Record now", "record", true));
+    }
+    actions.append(scheduleActionButton(schedule, "Delete", "delete"));
+    row.append(copy, actions);
+    list.append(row);
+  });
+}
+
+function scheduleActionButton(schedule, label, action, primary = false) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `button ${primary ? "button-primary" : "button-secondary"} button-small${action === "delete" ? " schedule-delete" : ""}`;
+  button.textContent = label;
+  button.setAttribute("aria-label", `${label} ${schedule.note || "scheduled transaction"}`);
+  button.addEventListener("click", async () => {
+    if (action === "delete" && !window.confirm(`Delete “${schedule.note || "scheduled transaction"}”?`)) return;
+    button.disabled = true;
+    let actionCompleted = false;
+    try {
+      await request("/api/schedules/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: schedule.id, action }),
+      });
+      actionCompleted = true;
+      const messages = {
+        record: "Scheduled transaction recorded.",
+        skip: "Next scheduled entry skipped.",
+        pause: "Schedule paused.",
+        resume: "Schedule enabled.",
+        delete: "Schedule deleted.",
+      };
+      populateDashboard(await fetchLedger());
+      showDashboardFeedback(messages[action]);
+      await refreshMetrics();
+    } catch (error) {
+      showDashboardFeedback(actionCompleted
+        ? "The schedule action completed, but the page could not refresh. Reload before repeating it."
+        : error.message || "The schedule could not be updated. Try again.", true);
+      button.disabled = actionCompleted;
+    }
+  });
+  return button;
+}
+
 function makeCell(text, className = "") {
   const cell = document.createElement("td");
   if (className) cell.className = className;
   cell.textContent = text;
   return cell;
+}
+
+function categoryMatches(categoryID, selectedCategoryID) {
+  let category = state.ledger.categories.find((item) => String(item.id) === String(categoryID));
+  while (category) {
+    if (String(category.id) === String(selectedCategoryID)) return true;
+    category = state.ledger.categories.find((item) => String(item.id) === String(category.parentID));
+  }
+  return false;
 }
 
 function renderTransactions() {
@@ -280,18 +429,39 @@ function renderTransactions() {
   body.replaceChildren();
   const query = $("#transaction-search").value.trim().toLocaleLowerCase();
   const kindFilter = $("#transaction-filter").value;
+  const categoryFilter = $("#transaction-category-filter").value;
+  const accountFilter = $("#transaction-account-filter").value;
   const transactions = [...ledger.transactions]
     .filter((item) => kindFilter === "all" || item.kind === kindFilter)
-    .filter((item) => !query || [item.note, item.categoryName, item.kind, item.date].some((value) => String(value || "").toLocaleLowerCase().includes(query)))
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    .filter((item) => !categoryFilter || item.splits.some((split) => categoryMatches(split.categoryID, categoryFilter)))
+    .filter((item) => !accountFilter || item.splits.some((split) => String(split.accountID) === accountFilter))
+    .filter((item) => {
+      if (!query) return true;
+      const splits = Array.isArray(item.splits) ? item.splits : [];
+      const searchable = [
+        item.note,
+        item.categoryName,
+        item.kind,
+        item.date,
+        item.currencyCode,
+        ...splits.flatMap((split) => [
+          split.accountName,
+          split.categoryName,
+          formatMoney(Math.abs(Number(split.amountMinorUnits) || 0), split.currencyCode || item.currencyCode),
+        ]),
+      ].join(" ").toLocaleLowerCase();
+      return searchable.includes(query);
+    });
 
+  setText("#transaction-count", `${Math.min(transactions.length, state.transactionVisibleLimit)} of ${transactions.length} ${transactions.length === 1 ? "transaction" : "transactions"}`);
+  $("#load-more-transactions").hidden = transactions.length <= state.transactionVisibleLimit;
   if (!transactions.length) {
     empty.hidden = false;
     empty.textContent = ledger.transactions.length ? "No transactions match these filters." : "No transactions yet. Add one to start filling your ledger.";
     return;
   }
   empty.hidden = true;
-  transactions.forEach((transaction) => {
+  transactions.slice(0, state.transactionVisibleLimit).forEach((transaction) => {
     const row = document.createElement("tr");
     const description = document.createElement("td");
     description.className = "description-cell";
@@ -330,15 +500,142 @@ function renderTransactions() {
 }
 
 function populateDashboard(data) {
+  state.metricsRequestSequence += 1;
   state.ledger = data;
+  populateDashboardFilters(data);
+  if (!state.metricData) {
+    state.metricData = {
+      currencyCode: data.currencyCode,
+      incomeMinorUnits: data.metrics.monthIncomeMinorUnits,
+      expenseMinorUnits: data.metrics.monthExpenseMinorUnits,
+      selectedCategoryID: null,
+      categoryExpenses: data.metrics.categoryExpenses,
+      monthly: data.metrics.monthly,
+    };
+  }
   setText("#total-balance", formatMoney(data.metrics.totalBalanceMinorUnits, data.currencyCode));
-  setText("#month-income", formatMoney(data.metrics.monthIncomeMinorUnits, data.currencyCode));
-  setText("#month-expense", formatMoney(data.metrics.monthExpenseMinorUnits, data.currencyCode));
-  renderCashFlow(data);
-  renderCategories(data);
+  updateMetricDisplay(state.metricData, state.metricData.currencyCode || data.currencyCode);
   renderAccounts(data);
+  renderSchedules(data);
   renderTransactions();
   refreshAccountOptions();
+}
+
+function populateDashboardFilters(data) {
+  const fillSelect = (selector, placeholder, options) => {
+    const select = $(selector);
+    const previous = select.value;
+    select.replaceChildren(new Option(placeholder, ""));
+    options.forEach((item) => select.add(new Option(item.name, String(item.id))));
+    if (options.some((item) => String(item.id) === previous)) select.value = previous;
+  };
+  fillSelect("#transaction-category-filter", "All categories", data.categories);
+  fillSelect("#metrics-category", "All categories", data.categories);
+  fillSelect("#transaction-account-filter", "All accounts", data.accounts);
+
+  const currency = $("#metrics-currency");
+  const previousCurrency = currency.value;
+  const currencies = [...new Set([data.currencyCode, ...data.accounts.map((account) => account.currencyCode)].filter(Boolean))];
+  currency.replaceChildren(...currencies.map((code) => new Option(code, code)));
+  currency.value = currencies.includes(previousCurrency) ? previousCurrency : data.currencyCode;
+}
+
+function updateMetricDisplay(metrics, currencyCode) {
+  setText("#month-income", formatMoney(metrics.incomeMinorUnits, currencyCode));
+  setText("#month-expense", formatMoney(metrics.expenseMinorUnits, currencyCode));
+  setText("#cashflow-subtitle", metricsPeriodLabel());
+  setText("#category-title", metrics.selectedCategoryName || "Where it goes");
+  setText("#category-subtitle", metrics.selectedCategoryName
+    ? `Expenses in ${metrics.selectedCategoryName} and its subcategories`
+    : `Expenses by category · ${metricsPeriodLabel()}`);
+  renderCashFlow(metrics, currencyCode);
+  renderCategories(metrics, currencyCode);
+}
+
+function metricsPeriodLabel() {
+  const period = $("#metrics-period").value;
+  if (period === "custom") return `${$("#metrics-start").value} – ${$("#metrics-end").value}`;
+  if (period === "year") return $("#metrics-year").value || "This year";
+  const [year, month] = $("#metrics-anchor").value.split("-").map(Number);
+  if (!year || !month) return "This month";
+  return new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+}
+
+function metricsDateRange() {
+  const period = $("#metrics-period").value;
+  let start;
+  let end;
+  if (period === "custom") {
+    const startValue = $("#metrics-start").value;
+    const endValue = $("#metrics-end").value;
+    if (!startValue || !endValue) {
+      $("#metrics-start").reportValidity();
+      $("#metrics-end").reportValidity();
+      return null;
+    }
+    start = new Date(`${startValue}T00:00:00`);
+    const lastDay = new Date(`${endValue}T00:00:00`);
+    if (lastDay < start) {
+      $("#metrics-end").setCustomValidity("The end date must be on or after the start date.");
+      $("#metrics-end").reportValidity();
+      return null;
+    }
+    $("#metrics-end").setCustomValidity("");
+    end = new Date(lastDay);
+    end.setDate(end.getDate() + 1);
+  } else {
+    if (period === "year") {
+      const year = Number($("#metrics-year").value);
+      if (!$("#metrics-year").reportValidity() || !year) return null;
+      start = new Date(year, 0, 1);
+      end = new Date(year + 1, 0, 1);
+    } else {
+      const [year, month] = $("#metrics-anchor").value.split("-").map(Number);
+      if (!year || !month) {
+        $("#metrics-anchor").reportValidity();
+        return null;
+      }
+      start = new Date(year, month - 1, 1);
+      end = new Date(year, month, 1);
+    }
+  }
+  return { startDate: start.toISOString(), endDate: end.toISOString() };
+}
+
+function updateMetricPeriodFields() {
+  const period = $("#metrics-period").value;
+  const isCustom = period === "custom";
+  $("#metrics-anchor-field").hidden = period !== "month";
+  $("#metrics-year-field").hidden = period !== "year";
+  $("#metrics-range-fields").hidden = !isCustom;
+  $("#metrics-anchor-label").textContent = "Month";
+  $("#metrics-anchor").setAttribute("aria-label", "Metric month");
+}
+
+async function refreshMetrics() {
+  if (!state.ledger) return;
+  const range = metricsDateRange();
+  if (!range) return;
+  const requestSequence = ++state.metricsRequestSequence;
+  $("#metrics-status").hidden = false;
+  try {
+    const metrics = await request("/api/metrics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...range,
+        currencyCode: $("#metrics-currency").value,
+        categoryID: $("#metrics-category").value || null,
+      }),
+    });
+    if (requestSequence !== state.metricsRequestSequence) return;
+    state.metricData = metrics;
+    updateMetricDisplay(metrics, metrics.currencyCode);
+  } catch (error) {
+    if (requestSequence === state.metricsRequestSequence) showDashboardFeedback(error.message || "Metrics could not be updated.", true);
+  } finally {
+    if (requestSequence === state.metricsRequestSequence) $("#metrics-status").hidden = true;
+  }
 }
 
 async function openLedger() {
@@ -346,6 +643,7 @@ async function openLedger() {
   try {
     populateDashboard(await fetchLedger());
     showView("dashboard");
+    await refreshMetrics();
   } catch (error) {
     if (error.status === 401 || error.status === 403) {
       showView("pair");
@@ -380,6 +678,7 @@ $("#pair-form").addEventListener("submit", async (event) => {
     input.value = "";
     populateDashboard(await fetchLedger());
     showView("dashboard");
+    await refreshMetrics();
   } catch (error) {
     feedback.textContent = error.status === 401 || error.status === 403
       ? "That code is incorrect or expired. Check the current code on your iPhone and try again."
@@ -469,11 +768,42 @@ function renumberSplits() {
 
 function setKind(kind) {
   state.kind = kind;
-  $$(".kind-option").forEach((button) => {
+  $$("#transaction-form [data-kind]").forEach((button) => {
     const selected = button.dataset.kind === kind;
     button.classList.toggle("is-selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
+}
+
+function setEntryMode(mode) {
+  if (mode === "schedule" && state.entryMode !== "schedule" && $("#transaction-date").value === localDateValue()) {
+    const firstRun = new Date();
+    firstRun.setDate(firstRun.getDate() + 1);
+    $("#transaction-date").value = localDateValue(firstRun);
+  }
+  state.entryMode = mode;
+  $$("#entry-mode-switch [data-mode]").forEach((button) => {
+    const selected = button.dataset.mode === mode;
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  $("#schedule-fields").hidden = mode !== "schedule";
+  $("#transaction-date-label").textContent = mode === "schedule" ? "First run" : "Date";
+  $("#entry-title").textContent = mode === "schedule" ? "Add schedule" : "Add transaction";
+  $("#entry-title").nextElementSibling.textContent = mode === "schedule"
+    ? "Choose a future first run and how often it should repeat."
+    : "Each split is saved to its own account and category.";
+  $("#save-transaction").textContent = mode === "schedule" ? "Save schedule" : "Save transaction";
+  $("#monthly-rule-field").hidden = $("#schedule-frequency").value !== "monthly";
+  alignLastDayScheduleDate();
+}
+
+function alignLastDayScheduleDate() {
+  const dateValue = $("#transaction-date").value;
+  if (state.entryMode !== "schedule" || $("#schedule-frequency").value !== "monthly" ||
+      $("#schedule-monthly-rule").value !== "lastDayOfMonth" || !dateValue) return;
+  const [year, month] = dateValue.split("-").map(Number);
+  $("#transaction-date").value = localDateValue(new Date(year, month, 0));
 }
 
 $(".kind-switch").addEventListener("click", (event) => {
@@ -489,14 +819,26 @@ $("#add-split").addEventListener("click", () => {
   $(".split-account", rows.lastElementChild).focus();
 });
 
-function openEntry() {
+function openEntry(mode = "transaction") {
+  setEntryMode(mode);
   const panel = $("#entry-panel");
   panel.hidden = false;
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
   $("#transaction-date").focus({ preventScroll: true });
 }
 
-$("#open-entry").addEventListener("click", openEntry);
+$("#open-entry").addEventListener("click", () => openEntry());
+$("#add-schedule").addEventListener("click", () => openEntry("schedule"));
+$("#entry-mode-switch").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-mode]");
+  if (button) setEntryMode(button.dataset.mode);
+});
+$("#schedule-frequency").addEventListener("change", () => {
+  $("#monthly-rule-field").hidden = $("#schedule-frequency").value !== "monthly";
+  alignLastDayScheduleDate();
+});
+$("#schedule-monthly-rule").addEventListener("change", alignLastDayScheduleDate);
+$("#transaction-date").addEventListener("change", alignLastDayScheduleDate);
 $("#close-entry").addEventListener("click", () => {
   $("#entry-panel").hidden = true;
   $("#open-entry").focus();
@@ -514,6 +856,8 @@ $("#transaction-form").addEventListener("submit", async (event) => {
   const form = event.currentTarget;
   const feedback = $("#form-feedback");
   const submit = $("#save-transaction");
+  const isSchedule = state.entryMode === "schedule";
+  const entryName = isSchedule ? "schedule" : "transaction";
   feedback.textContent = "";
   const date = $("#transaction-date").value;
   if (!date) {
@@ -544,18 +888,25 @@ $("#transaction-form").addEventListener("submit", async (event) => {
     return String(account.currencyCode || state.ledger.currencyCode).toUpperCase();
   }));
   if (splitCurrencies.size > 1) {
-    feedback.textContent = "All splits in one transaction must use accounts with the same currency. Choose matching accounts to continue.";
+    feedback.textContent = `All splits in one ${entryName} must use accounts with the same currency. Choose matching accounts to continue.`;
     feedback.className = "form-feedback error-feedback";
     return;
   }
 
   submit.disabled = true;
-  submit.textContent = "Saving…";
+  submit.textContent = isSchedule ? "Saving schedule…" : "Saving transaction…";
   try {
-    await request("/api/transactions", {
+    await request(isSchedule ? "/api/schedules" : "/api/transactions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: JSON.stringify(isSchedule ? {
+        nextRunDate: new Date(`${date}T00:00:00.000Z`).toISOString(),
+        frequency: $("#schedule-frequency").value,
+        monthlyRule: $("#schedule-monthly-rule").value,
+        note: $("#transaction-note").value.trim(),
+        kind: state.kind,
+        splits,
+      } : {
         date: new Date(`${date}T00:00:00.000Z`).toISOString(),
         note: $("#transaction-note").value.trim(),
         kind: state.kind,
@@ -564,33 +915,86 @@ $("#transaction-form").addEventListener("submit", async (event) => {
     });
     form.reset();
     setKind("expense");
+    setEntryMode("transaction");
     $("#transaction-date").value = localDateValue();
     $("#split-rows").replaceChildren(createSplitRow());
     renumberSplits();
     $("#entry-panel").hidden = true;
-    showDashboardFeedback("Transaction saved to your ledger.");
+    showDashboardFeedback(isSchedule ? "Schedule saved to your ledger." : "Transaction saved to your ledger.");
     try {
       populateDashboard(await fetchLedger());
+      await refreshMetrics();
     } catch {
-      showDashboardFeedback("Transaction saved, but the ledger view couldn’t refresh. Check Transactions before submitting it again.", true);
+      showDashboardFeedback(`${isSchedule ? "Schedule" : "Transaction"} saved, but the ledger view couldn’t refresh. Check ${isSchedule ? "Schedules" : "Transactions"} before submitting it again.`, true);
     }
     $("#open-entry").focus();
   } catch (error) {
     const currencyRejection = /currency/i.test(error.message) && /(same|different|mixed|multiple|more than one|match|mismatch)/i.test(error.message);
     feedback.textContent = currencyRejection
-      ? "All splits in one transaction must use accounts with the same currency. Choose matching accounts to continue."
+      ? `All splits in one ${entryName} must use accounts with the same currency. Choose matching accounts to continue.`
       : error.networkError
-        ? "The connection ended before Pocket Ledger confirmed the save. Check Transactions before trying again to avoid a duplicate."
-        : error.message || "Couldn’t save this transaction. Check the details and try again.";
+        ? `The connection ended before Pocket Ledger confirmed the save. Check ${isSchedule ? "Schedules" : "Transactions"} before trying again to avoid a duplicate.`
+        : error.message || `Couldn’t save this ${entryName}. Check the details and try again.`;
     feedback.className = "form-feedback error-feedback";
   } finally {
     submit.disabled = !state.ledger.accounts.length;
-    submit.textContent = "Save transaction";
+    submit.textContent = state.entryMode === "schedule" ? "Save schedule" : "Save transaction";
   }
 });
 
-$("#transaction-search").addEventListener("input", renderTransactions);
-$("#transaction-filter").addEventListener("change", renderTransactions);
+const today = new Date();
+$("#metrics-anchor").value = localDateValue(today).slice(0, 7);
+$("#metrics-year").value = today.getFullYear();
+$("#metrics-start").value = localDateValue(new Date(today.getFullYear(), today.getMonth(), 1));
+$("#metrics-end").value = localDateValue(today);
+$("#transaction-date").value = localDateValue(today);
+updateMetricPeriodFields();
+setEntryMode("transaction");
+
+function resetTransactionResults() {
+  state.transactionVisibleLimit = 100;
+  renderTransactions();
+}
+
+$("#transaction-search").addEventListener("input", resetTransactionResults);
+$("#transaction-filter").addEventListener("change", resetTransactionResults);
+$("#transaction-category-filter").addEventListener("change", resetTransactionResults);
+$("#transaction-account-filter").addEventListener("change", resetTransactionResults);
+$("#load-more-transactions").addEventListener("click", () => {
+  state.transactionVisibleLimit += 100;
+  renderTransactions();
+});
+$("#schedule-cost-period").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-cost-period]");
+  if (!button || !state.ledger) return;
+  state.scheduleCostPeriod = button.dataset.costPeriod;
+  $$("#schedule-cost-period [data-cost-period]").forEach((item) => {
+    const selected = item === button;
+    item.classList.toggle("is-selected", selected);
+    item.setAttribute("aria-pressed", String(selected));
+  });
+  renderSchedules(state.ledger);
+});
+$("#metrics-period").addEventListener("change", () => {
+  updateMetricPeriodFields();
+  refreshMetrics();
+});
+$("#metrics-anchor").addEventListener("change", refreshMetrics);
+$("#metrics-year").addEventListener("change", refreshMetrics);
+$("#metrics-start").addEventListener("change", refreshMetrics);
+$("#metrics-end").addEventListener("change", refreshMetrics);
+$("#metrics-currency").addEventListener("change", refreshMetrics);
+$("#metrics-category").addEventListener("change", refreshMetrics);
+$("#category-back").addEventListener("click", () => {
+  $("#metrics-category").value = "";
+  refreshMetrics();
+});
+$("#category-list").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-category-id]");
+  if (!button) return;
+  $("#metrics-category").value = button.dataset.categoryId;
+  refreshMetrics();
+});
 
 $(".primary-nav").addEventListener("click", (event) => {
   const link = event.target.closest(".nav-link");

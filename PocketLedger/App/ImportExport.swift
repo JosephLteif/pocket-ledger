@@ -461,7 +461,10 @@ enum FinanceImportReview {
         }
 
         var referencedCategoryIDs = Set(
-            prepared.transactions.compactMap(\.categoryID)
+            prepared.transactions.flatMap { transaction in
+                [transaction.categoryID]
+                    + (transaction.outflows + transaction.inflows).map(\.categoryID)
+            }.compactMap { $0 }
         )
         while let category = prepared.categories.first(where: {
             guard referencedCategoryIDs.contains($0.id), let parentID = $0.parentID else { return false }
@@ -480,8 +483,8 @@ enum FinanceImportReview {
     ) -> String {
         let day = Calendar.current.startOfDay(for: transaction.date).timeIntervalSince1970
         let category = categoryPath(for: transaction.categoryID, in: data)
-        let outflows = movementFingerprints(transaction.outflows, in: data).joined(separator: ";")
-        let inflows = movementFingerprints(transaction.inflows, in: data).joined(separator: ";")
+        let outflows = movementFingerprints(transaction.outflows, transaction: transaction, in: data).joined(separator: ";")
+        let inflows = movementFingerprints(transaction.inflows, transaction: transaction, in: data).joined(separator: ";")
         let amountDue = transaction.amountDue.map { "\($0.currency.rawValue):\($0.minorUnits)" } ?? "-"
         return [
             String(Int64(day)),
@@ -496,6 +499,7 @@ enum FinanceImportReview {
 
     private static func movementFingerprints(
         _ movements: [MoneyMovement],
+        transaction: LedgerTransaction,
         in data: FinanceData
     ) -> [String] {
         movements.map { movement in
@@ -503,7 +507,8 @@ enum FinanceImportReview {
             return [
                 account?.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "?",
                 movement.money.currency.rawValue,
-                String(movement.money.minorUnits)
+                String(movement.money.minorUnits),
+                categoryPath(for: transaction.categoryID(for: movement), in: data)
             ].joined(separator: ":")
         }.sorted()
     }
@@ -2482,7 +2487,10 @@ enum LedgerCSVExporter {
 
             for (movement, destination) in movements {
                 let accountName = accountsByID[movement.accountID]?.name ?? ""
-                let category = categoryPath(for: transaction.categoryID, categories: financeData.categories)
+                let category = categoryPath(
+                    for: movement.categoryID ?? transaction.categoryID,
+                    categories: financeData.categories
+                )
                 let values = [
                     transaction.date.formatted(.iso8601.year().month().day()),
                     transaction.kind.displayName,

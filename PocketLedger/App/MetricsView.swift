@@ -84,39 +84,21 @@ private struct CategoryMetricsDetailSnapshot {
         for transaction in index.sortedTransactions {
             guard transaction.kind == .expense,
                   range.contains(transaction.date),
-                  index.categoryMatches(
-                      transaction.categoryID,
-                      selectedCategoryID: categoryID
-                  ),
-                  index.categoryIncludedInTotals(transaction.categoryID),
-                  transaction.outflows.contains(where: {
-                      index.includesInTotals(accountID: $0.accountID)
-                          && financeConvertedMinorUnits(
-                              $0.money,
-                              to: currency,
-                              using: transaction.exchangeRate
-                          ) != nil
-                  }),
+                  index.transactionMatchesCategory(transaction, selectedCategoryID: categoryID),
+                  index.transactionCategoryIncludedInTotals(transaction),
                   let monthStart = calendar.dateInterval(of: .month, for: transaction.date)?.start else {
                 continue
             }
 
-            let outflowAmount = transaction.outflows.reduce(Int64.zero) { total, movement in
-                guard index.includesInTotals(accountID: movement.accountID),
-                      let converted = financeConvertedMinorUnits(
-                          movement.money,
-                          to: currency,
-                          using: transaction.exchangeRate
-                      ) else {
-                    return total
-                }
-                return total + converted
-            }
-            monthlyAmounts[monthStart, default: 0] += outflowAmount
+            let categoryAmounts = index.expenseAmountsByCategory(transaction, currency: currency)
+                .filter { index.categoryMatches($0.key, selectedCategoryID: categoryID) }
+            let amount = max(categoryAmounts.values.reduce(Int64.zero, +), 0)
+            guard amount > 0 else { continue }
+            monthlyAmounts[monthStart, default: 0] += amount
 
             if monthStart == currentMonth {
                 selectedMonthTransactions.append(transaction)
-                selectedMonthTotal += outflowAmount
+                selectedMonthTotal += amount
             }
         }
 
@@ -866,7 +848,7 @@ struct MetricsView: View {
                 date: transaction.date,
                 note: transaction.note,
                 kind: transaction.kind,
-                category: store.ledgerIndex.categoryPath(for: transaction.categoryID),
+                category: store.ledgerIndex.categorySummary(for: transaction),
                 amount: amount
             )
         }
@@ -1441,7 +1423,7 @@ private struct MetricsTransactionDetailView: View {
 
     private func metadataSection(_ transaction: LedgerTransaction) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            detailRow("Category", store.ledgerIndex.categoryPath(for: transaction.categoryID))
+            detailRow("Category", store.ledgerIndex.categorySummary(for: transaction))
             detailRow("Type", transaction.kind.displayName)
 
             if let amountDue = transaction.amountDue {

@@ -82,6 +82,14 @@ enum FinanceTransactionValidator {
             guard movement.money.minorUnits > 0 else {
                 return .nonPositiveMovement
             }
+            if let categoryID = movement.categoryID {
+                guard let category = data.categories.first(where: { $0.id == categoryID }) else {
+                    return .missingCategory
+                }
+                if category.isArchived && !allowArchivedReferences {
+                    return .archivedCategory
+                }
+            }
         }
 
         switch transaction.kind {

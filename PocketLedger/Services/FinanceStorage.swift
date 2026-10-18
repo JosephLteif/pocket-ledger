@@ -396,8 +396,9 @@ final class FinanceStorage {
         }
 
         let latest = value.transactions.max { $0.date < $1.date }
-        let attentionCount = value.transactions.filter {
-            $0.kind == .expense && $0.categoryID == nil
+        let attentionCount = value.transactions.filter { transaction in
+            transaction.kind == .expense
+                && transaction.outflows.contains { transaction.categoryID(for: $0) == nil }
         }.count
             + value.budgets.filter { budget in
                 let spent = financeBudgetSpent(budget, in: value)

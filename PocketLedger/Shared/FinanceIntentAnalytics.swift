@@ -105,9 +105,7 @@ struct FinanceTransactionEntity: IndexedEntity, Hashable, Sendable {
         date = transaction.date
         note = transaction.note
         kind = transaction.kind.displayName
-        category = transaction.categoryID
-            .map { financeCategoryPath(for: $0, in: data.categories) }
-            ?? "Uncategorized"
+        category = financeTransactionCategorySummary(transaction, in: data.categories)
         amount = financeIntentMovementSummary(for: transaction)
 
         let accountIDs = Set((transaction.outflows + transaction.inflows).map(\.accountID))
@@ -373,8 +371,11 @@ private func financeTransaction(
     }
 
     if let categoryID {
-        guard let transactionCategoryID = transaction.categoryID,
-              financeCategoryScope(for: categoryID, in: data.categories).contains(transactionCategoryID) else {
+        let categoryScope = financeCategoryScope(for: categoryID, in: data.categories)
+        guard financeTransactionCategoryIDs(transaction).contains(where: { candidate in
+            guard let candidate else { return false }
+            return categoryScope.contains(candidate)
+        }) else {
             return false
         }
     }
@@ -428,14 +429,12 @@ private func financeSpendingSummary(
                   accountID: accountID,
                   in: data
               ),
-              financeCategoryIncludedInTotals(transaction.categoryID, in: data.categories) else {
+              transaction.outflows.contains(where: {
+                  financeCategoryIncludedInTotals(transaction.categoryID(for: $0), in: data.categories)
+              }) else {
             return false
         }
-
-        return transaction.outflows.contains { movement in
-            (accountID != nil && movement.accountID == accountID)
-                || (accountID == nil && data.accounts.first(where: { $0.id == movement.accountID })?.includeInTotals != false)
-        }
+        return true
     }
 
     var totals: [LedgerCurrency: Int64] = [:]
@@ -444,8 +443,14 @@ private func financeSpendingSummary(
 
     for transaction in matchingTransactions {
         let outflows = transaction.outflows.filter { movement in
-            (accountID != nil && movement.accountID == accountID)
+            let category = transaction.categoryID(for: movement)
+            let matchesCategory = categoryScope.map { scope in
+                category.map { scope.contains($0) } ?? false
+            } ?? true
+            let included = financeCategoryIncludedInTotals(category, in: data.categories)
+            let includedAccount = (accountID != nil && movement.accountID == accountID)
                 || (accountID == nil && data.accounts.first(where: { $0.id == movement.accountID })?.includeInTotals != false)
+            return matchesCategory && included && includedAccount
         }
         guard !outflows.isEmpty else { continue }
 
@@ -454,14 +459,16 @@ private func financeSpendingSummary(
             totals[movement.money.currency, default: 0] += movement.money.minorUnits
         }
 
-        let categoryName: String
-        if let transactionCategoryID = transaction.categoryID,
-           categoryScope?.contains(transactionCategoryID) != false {
-            categoryName = financeCategoryPath(for: transactionCategoryID, in: data.categories)
-        } else {
-            categoryName = "Uncategorized"
+        var seenCategoryIDs: Set<UUID?> = []
+        let transactionCategoryIDs = outflows
+            .map { transaction.categoryID(for: $0) }
+            .filter { seenCategoryIDs.insert($0).inserted }
+        for categoryID in transactionCategoryIDs {
+            let categoryName = categoryID
+                .map { financeCategoryPath(for: $0, in: data.categories) }
+                ?? "Uncategorized"
+            categoryCounts[categoryName, default: 0] += 1
         }
-        categoryCounts[categoryName, default: 0] += 1
     }
 
     let periodText = period.displayName.lowercased()
@@ -491,4 +498,21 @@ private func financeSpendingSummary(
     }
 
     return summary
+}
+
+private func financeTransactionCategoryIDs(_ transaction: LedgerTransaction) -> [UUID?] {
+    transaction.kind == .expense
+        ? transaction.outflows.map { transaction.categoryID(for: $0) }
+        : [transaction.categoryID]
+}
+
+private func financeTransactionCategorySummary(
+    _ transaction: LedgerTransaction,
+    in categories: [LedgerCategory]
+) -> String {
+    var seen: Set<UUID?> = []
+    return financeTransactionCategoryIDs(transaction)
+        .filter { seen.insert($0).inserted }
+        .map { $0.map { financeCategoryPath(for: $0, in: categories) } ?? "Uncategorized" }
+        .joined(separator: ", ")
 }

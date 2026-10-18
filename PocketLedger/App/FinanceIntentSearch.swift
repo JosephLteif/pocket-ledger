@@ -54,7 +54,13 @@ private struct FinanceTransactionIntentSearchIndex {
             return true
         }
 
-        let category = transaction.categoryID.map { categoryPath(for: $0) } ?? "Uncategorized"
+        var seenCategoryIDs: Set<UUID?> = []
+        let category = (transaction.kind == .expense
+            ? transaction.outflows.map { transaction.categoryID(for: $0) }
+            : [transaction.categoryID])
+            .filter { seenCategoryIDs.insert($0).inserted }
+            .map { $0.map { categoryPath(for: $0) } ?? "Uncategorized" }
+            .joined(separator: ", ")
         if category.localizedCaseInsensitiveContains(query) {
             return true
         }

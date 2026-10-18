@@ -552,7 +552,8 @@ struct ImportDraft {
                     return MoneyMovement(
                         id: movement.id,
                         accountID: target.id,
-                        money: movement.money.recast(to: target.currency)
+                        money: movement.money.recast(to: target.currency),
+                        categoryID: movement.categoryID
                     )
                 }
                 transaction.inflows = transaction.inflows.map { movement in
@@ -561,7 +562,8 @@ struct ImportDraft {
                     return MoneyMovement(
                         id: movement.id,
                         accountID: target.id,
-                        money: movement.money.recast(to: target.currency)
+                        money: movement.money.recast(to: target.currency),
+                        categoryID: movement.categoryID
                     )
                 }
                 if changed {
@@ -602,10 +604,39 @@ struct ImportDraft {
             }
             var transactionCount = 0
             for index in data.transactions.indices {
-                guard let categoryID = data.transactions[index].categoryID,
-                      selectedCategoryIDs.contains(categoryID) else { continue }
-                data.transactions[index].categoryID = target.id
-                transactionCount += 1
+                var transaction = data.transactions[index]
+                var changed = false
+                if let categoryID = transaction.categoryID,
+                   selectedCategoryIDs.contains(categoryID) {
+                    transaction.categoryID = target.id
+                    changed = true
+                }
+                transaction.outflows = transaction.outflows.map { movement in
+                    guard let categoryID = movement.categoryID,
+                          selectedCategoryIDs.contains(categoryID) else { return movement }
+                    changed = true
+                    return MoneyMovement(
+                        id: movement.id,
+                        accountID: movement.accountID,
+                        money: movement.money,
+                        categoryID: target.id
+                    )
+                }
+                transaction.inflows = transaction.inflows.map { movement in
+                    guard let categoryID = movement.categoryID,
+                          selectedCategoryIDs.contains(categoryID) else { return movement }
+                    changed = true
+                    return MoneyMovement(
+                        id: movement.id,
+                        accountID: movement.accountID,
+                        money: movement.money,
+                        categoryID: target.id
+                    )
+                }
+                if changed {
+                    data.transactions[index] = transaction
+                    transactionCount += 1
+                }
             }
             for index in data.categories.indices where selectedCategoryIDs.contains(data.categories[index].parentID ?? UUID()) {
                 data.categories[index].parentID = target.id
@@ -640,7 +671,12 @@ struct ImportDraft {
                 movementCount: 0
             )
         case .excludeUnused:
-            let usedIDs = Set(data.transactions.compactMap(\.categoryID))
+            let usedIDs = Set(
+                data.transactions.flatMap { transaction in
+                    [transaction.categoryID]
+                        + (transaction.outflows + transaction.inflows).map(\.categoryID)
+                }.compactMap { $0 }
+            )
             guard selected.allSatisfy({ !usedIDs.contains($0.id) }) else {
                 throw ImportBulkMutationError.categoryIsUsed
             }

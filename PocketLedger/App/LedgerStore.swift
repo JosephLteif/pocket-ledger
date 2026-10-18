@@ -116,7 +116,7 @@ final class LedgerStore: ObservableObject {
 
         for transaction in data.transactions {
             if transaction.kind == .expense,
-               transaction.categoryID == nil,
+               ledgerIndex.isUncategorizedExpense(transaction),
                transactionHasIncludedAccount(transaction) {
                 uncategorizedCount += 1
             }
@@ -242,10 +242,17 @@ final class LedgerStore: ObservableObject {
         var counts: [UUID: Int] = [:]
         for transaction in ledgerIndex.sortedTransactions where transaction.kind == .expense
             && transaction.date >= monthStart
-            && ledgerIndex.categoryIncludedInTotals(transaction.categoryID)
+            && ledgerIndex.transactionCategoryIncludedInTotals(transaction)
             && transaction.outflows.contains(where: { includesInTotals(accountID: $0.accountID) }) {
-            guard let categoryID = transaction.categoryID else { continue }
-            counts[categoryID, default: 0] += 1
+            let categoryIDs = Set(
+                transaction.outflows
+                    .filter { includesInTotals(accountID: $0.accountID) }
+                    .map { transaction.categoryID(for: $0) }
+                    .compactMap { $0 }
+            )
+            for categoryID in categoryIDs where ledgerIndex.categoryIncludedInTotals(categoryID) {
+                counts[categoryID, default: 0] += 1
+            }
         }
 
         guard let categoryID = counts.max(by: { $0.value < $1.value })?.key else {
@@ -340,6 +347,12 @@ final class LedgerStore: ObservableObject {
         for index in updated.transactions.indices where ids.contains(updated.transactions[index].id) {
             guard updated.transactions[index].loanID == nil else { continue }
             updated.transactions[index].categoryID = categoryID
+            updated.transactions[index].outflows = updated.transactions[index].outflows.map {
+                MoneyMovement(accountID: $0.accountID, money: $0.money, categoryID: categoryID)
+            }
+            updated.transactions[index].inflows = updated.transactions[index].inflows.map {
+                MoneyMovement(accountID: $0.accountID, money: $0.money, categoryID: categoryID)
+            }
             changed = true
         }
         guard changed else {
@@ -425,8 +438,12 @@ final class LedgerStore: ObservableObject {
             kind: transaction.kind,
             categoryID: transaction.categoryID,
             amountDue: transaction.amountDue,
-            outflows: transaction.outflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
-            inflows: transaction.inflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
+            outflows: transaction.outflows.map {
+                MoneyMovement(accountID: $0.accountID, money: $0.money, categoryID: $0.categoryID)
+            },
+            inflows: transaction.inflows.map {
+                MoneyMovement(accountID: $0.accountID, money: $0.money, categoryID: $0.categoryID)
+            },
             exchangeRate: transaction.exchangeRate,
             changeAdjustment: transaction.changeAdjustment,
             attachmentIDs: transaction.attachmentIDs

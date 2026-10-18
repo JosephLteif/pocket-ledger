@@ -62,6 +62,18 @@ enum WatchSyncPublisher {
                     return nil
                 }
 
+                let transactionCategoryPath: String?
+                if transaction.kind == .expense {
+                    var seenCategoryIDs: Set<UUID?> = []
+                    let categoryPaths = transaction.outflows
+                        .map { transaction.categoryID(for: $0) }
+                        .filter { seenCategoryIDs.insert($0).inserted }
+                        .map { categoryPath(for: $0) ?? "Uncategorized" }
+                    transactionCategoryPath = categoryPaths.isEmpty ? nil : categoryPaths.joined(separator: ", ")
+                } else {
+                    transactionCategoryPath = categoryPath(for: transaction.categoryID)
+                }
+
                 return WatchTransactionSummary(
                     id: transaction.id,
                     date: transaction.date,
@@ -69,7 +81,7 @@ enum WatchSyncPublisher {
                     kind: transaction.kind.displayName,
                     amount: movement.money,
                     accountName: account.name,
-                    categoryPath: categoryPath(for: transaction.categoryID)
+                    categoryPath: transactionCategoryPath
                 )
             }
 
@@ -83,7 +95,7 @@ enum WatchSyncPublisher {
             )
         }
         let attentionCount = data.transactions.filter {
-            $0.kind == .expense && $0.categoryID == nil
+            index.isUncategorizedExpense($0)
         }.count
             + data.budgets.filter { budget in
                 financeBudgetSpent(budget, in: data, using: index).minorUnits

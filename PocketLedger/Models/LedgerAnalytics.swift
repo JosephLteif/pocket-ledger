@@ -134,27 +134,60 @@ struct LedgerIndex {
     }
 
     func categoryIncludedInTotals(_ categoryID: UUID?) -> Bool {
-        guard let categoryID else { return true }
-
-        let ancestorIDs = categoryAncestorsByID[categoryID] ?? [categoryID]
-        for id in ancestorIDs {
-            guard let category = categoriesByID[id] else { break }
-            let categoryName = category.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            if category.parentID == nil,
-               categoryName.caseInsensitiveCompare("Modified Bal.") == .orderedSame {
-                return false
-            }
-            if !category.includeInTotals {
-                return false
-            }
-        }
-        return true
+        Self.categoryIsIncluded(
+            categoryID,
+            categoriesByID: categoriesByID,
+            categoryAncestorsByID: categoryAncestorsByID
+        )
     }
 
     func categoryMatches(_ categoryID: UUID?, selectedCategoryID: UUID?) -> Bool {
         guard let selectedCategoryID else { return true }
         guard let categoryID else { return false }
         return categoryAncestorsByID[categoryID]?.contains(selectedCategoryID) ?? (categoryID == selectedCategoryID)
+    }
+
+    func categoryIDs(for transaction: LedgerTransaction) -> [UUID?] {
+        transaction.kind == .expense
+            ? transaction.outflows.map { transaction.categoryID(for: $0) }
+            : [transaction.categoryID]
+    }
+
+    func transactionMatchesCategory(
+        _ transaction: LedgerTransaction,
+        selectedCategoryID: UUID?,
+        includesDescendants: Bool = true
+    ) -> Bool {
+        guard let selectedCategoryID else { return true }
+        return categoryIDs(for: transaction).contains { categoryID in
+            guard let categoryID else { return false }
+            return includesDescendants
+                ? categoryMatches(categoryID, selectedCategoryID: selectedCategoryID)
+                : categoryID == selectedCategoryID
+        }
+    }
+
+    func isUncategorizedExpense(_ transaction: LedgerTransaction) -> Bool {
+        transaction.kind == .expense
+            && categoryIDs(for: transaction).contains { $0 == nil }
+    }
+
+    func transactionCategoryIncludedInTotals(_ transaction: LedgerTransaction) -> Bool {
+        guard transaction.kind == .expense else {
+            return categoryIncludedInTotals(transaction.categoryID)
+        }
+        return transaction.outflows.contains {
+            includesInTotals(accountID: $0.accountID)
+                && categoryIncludedInTotals(transaction.categoryID(for: $0))
+        }
+    }
+
+    func categorySummary(for transaction: LedgerTransaction) -> String {
+        var seen: Set<UUID?> = []
+        return categoryIDs(for: transaction)
+            .filter { seen.insert($0).inserted }
+            .map { categoryPath(for: $0) }
+            .joined(separator: ", ")
     }
 
     func categoryPath(for categoryID: UUID?) -> String {
@@ -248,15 +281,29 @@ struct LedgerIndex {
     }
 
     func netExpenseAmount(_ transaction: LedgerTransaction, currency: LedgerCurrency) -> Int64 {
-        guard transaction.kind == .expense,
-              categoryIncludedInTotals(transaction.categoryID) else {
-            return 0
-        }
-
+        guard transaction.kind == .expense else { return 0 }
         return max(
-            movementTotal(transaction.outflows, currency: currency, exchangeRate: transaction.exchangeRate)
-                - movementTotal(transaction.inflows, currency: currency, exchangeRate: transaction.exchangeRate),
+            Self.expenseAmountsByCategory(
+                transaction,
+                currency: currency,
+                accountsByID: accountsByID,
+                categoriesByID: categoriesByID,
+                categoryAncestorsByID: categoryAncestorsByID
+            ).values.reduce(Int64.zero, +),
             0
+        )
+    }
+
+    func expenseAmountsByCategory(
+        _ transaction: LedgerTransaction,
+        currency: LedgerCurrency
+    ) -> [UUID?: Int64] {
+        Self.expenseAmountsByCategory(
+            transaction,
+            currency: currency,
+            accountsByID: accountsByID,
+            categoriesByID: categoriesByID,
+            categoryAncestorsByID: categoryAncestorsByID
         )
     }
 
@@ -288,9 +335,10 @@ struct LedgerIndex {
                 .filter {
                     $0.kind == .expense
                         && interval.contains($0.date)
-                        && $0.categoryID == budget.categoryID
                 }
-                .reduce(Int64.zero) { $0 + netExpenseAmount($1, currency: budget.currency) }
+                .reduce(Int64.zero) {
+                    $0 + (expenseAmountsByCategory($1, currency: budget.currency)[budget.categoryID] ?? 0)
+                }
             return Money(currency: budget.currency, minorUnits: total)
         }
 
@@ -332,61 +380,95 @@ struct LedgerIndex {
         categoryAncestorsByID: [UUID: [UUID]],
         calendar: Calendar
     ) -> [MonthCategoryCurrencyKey: Int64] {
-        func categoryIncludedInTotals(_ categoryID: UUID?) -> Bool {
-            guard let categoryID else { return true }
-            for id in categoryAncestorsByID[categoryID] ?? [categoryID] {
-                guard let category = categoriesByID[id] else { break }
-                let name = category.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                if category.parentID == nil,
-                   name.caseInsensitiveCompare("Modified Bal.") == .orderedSame {
-                    return false
-                }
-                if !category.includeInTotals { return false }
-            }
-            return true
-        }
-
-        func movementTotal(
-            _ movements: [MoneyMovement],
-            currency: LedgerCurrency,
-            exchangeRate: ExchangeRate?
-        ) -> Int64 {
-            movements.reduce(Int64.zero) { total, movement in
-                guard accountsByID[movement.accountID]?.includeInTotals == true,
-                      let converted = financeConvertedMinorUnits(
-                          movement.money,
-                          to: currency,
-                          using: exchangeRate
-                      ) else {
-                    return total
-                }
-                return total + converted
-            }
-        }
-
         var totals: [MonthCategoryCurrencyKey: Int64] = [:]
         for transaction in transactions where transaction.kind == .expense {
-            guard categoryIncludedInTotals(transaction.categoryID),
-                  let monthStart = calendar.dateInterval(of: .month, for: transaction.date)?.start else {
+            guard let monthStart = calendar.dateInterval(of: .month, for: transaction.date)?.start else {
                 continue
             }
 
             for currency in LedgerCurrency.allCases {
-                let amount = max(
-                    movementTotal(transaction.outflows, currency: currency, exchangeRate: transaction.exchangeRate)
-                        - movementTotal(transaction.inflows, currency: currency, exchangeRate: transaction.exchangeRate),
-                    0
+                let amounts = expenseAmountsByCategory(
+                    transaction,
+                    currency: currency,
+                    accountsByID: accountsByID,
+                    categoriesByID: categoriesByID,
+                    categoryAncestorsByID: categoryAncestorsByID
                 )
-                guard amount > 0 else { continue }
-                let key = MonthCategoryCurrencyKey(
-                    monthStart: monthStart,
-                    categoryID: transaction.categoryID,
-                    currency: currency
-                )
-                totals[key, default: 0] += amount
+                for (categoryID, amount) in amounts where amount != 0 {
+                    let key = MonthCategoryCurrencyKey(monthStart: monthStart, categoryID: categoryID, currency: currency)
+                    totals[key, default: 0] += amount
+                }
             }
         }
         return totals
+    }
+
+    private static func categoryIsIncluded(
+        _ categoryID: UUID?,
+        categoriesByID: [UUID: LedgerCategory],
+        categoryAncestorsByID: [UUID: [UUID]]
+    ) -> Bool {
+        guard let categoryID else { return true }
+        for id in categoryAncestorsByID[categoryID] ?? [categoryID] {
+            guard let category = categoriesByID[id] else { break }
+            let name = category.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if category.parentID == nil,
+               name.caseInsensitiveCompare("Modified Bal.") == .orderedSame {
+                return false
+            }
+            if !category.includeInTotals { return false }
+        }
+        return true
+    }
+
+    private static func expenseAmountsByCategory(
+        _ transaction: LedgerTransaction,
+        currency: LedgerCurrency,
+        accountsByID: [UUID: Account],
+        categoriesByID: [UUID: LedgerCategory],
+        categoryAncestorsByID: [UUID: [UUID]]
+    ) -> [UUID?: Int64] {
+        var amounts: [UUID?: Int64] = [:]
+        let refundCategoryID = transaction.categoryID
+            ?? transaction.outflows.first.flatMap { transaction.categoryID(for: $0) }
+
+        for movement in transaction.outflows {
+            let categoryID = transaction.categoryID(for: movement)
+            guard categoryIsIncluded(
+                    categoryID,
+                    categoriesByID: categoriesByID,
+                    categoryAncestorsByID: categoryAncestorsByID
+                  ),
+                  accountsByID[movement.accountID]?.includeInTotals == true,
+                  let converted = financeConvertedMinorUnits(
+                      movement.money,
+                      to: currency,
+                      using: transaction.exchangeRate
+                  ) else {
+                continue
+            }
+            amounts[categoryID, default: 0] += converted
+        }
+
+        for movement in transaction.inflows {
+            let categoryID = movement.categoryID ?? refundCategoryID
+            guard categoryIsIncluded(
+                    categoryID,
+                    categoriesByID: categoriesByID,
+                    categoryAncestorsByID: categoryAncestorsByID
+                  ),
+                  accountsByID[movement.accountID]?.includeInTotals == true,
+                  let converted = financeConvertedMinorUnits(
+                      movement.money,
+                      to: currency,
+                      using: transaction.exchangeRate
+                  ) else {
+                continue
+            }
+            amounts[categoryID, default: 0] -= converted
+        }
+
+        return amounts
     }
 }
 

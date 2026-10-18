@@ -127,7 +127,7 @@ struct TransactionListSnapshot {
         let filteredTransactions = index.sortedTransactions.filter { transaction in
             let matchesKind: Bool
             if filter == .uncategorized {
-                matchesKind = transaction.kind == .expense && transaction.categoryID == nil
+                matchesKind = index.isUncategorizedExpense(transaction)
             } else {
                 matchesKind = filter.kind.map { transaction.kind == $0 } ?? true
             }
@@ -147,12 +147,11 @@ struct TransactionListSnapshot {
             guard matchesPeriod else { return false }
 
             if let categoryID {
-                guard let transactionCategoryID = transaction.categoryID else { return false }
-                let ancestors = index.categoryAncestorsByID[transactionCategoryID] ?? [transactionCategoryID]
-                let matchesCategory = includesCategoryDescendants
-                    ? ancestors.contains(categoryID)
-                    : transactionCategoryID == categoryID
-                guard matchesCategory else { return false }
+                guard index.transactionMatchesCategory(
+                    transaction,
+                    selectedCategoryID: categoryID,
+                    includesDescendants: includesCategoryDescendants
+                ) else { return false }
             }
 
             if let accountID {
@@ -1405,7 +1404,7 @@ struct TransactionRow: View {
             detail = "Loan activity"
         } else {
             detail = transaction.kind == .expense
-                ? store.categoryPath(for: transaction.categoryID)
+                ? store.ledgerIndex.categorySummary(for: transaction)
                 : transaction.kind.displayName
         }
         if accountContext != nil {
@@ -1422,8 +1421,10 @@ struct TransactionRow: View {
 
     private var iconName: String {
         if transaction.loanID != nil { return "banknote" }
-        if transaction.categoryID != nil {
-            return store.ledgerIndex.categorySystemImage(for: transaction.categoryID)
+        let categoryID = transaction.categoryID
+            ?? transaction.outflows.compactMap { transaction.categoryID(for: $0) }.first
+        if categoryID != nil {
+            return store.ledgerIndex.categorySystemImage(for: categoryID)
         }
 
         switch transaction.kind {

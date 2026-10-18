@@ -597,8 +597,11 @@ struct ImportWizardView: View {
     private func affectedTransactionCount(for categories: [LedgerCategory]) -> Int {
         let ids = Set(categories.map(\.id))
         return draft.importedData?.transactions.filter { transaction in
-            guard let categoryID = transaction.categoryID else { return false }
-            return ids.contains(categoryID)
+            if let categoryID = transaction.categoryID, ids.contains(categoryID) { return true }
+            return (transaction.outflows + transaction.inflows).contains {
+                guard let categoryID = transaction.categoryID(for: $0) else { return false }
+                return ids.contains(categoryID)
+            }
         }.count ?? 0
     }
 }
@@ -1186,8 +1189,11 @@ private struct ImportWizardOrganizeStep: View {
     private func affectedTransactionCount(for categories: [LedgerCategory]) -> Int {
         let ids = Set(categories.map(\.id))
         return draft.importedData?.transactions.filter { transaction in
-            guard let categoryID = transaction.categoryID else { return false }
-            return ids.contains(categoryID)
+            if let categoryID = transaction.categoryID, ids.contains(categoryID) { return true }
+            return (transaction.outflows + transaction.inflows).contains {
+                guard let categoryID = transaction.categoryID(for: $0) else { return false }
+                return ids.contains(categoryID)
+            }
         }.count ?? 0
     }
 }
@@ -1794,9 +1800,13 @@ private func makeImportWizardReviewContext(
         let accountText = Set(movements.map(\.accountID))
             .compactMap { accountsByID[$0]?.name }
             .joined(separator: " ")
-        let categoryText = transaction.categoryID
-            .flatMap { categoriesByID[$0]?.name }
-            ?? ""
+        let categoryIDs = Set(
+            (transaction.kind == .expense
+                ? transaction.outflows.map { transaction.categoryID(for: $0) }
+                : [transaction.categoryID])
+                .compactMap { $0 }
+        )
+        let categoryText = categoryIDs.compactMap { categoriesByID[$0]?.name }.joined(separator: " ")
         let amountText = movements.map { $0.money.formatted }.joined(separator: " ")
         transactionSearchTextByID[transaction.id] = [
             transaction.note,

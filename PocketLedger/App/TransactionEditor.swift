@@ -8,6 +8,7 @@ private struct MovementDraft: Identifiable, Equatable {
     var accountID: UUID
     var currency: LedgerCurrency
     var amount: String
+    var categoryID: UUID? = nil
 }
 
 enum FinanceTransactionDefaults {
@@ -203,6 +204,7 @@ struct TransactionEditor: View {
     @State private var scheduleEnabled = true
     @State private var categoryID: UUID?
     @State private var isSelectingCategory = false
+    @State private var categorySelectionPaymentID: UUID?
     @State private var dueCurrency: LedgerCurrency = .usd
     @State private var amountDue = ""
     @State private var outflows: [MovementDraft]
@@ -336,13 +338,15 @@ struct TransactionEditor: View {
                 MovementDraft(
                     accountID: $0.accountID,
                     currency: $0.money.currency,
-                    amount: Self.inputText(for: $0.money)
+                    amount: Self.inputText(for: $0.money),
+                    categoryID: $0.categoryID ?? sourceTransaction?.categoryID ?? scheduledTransaction?.categoryID
                 )
             } ?? [
                 MovementDraft(
                     accountID: firstAccountID,
                     currency: initialAmount?.currency ?? firstAccount?.currency ?? preferredCurrency ?? .usd,
-                    amount: initialAmount.map { Self.inputText(for: $0) } ?? ""
+                    amount: initialAmount.map { Self.inputText(for: $0) } ?? "",
+                    categoryID: resolvedInitialKind == .expense ? initialCategoryID : nil
                 )
             ]
         )
@@ -351,7 +355,8 @@ struct TransactionEditor: View {
                 MovementDraft(
                     accountID: $0.accountID,
                     currency: $0.money.currency,
-                    amount: Self.inputText(for: $0.money)
+                    amount: Self.inputText(for: $0.money),
+                    categoryID: $0.categoryID ?? sourceTransaction?.categoryID ?? scheduledTransaction?.categoryID
                 )
             } ?? (resolvedInitialKind == .transfer
                 ? [
@@ -510,6 +515,9 @@ struct TransactionEditor: View {
                 synchronizeAutomaticTransferAmount()
             }
             .onChange(of: outflows) { _, _ in
+                if kind == .expense, outflows.count == 1 {
+                    categoryID = outflows[0].categoryID
+                }
                 synchronizeAutomaticTransferAmount()
             }
             .onChange(of: inflows) { oldInflows, newInflows in
@@ -571,10 +579,12 @@ struct TransactionEditor: View {
                     AttachmentPreviewView(store: store, attachment: attachment)
                 }
             }
-            .sheet(isPresented: $isSelectingCategory) {
+            .sheet(isPresented: $isSelectingCategory, onDismiss: {
+                categorySelectionPaymentID = nil
+            }) {
                 CategorySelectionSheet(
                     categories: selectableCategories,
-                    selectedCategoryID: $categoryID,
+                    selectedCategoryID: categorySelectionBinding,
                     includeUncategorized: true
                 )
             }
@@ -714,8 +724,8 @@ struct TransactionEditor: View {
             footer: Text(outflows.isEmpty
                          ? "Choose the account this purchase was paid from."
                          : outflows.count > 1
-                            ? "These amounts combine into one purchase total. Each part can use a different account or currency."
-                            : "Add another part only if you paid from more than one account."),
+                            ? "These amounts combine into one purchase total. Each part can use a different account, currency, or category."
+                            : "Add another part to use a different account, currency, or category."),
             content: {
             if outflows.isEmpty {
                 Button("Choose payment account") {
@@ -746,6 +756,22 @@ struct TransactionEditor: View {
                             focusAmountOnAppear: index == 0 && outflows[index].amount.isEmpty,
                             isAmountRevealed: canEditAmounts
                         )
+                        if outflows.count > 1 {
+                            if selectableCategories.isEmpty {
+                                Text("No categories yet — this payment will be Uncategorized.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                categorySelectionButton(
+                                    for: outflows[index].categoryID,
+                                    accessibilityLabel: "Category for payment \(index + 1)"
+                                ) {
+                                    categorySelectionPaymentID = outflows[index].id
+                                    isSelectingCategory = true
+                                }
+                                .accessibilityIdentifier("payment-category-picker-\(index + 1)")
+                            }
+                        }
                     }
                     .padding(.vertical, 4)
                 }
@@ -971,28 +997,16 @@ struct TransactionEditor: View {
     @ViewBuilder
     private var detailsSection: some View {
         Section("Details") {
-            if kind == .expense {
+            if kind == .expense && outflows.count <= 1 {
                 if selectableCategories.isEmpty {
                     Text("No categories yet — this expense will be Uncategorized.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
-                    Button {
+                    categorySelectionButton(for: categoryIDForPicker) {
+                        categorySelectionPaymentID = nil
                         isSelectingCategory = true
-                    } label: {
-                        LabeledContent("Category") {
-                            HStack(spacing: 6) {
-                                Text(selectedCategoryPath)
-                                    .lineLimit(1)
-                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(PocketLedgerTheme.textTertiary)
-                            }
-                        }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Search categories or browse the category hierarchy")
                 }
             }
 
@@ -1275,10 +1289,6 @@ struct TransactionEditor: View {
         }
     }
 
-    private var selectedCategoryPath: String {
-        categoryID.map { store.categoryPath(for: $0) } ?? "Uncategorized"
-    }
-
     private func beginReplacingAttachment(_ attachment: LedgerAttachment) {
         replacingAttachmentID = attachment.id
         isShowingAttachmentImporter = true
@@ -1286,12 +1296,69 @@ struct TransactionEditor: View {
 
     private var selectableCategories: [LedgerCategory] {
         var categories = store.activeCategories
-        if let categoryID,
-           let category = store.ledgerIndex.categoriesByID[categoryID],
-           !categories.contains(where: { $0.id == category.id }) {
-            categories.append(category)
+        let existingCategoryIDs = Set(([categoryID] + (outflows + inflows).map(\.categoryID)).compactMap { $0 })
+        for categoryID in existingCategoryIDs {
+            if let category = store.ledgerIndex.categoriesByID[categoryID],
+               !categories.contains(where: { $0.id == category.id }) {
+                categories.append(category)
+            }
         }
         return categories
+    }
+
+    private var categoryIDForPicker: UUID? {
+        outflows.count == 1 ? outflows[0].categoryID : categoryID
+    }
+
+    private var categorySelectionBinding: Binding<UUID?> {
+        Binding(
+            get: {
+                guard let paymentID = categorySelectionPaymentID,
+                      let payment = outflows.first(where: { $0.id == paymentID }) else {
+                    return categoryIDForPicker
+                }
+                return payment.categoryID
+            },
+            set: { selectedID in
+                guard let paymentID = categorySelectionPaymentID,
+                      let index = outflows.firstIndex(where: { $0.id == paymentID }) else {
+                    categoryID = selectedID
+                    if outflows.count == 1 { outflows[0].categoryID = selectedID }
+                    return
+                }
+                outflows[index].categoryID = selectedID
+                if index == 0 { categoryID = selectedID }
+            }
+        )
+    }
+
+    private func categorySelectionButton(
+        for selectedID: UUID?,
+        accessibilityLabel: String = "Category",
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            LabeledContent("Category") {
+                HStack(spacing: 6) {
+                    Text(selectedID.map { store.categoryPath(for: $0) } ?? "Uncategorized")
+                        .lineLimit(1)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(selectedID.map { store.categoryPath(for: $0) } ?? "Uncategorized")
+        .accessibilityHint("Search categories or browse the category hierarchy")
+    }
+
+    private var transactionCategoryID: UUID? {
+        guard kind == .expense else { return nil }
+        guard let first = outflows.first else { return categoryID }
+        return outflows.allSatisfy({ $0.categoryID == first.categoryID }) ? first.categoryID : nil
     }
 
     private func replaceAttachment(_ result: Result<[URL], Error>) {
@@ -1333,7 +1400,8 @@ struct TransactionEditor: View {
         return MovementDraft(
             accountID: account?.id ?? UUID(),
             currency: account?.currency ?? .usd,
-            amount: ""
+            amount: "",
+            categoryID: kind == .expense ? categoryID : nil
         )
     }
 
@@ -1344,7 +1412,8 @@ struct TransactionEditor: View {
         return MovementDraft(
             accountID: account?.id ?? UUID(),
             currency: account?.currency ?? .usd,
-            amount: ""
+            amount: "",
+            categoryID: outflows.isEmpty ? categoryID : outflows[0].categoryID
         )
     }
 
@@ -1355,7 +1424,10 @@ struct TransactionEditor: View {
         return MovementDraft(
             accountID: account?.id ?? UUID(),
             currency: account?.currency ?? .usd,
-            amount: ""
+            amount: "",
+            categoryID: kind == .expense
+                ? (outflows.isEmpty ? categoryID : outflows[0].categoryID)
+                : nil
         )
     }
 
@@ -1525,6 +1597,9 @@ struct TransactionEditor: View {
     }
 
     private func handleKindChange(_ newKind: TransactionKind) {
+        if newKind == .expense, outflows.count == 1, outflows[0].categoryID == nil {
+            outflows[0].categoryID = categoryID
+        }
         if newKind == .transfer && inflows.isEmpty {
             inflows.append(newReceivingMovementDraft)
         }
@@ -1747,7 +1822,7 @@ struct TransactionEditor: View {
                   money.minorUnits > 0 else {
                 return nil
             }
-            return MoneyMovement(accountID: account.id, money: money)
+            return MoneyMovement(accountID: account.id, money: money, categoryID: draft.categoryID)
         }
         return movements.count == drafts.count ? movements : nil
     }
@@ -1835,7 +1910,7 @@ struct TransactionEditor: View {
             date: date,
             note: trimmedNote.isEmpty ? kind.displayName : trimmedNote,
             kind: kind,
-            categoryID: kind == .expense ? categoryID : nil,
+            categoryID: transactionCategoryID,
             amountDue: parsedAmountDue,
             outflows: parsedOutflows,
             inflows: parsedInflows,

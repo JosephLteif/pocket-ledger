@@ -5,6 +5,7 @@ import SwiftUI
 struct MoreView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
+    @ObservedObject var localWebServer: LocalWebServer
     @ObservedObject private var proAccess = ProEntitlementStore.shared
     let onAddExpense: () -> Void
     let onAddAction: (AddAction) -> Void
@@ -112,6 +113,13 @@ struct MoreView: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        LocalWebAccessView(server: localWebServer)
+                    } label: {
+                        Label("PC Access", systemImage: "desktopcomputer")
+                    }
+                    .listRowBackground(PocketLedgerTheme.surface)
+
                     NavigationLink {
                         DataTransferView(store: store)
                     } label: {

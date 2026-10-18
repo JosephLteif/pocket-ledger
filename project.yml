@@ -30,6 +30,12 @@ packages:
   ZIPFoundation:
     url: https://github.com/weichsel/ZIPFoundation.git
     from: 0.9.19
+  swift-certificates:
+    url: https://github.com/apple/swift-certificates.git
+    exactVersion: 1.18.0
+  swift-asn1:
+    url: https://github.com/apple/swift-asn1.git
+    from: 1.1.0
 
 targets:
   PocketLedger:
@@ -44,6 +50,7 @@ targets:
       - path: PocketLedger/Resources/Assets.xcassets
     resources:
       - path: PocketLedger/Config/PrivacyInfo.xcprivacy
+      - path: PocketLedger/Resources/LocalWeb
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX)
@@ -61,6 +68,9 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSCameraUsageDescription: "Pocket Ledger uses the camera to read bill items."
         NSFaceIDUsageDescription: "Pocket Ledger uses Face ID to unlock your financial data."
+        NSLocalNetworkUsageDescription: "Pocket Ledger uses your local network to let a paired browser access PC Access while the app is open."
+        NSBonjourServices:
+          - _pocketledger._tcp
         NSPhotoLibraryUsageDescription: "Pocket Ledger uses selected bill photos to read bill items."
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: com.josephlteif.pocketledger.backup
@@ -90,6 +100,10 @@ targets:
           - $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
     dependencies:
       - package: ZIPFoundation
+      - package: swift-certificates
+        product: X509
+      - package: swift-asn1
+        product: SwiftASN1
       - target: PocketLedgerWidget
         embed: true
         codeSign: false

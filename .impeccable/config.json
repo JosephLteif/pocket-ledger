@@ -29,6 +29,15 @@
         ],
         "createdAt": "2026-10-08T09:18:53.510Z",
         "reason": "Agent: privacy-strip content is inset by the centered page-frame with viewport gutters"
+      },
+      {
+        "rule": "cream-palette",
+        "value": "*",
+        "files": [
+          "PocketLedger/Resources/LocalWeb/index.html"
+        ],
+        "createdAt": "2026-10-18T15:29:50.556Z",
+        "reason": "Agent: matches Pocket Ledger's selected clay palette in DesignSystem.swift (background #F6EFE5, accent #A35438)."
       }
     ]
   }

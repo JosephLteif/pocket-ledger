@@ -4,7 +4,8 @@ import UIKit
 
 @MainActor
 struct ContentView: View {
-    @StateObject private var store = LedgerStore()
+    @StateObject private var store: LedgerStore
+    @StateObject private var localWebServer: LocalWebServer
     @StateObject private var proAccess = ProEntitlementStore.shared
     @StateObject private var security = AppSecurityService()
     @StateObject private var intentSearchRouter = FinanceIntentSearchRouter.shared
@@ -24,6 +25,12 @@ struct ContentView: View {
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init() {
+        let store = LedgerStore()
+        _store = StateObject(wrappedValue: store)
+        _localWebServer = StateObject(wrappedValue: LocalWebServer(store: store))
+    }
 
     var body: some View {
         ZStack {
@@ -54,10 +61,11 @@ struct ContentView: View {
                     await NotificationService.refreshLoanNotifications(loans: loans)
                 }
             } else if phase == .inactive {
-                if security.isPasscodeEnabled && !security.isBiometricPromptActive {
+                if !localWebServer.isStarting && security.isPasscodeEnabled && !security.isBiometricPromptActive {
                     isUnlocked = false
                 }
             } else if phase == .background {
+                localWebServer.stop()
                 needsForegroundRefresh = true
                 areBalancesRevealed = false
                 if security.isPasscodeEnabled {
@@ -75,6 +83,9 @@ struct ContentView: View {
             openPendingVisualBillScan()
         }
         .onChange(of: isUnlocked) { _, _ in
+            if security.isPasscodeEnabled && !isUnlocked {
+                localWebServer.stop()
+            }
             openPendingVisualBillScan()
         }
         .task {
@@ -246,6 +257,7 @@ struct ContentView: View {
                 MoreView(
                     store: store,
                     security: security,
+                    localWebServer: localWebServer,
                     onAddExpense: { addAction = .expense },
                     onAddAction: { addAction = $0 }
                 )

@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#f6efe5">
+    <title>Pocket Ledger · PC Access</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <main id="restore-view" class="connection-screen" aria-live="polite" aria-busy="true">
+      <div class="connection-card loading-card">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 36 36" fill="none"><path d="M10 8.5h11.5A4.5 4.5 0 0 1 26 13v14.5H14A4 4 0 0 1 10 23.5v-15Z" stroke="currentColor" stroke-width="1.8"/><path d="M14 13h7M14 17h8M14 21h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M26 23.5a4 4 0 0 1-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          <span>Pocket Ledger</span>
+        </div>
+        <h1>Opening your ledger</h1>
+        <p class="connection-copy">Checking the connection to your iPhone…</p>
+        <div class="skeleton-line skeleton-wide"></div>
+        <div class="skeleton-line skeleton-short"></div>
+      </div>
+    </main>
+
+    <main id="pair-view" class="connection-screen" hidden>
+      <div class="connection-card">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 36 36" fill="none"><path d="M10 8.5h11.5A4.5 4.5 0 0 1 26 13v14.5H14A4 4 0 0 1 10 23.5v-15Z" stroke="currentColor" stroke-width="1.8"/><path d="M14 13h7M14 17h8M14 21h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M26 23.5a4 4 0 0 1-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          <span>Pocket Ledger</span>
+        </div>
+        <h1>Your ledger, on a larger screen.</h1>
+        <p class="connection-copy">Open Pocket Ledger on your iPhone, start PC Access, then enter the one-time code shown there.</p>
+        <form id="pair-form" class="pair-form">
+          <label for="pair-code">Pairing code</label>
+          <div class="pair-entry">
+            <input id="pair-code" name="code" type="text" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required aria-describedby="pair-error">
+            <button id="pair-button" class="button button-primary" type="submit">Connect</button>
+          </div>
+          <p id="pair-error" class="form-feedback error-feedback" role="alert" hidden></p>
+        </form>
+        <div class="connection-note">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="4.5" y="8.5" width="11" height="8" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M7 8.5V6a3 3 0 1 1 6 0v2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span>Enter the current code from your iPhone. It works once and expires after five minutes or when PC Access stops.</span>
+        </div>
+      </div>
+    </main>
+
+    <main id="offline-view" class="connection-screen" hidden>
+      <div class="connection-card">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 36 36" fill="none"><path d="M10 8.5h11.5A4.5 4.5 0 0 1 26 13v14.5H14A4 4 0 0 1 10 23.5v-15Z" stroke="currentColor" stroke-width="1.8"/><path d="M14 13h7M14 17h8M14 21h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M26 23.5a4 4 0 0 1-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          <span>Pocket Ledger</span>
+        </div>
+        <h1 id="offline-title">Can’t reach your iPhone</h1>
+        <p id="offline-copy" class="connection-copy">Check that Pocket Ledger is open and PC Access is running, then try again.</p>
+        <button id="retry-button" class="button button-primary" type="button">Try again</button>
+      </div>
+    </main>
+
+    <div id="dashboard" class="app-shell" hidden>
+      <aside class="sidebar">
+        <a class="brand-lockup sidebar-brand" href="#overview" aria-label="Pocket Ledger home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 36 36" fill="none"><path d="M10 8.5h11.5A4.5 4.5 0 0 1 26 13v14.5H14A4 4 0 0 1 10 23.5v-15Z" stroke="currentColor" stroke-width="1.8"/><path d="M14 13h7M14 17h8M14 21h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M26 23.5a4 4 0 0 1-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          <span>Pocket Ledger</span>
+        </a>
+
+        <nav class="primary-nav" aria-label="Main navigation">
+          <a class="nav-link is-active" href="#overview">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.75" y="3.75" width="7" height="7" rx="1.4" stroke="currentColor" stroke-width="1.6"/><rect x="13.25" y="3.75" width="7" height="4.5" rx="1.4" stroke="currentColor" stroke-width="1.6"/><rect x="13.25" y="10.75" width="7" height="9.5" rx="1.4" stroke="currentColor" stroke-width="1.6"/><rect x="3.75" y="13.25" width="7" height="7" rx="1.4" stroke="currentColor" stroke-width="1.6"/></svg>
+            <span>Overview</span>
+          </a>
+          <a class="nav-link" href="#transactions">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 4.75h10a2 2 0 0 1 2 2v13l-3-1.8-3 1.8-3-1.8-3 1.8v-13a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 9h6M9 12.5h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <span>Transactions</span>
+          </a>
+          <a class="nav-link" href="#accounts">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.75" y="5.25" width="16.5" height="13.5" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M4 9h16M7.5 14h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <span>Accounts</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <div class="connection-status">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span class="status-copy"><strong>iPhone connected</strong><small>PC Access is active</small></span>
+          </div>
+          <p class="sidebar-footnote">Your ledger stays on your iPhone.</p>
+        </div>
+      </aside>
+
+      <div class="main-column">
+        <header class="topbar">
+          <div class="topbar-context">
+            <span class="topbar-label">Pocket Ledger</span>
+            <span class="topbar-separator" aria-hidden="true">/</span>
+            <span>PC Access</span>
+          </div>
+          <button id="open-entry" class="button button-primary topbar-action" type="button">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <span>Add transaction</span>
+          </button>
+        </header>
+
+        <main class="dashboard-content" id="overview">
+          <div id="dashboard-feedback" class="dashboard-feedback" role="status" hidden></div>
+          <header class="page-heading">
+            <div>
+              <h1>Overview</h1>
+              <p>A clear view of what’s moving through your ledger.</p>
+            </div>
+            <span class="updated-label"><span class="status-dot" aria-hidden="true"></span>Live from your iPhone</span>
+          </header>
+
+          <section class="summary-layout" aria-label="Monthly summary">
+            <article class="balance-summary">
+              <div class="balance-heading">
+                <span class="summary-label">Total balance</span>
+                <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M5.5 7.5h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-16a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.5"/><path d="M3.5 11h20M18 16.5h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              </div>
+              <p id="total-balance" class="balance-value">—</p>
+              <div class="balance-foot"><span id="account-count">—</span><span>accounts in your ledger</span></div>
+            </article>
+            <article class="flow-summary">
+              <div class="flow-summary-heading"><span class="flow-dot income-dot" aria-hidden="true"></span><span class="summary-label">Income this month</span></div>
+              <p id="month-income" class="flow-value">—</p>
+              <span class="flow-caption">Added to your accounts</span>
+            </article>
+            <article class="flow-summary">
+              <div class="flow-summary-heading"><span class="flow-dot expense-dot" aria-hidden="true"></span><span class="summary-label">Expenses this month</span></div>
+              <p id="month-expense" class="flow-value">—</p>
+              <span class="flow-caption">Across every category</span>
+            </article>
+          </section>
+
+          <div class="insights-grid">
+            <section class="panel cashflow-panel" aria-labelledby="cashflow-title">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="cashflow-title">Cash flow</h2>
+                  <p>Income and expenses by month</p>
+                </div>
+                <div class="chart-legend" aria-label="Chart legend">
+                  <span><i class="legend-swatch income-swatch" aria-hidden="true"></i>Income</span>
+                  <span><i class="legend-swatch expense-swatch" aria-hidden="true"></i>Expenses</span>
+                </div>
+              </div>
+              <div id="cashflow-empty" class="empty-chart" hidden>No monthly activity yet. Transactions will appear here.</div>
+              <div id="cashflow-viewport" class="cashflow-viewport">
+                <svg id="cashflow-chart" class="cashflow-chart" role="img" aria-labelledby="cashflow-title cashflow-description"></svg>
+              </div>
+              <p id="cashflow-description" class="sr-only"></p>
+            </section>
+
+            <section class="panel category-panel" aria-labelledby="category-title">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="category-title">Where it goes</h2>
+                  <p>Expenses by category this month</p>
+                </div>
+              </div>
+              <div id="category-empty" class="empty-chart" hidden>No categorized expenses yet.</div>
+              <ol id="category-list" class="category-list"></ol>
+            </section>
+          </div>
+
+          <section id="entry-panel" class="panel entry-panel" aria-labelledby="entry-title" hidden tabindex="-1">
+            <div class="panel-heading entry-heading">
+              <div>
+                <h2 id="entry-title">Add transaction</h2>
+                <p>Each split is saved to its own account and category.</p>
+              </div>
+              <button id="close-entry" class="icon-button" type="button" aria-label="Close transaction form">
+                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+            <p id="no-accounts-message" class="inline-notice" hidden>Add an account in Pocket Ledger on your iPhone before entering a transaction.</p>
+            <form id="transaction-form" novalidate>
+              <fieldset class="kind-fieldset">
+                <legend>Transaction type</legend>
+                <div class="kind-switch" role="group" aria-label="Transaction type">
+                  <button class="kind-option is-selected" type="button" data-kind="expense" aria-pressed="true">Expense</button>
+                  <button class="kind-option" type="button" data-kind="income" aria-pressed="false">Income</button>
+                </div>
+              </fieldset>
+              <div class="form-meta-grid">
+                <div class="field-group">
+                  <label for="transaction-date">Date</label>
+                  <input id="transaction-date" name="date" type="date" required>
+                </div>
+                <div class="field-group note-field">
+                  <label for="transaction-note">Note <span class="optional-label">Optional</span></label>
+                  <input id="transaction-note" name="note" type="text" maxlength="200" placeholder="What was this for?" autocomplete="off">
+                </div>
+              </div>
+              <div class="split-list-heading">
+                <div><h3>Payment splits</h3><p>Choose a category for each split. All accounts must use the same currency.</p></div>
+                <button id="add-split" class="button button-secondary button-small" type="button">
+                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                  <span>Add split</span>
+                </button>
+              </div>
+              <div id="split-rows" class="split-rows"></div>
+              <div class="form-footer">
+                <p id="form-feedback" class="form-feedback" role="alert" aria-live="assertive"></p>
+                <button id="save-transaction" class="button button-primary" type="submit">Save transaction</button>
+              </div>
+            </form>
+          </section>
+
+          <section id="accounts" class="accounts-section" aria-labelledby="accounts-title">
+            <div class="section-heading">
+              <div><h2 id="accounts-title">Accounts</h2><p>Balances across your ledger</p></div>
+              <span id="accounts-total" class="section-meta"></span>
+            </div>
+            <div id="account-list" class="account-list"></div>
+          </section>
+
+          <section id="transactions" class="panel transactions-panel" aria-labelledby="transactions-title">
+            <div class="panel-heading transactions-heading">
+              <div><h2 id="transactions-title">Transactions</h2><p>Your latest ledger activity</p></div>
+              <div class="transaction-controls">
+                <label class="search-field">
+                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="8.7" cy="8.7" r="5.7" stroke="currentColor" stroke-width="1.5"/><path d="m13 13 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  <span class="sr-only">Search transactions</span>
+                  <input id="transaction-search" type="search" placeholder="Search transactions" autocomplete="off">
+                </label>
+                <label class="filter-field"><span class="sr-only">Filter by type</span>
+                  <select id="transaction-filter">
+                    <option value="all">All types</option>
+                    <option value="expense">Expenses</option>
+                    <option value="income">Income</option>
+                    <option value="transfer">Transfers</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th scope="col">Date</th><th scope="col">Description</th><th scope="col">Category</th><th scope="col">Type</th><th scope="col" class="amount-column">Amount</th></tr></thead>
+                <tbody id="transaction-rows"></tbody>
+              </table>
+            </div>
+            <p id="transaction-empty" class="table-empty" hidden></p>
+          </section>
+
+          <footer class="page-footer">Pocket Ledger PC Access <span aria-hidden="true">·</span> Connected to your iPhone</footer>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

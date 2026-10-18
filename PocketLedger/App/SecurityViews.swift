@@ -556,7 +556,7 @@ private struct PrivacyPolicyView: View {
 
             Section("How information is used") {
                 Text("The app uses this information to provide ledger, budget, reporting, widget, Watch, receipt scanning, and import or backup features.")
-                Text("Receipt scanning and optional writing assistance use on-device processing. Pocket Ledger does not send ledger data to a developer-operated server, third-party analytics service, advertising network, or third-party AI service.")
+                Text("Receipt scanning and optional writing assistance use on-device processing. Pocket Ledger does not send ledger data to a developer-operated server, third-party analytics service, advertising network, or third-party AI service. When you enable PC Access, selected ledger data is served to a browser you pair over your local network while the app is open.")
             }
 
             Section("Automatic metal prices") {

@@ -70,9 +70,8 @@ actor ScheduledTransactionLiveActivityService {
                 && $0.activityState != .ended
                 && $0.activityState != .dismissed
         }), !(shouldStartImmediately && matchingActivity.activityState == .pending) {
-            if matchingActivity.content.state != content.state {
-                await matchingActivity.update(content)
-            }
+            // Refresh the view after app or widget-extension updates even when the transaction data is unchanged.
+            await matchingActivity.update(content)
             await end(existingActivities.filter { $0.id != matchingActivity.id })
             return
         }

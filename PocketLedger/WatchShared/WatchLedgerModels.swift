@@ -1,8 +1,25 @@
 import Foundation
+import Security
 
 enum WatchLedgerConstants {
     static var appGroupIdentifier: String {
-        Bundle.main.object(forInfoDictionaryKey: "PocketLedgerAppGroupIdentifier") as? String
+        let configuredIdentifier = Bundle.main.object(
+            forInfoDictionaryKey: "PocketLedgerAppGroupIdentifier"
+        ) as? String
+        let signedIdentifiers = SecTaskCreateFromSelf(nil).flatMap {
+            SecTaskCopyValueForEntitlement(
+                $0,
+                "com.apple.security.application-groups" as CFString,
+                nil
+            ) as? [String]
+        } ?? []
+
+        if let configuredIdentifier, signedIdentifiers.contains(configuredIdentifier) {
+            return configuredIdentifier
+        }
+
+        return signedIdentifiers.first
+            ?? configuredIdentifier
             ?? "group.com.josephlteif.pocketledger"
     }
     static let cacheKey = "watchLedgerCache"

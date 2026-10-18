@@ -59,7 +59,7 @@ enum LocalWebCertificate {
         let extensions = try Certificate.Extensions {
             Critical(BasicConstraints.notCertificateAuthority)
             Critical(KeyUsage(digitalSignature: true))
-            ExtendedKeyUsage([.serverAuth])
+            try ExtendedKeyUsage([.serverAuth])
             try SubjectAlternativeNames([
                 .ipAddress(ASN1OctetString(contentBytes: addressBytes[...]))
             ])

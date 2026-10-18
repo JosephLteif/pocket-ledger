@@ -729,9 +729,12 @@ final class LocalWebServer: ObservableObject {
             .joined(separator: "\r\n") + "\r\n\r\n"
         var response = Data(headerText.utf8)
         response.append(body)
-        connection.send(content: response, contentContext: .defaultMessage, isComplete: true) { [weak connection] _ in
-            connection?.cancel()
-        }
+        connection.send(
+            content: response,
+            contentContext: .defaultMessage,
+            isComplete: true,
+            completion: .contentProcessed { [weak connection] _ in connection?.cancel() }
+        )
     }
 
     private static func parseRequest(_ data: Data) throws -> HTTPRequest? {

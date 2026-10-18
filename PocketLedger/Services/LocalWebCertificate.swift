@@ -60,7 +60,7 @@ enum LocalWebCertificate {
             Critical(BasicConstraints.notCertificateAuthority)
             Critical(KeyUsage(digitalSignature: true))
             ExtendedKeyUsage([.serverAuth])
-            SubjectAlternativeNames([
+            try SubjectAlternativeNames([
                 .ipAddress(ASN1OctetString(contentBytes: addressBytes[...]))
             ])
         }
@@ -137,8 +137,8 @@ enum LocalWebCertificate {
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecSuccess {
-            guard let key = result as? SecKey else { throw CertificateError.keychain(errSecDecode) }
-            return (key, false)
+            guard let keyReference = result else { throw CertificateError.keychain(errSecDecode) }
+            return (keyReference as! SecKey, false)
         }
         guard status == errSecItemNotFound else { throw CertificateError.keychain(status) }
 

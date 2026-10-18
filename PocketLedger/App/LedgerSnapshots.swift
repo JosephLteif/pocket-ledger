@@ -213,8 +213,7 @@ struct MetricsSnapshot {
                   interval.contains(transaction.date),
                   index.transactionMatchesCategory(transaction, selectedCategoryID: categoryID),
                   index.transactionCategoryIncludedInTotals(transaction),
-                  index.transactionHasIncludedAccount(transaction),
-                  let selectedCategoryID = categoryID else {
+                  index.transactionHasIncludedAccount(transaction) else {
                 continue
             }
 
@@ -223,11 +222,11 @@ struct MetricsSnapshot {
                 currency: selectedCurrency
             ) where amount > 0 && index.categoryMatches(
                 transactionCategoryID,
-                selectedCategoryID: selectedCategoryID
+                selectedCategoryID: categoryID
             ) {
                 guard let subcategoryID = index.directDescendantCategoryID(
                     for: transactionCategoryID,
-                    under: selectedCategoryID
+                    under: categoryID
                 ) else { continue }
                 let current = totals[subcategoryID]
                     ?? (index.categoryName(for: subcategoryID), 0, 0)

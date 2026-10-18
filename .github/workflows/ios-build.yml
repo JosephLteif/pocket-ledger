@@ -268,6 +268,9 @@ jobs:
             require_entry "$entries" Payload/PocketLedger.app/PlugIns/PocketLedgerWidget.appex/Info.plist
             require_entry "$entries" Payload/PocketLedger.app/Watch/PocketLedgerWatch.app/Info.plist
             require_entry "$entries" Payload/PocketLedger.app/Watch/PocketLedgerWatch.app/PlugIns/PocketLedgerWatchWidget.appex/Info.plist
+            require_entry "$entries" Payload/PocketLedger.app/index.html
+            require_entry "$entries" Payload/PocketLedger.app/app.js
+            require_entry "$entries" Payload/PocketLedger.app/styles.css
             if grep -Eq '^Payload/PocketLedger\.app/PlugIns/PocketLedgerWatch\.app(/|$)' "$entries"; then
               echo "The Watch app must be embedded under Watch/, not PlugIns/."
               return 1

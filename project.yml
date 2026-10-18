@@ -50,7 +50,9 @@ targets:
       - path: PocketLedger/Resources/Assets.xcassets
     resources:
       - path: PocketLedger/Config/PrivacyInfo.xcprivacy
-      - path: PocketLedger/Resources/LocalWeb
+      - path: PocketLedger/Resources/LocalWeb/index.html
+      - path: PocketLedger/Resources/LocalWeb/app.js
+      - path: PocketLedger/Resources/LocalWeb/styles.css
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX)

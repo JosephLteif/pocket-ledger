@@ -2018,6 +2018,7 @@ final class LedgerStore: ObservableObject {
         let loansChanged = data.loans != updated.loans
         let shortcutInputsChanged = data.accounts != updated.accounts
             || data.categories != updated.categories
+            || data.savingsGoals != updated.savingsGoals
             || data.templates != updated.templates
         let spotlightInputsChanged = data.accounts != updated.accounts
             || data.categories != updated.categories

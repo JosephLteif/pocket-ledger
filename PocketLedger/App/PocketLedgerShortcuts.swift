@@ -77,6 +77,39 @@ struct GetBudgetStatusIntent: AppIntent {
     }
 }
 
+struct OpenTransactionTemplateIntent: AppIntent {
+    static let title: LocalizedStringResource = "Start Transaction from Pocket Ledger Template"
+    static let description = IntentDescription("Opens a saved transaction template in Pocket Ledger so you can review and save it.")
+    static let openAppWhenRun = true
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
+
+    @Parameter(title: "Transaction template")
+    var template: FinanceTemplateEntity
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Start a transaction from \(\.$template)")
+    }
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let storage = FinanceStorage(context: "app-intent")
+        guard storage.isPersistent else {
+            return .result(dialog: "Saved transaction templates are unavailable because the persistent database is unavailable.")
+        }
+        let data = storage.load()
+        guard !storage.isCorrupted else {
+            return .result(dialog: "Pocket Ledger could not read the saved transaction templates.")
+        }
+        guard let savedTemplate = data.templates.first(where: { $0.id == template.id }) else {
+            return .result(dialog: "Pocket Ledger could not find that transaction template.")
+        }
+
+        await MainActor.run {
+            FinanceIntentSearchRouter.shared.showTransactionTemplate(id: savedTemplate.id)
+        }
+        return .result(dialog: IntentDialog(stringLiteral: "Opening \(savedTemplate.name) so you can review and save it."))
+    }
+}
+
 struct PocketLedgerShortcuts: AppShortcutsProvider {
     @AppShortcutsBuilder
     static var appShortcuts: [AppShortcut] {
@@ -97,33 +130,12 @@ struct PocketLedgerShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: AddLedgerTransactionIntent(),
             phrases: [
+                "Add a transaction in \(.applicationName)",
                 "Add a transaction to \(\.$account) in \(.applicationName)",
                 "Record a transaction in \(.applicationName)"
             ],
             shortTitle: "Add Pocket Ledger Transaction",
             systemImageName: "plus.circle"
-        )
-        AppShortcut(
-            intent: GetCategoriesIntent(),
-            phrases: [
-                "List my categories in \(.applicationName)",
-                "Get my Pocket Ledger categories in \(.applicationName)",
-                "Show my categories in \(.applicationName)",
-                "What categories do I have in \(.applicationName)"
-            ],
-            shortTitle: "Get Pocket Ledger Categories",
-            systemImageName: "tag"
-        )
-        AppShortcut(
-            intent: GetAccountsIntent(),
-            phrases: [
-                "List my accounts in \(.applicationName)",
-                "Get my Pocket Ledger accounts in \(.applicationName)",
-                "Show my accounts in \(.applicationName)",
-                "What accounts do I have in \(.applicationName)"
-            ],
-            shortTitle: "Get Pocket Ledger Accounts",
-            systemImageName: "wallet.pass"
         )
         AppShortcut(
             intent: GetAccountBalanceIntent(),
@@ -156,14 +168,34 @@ struct PocketLedgerShortcuts: AppShortcutsProvider {
             systemImageName: "chart.bar.doc.horizontal"
         )
         AppShortcut(
-            intent: GenerateBudgetSummaryIntent(),
+            intent: GetUpcomingCommitmentsIntent(),
             phrases: [
-                "Summarize my Pocket Ledger budget in \(.applicationName)",
-                "Give me a budget summary in \(.applicationName)",
-                "How are my category budgets doing in \(.applicationName)"
+                "What's due \(\.$period) in \(.applicationName)",
+                "What payments are due \(\.$period) in \(.applicationName)",
+                "List my upcoming payments \(\.$period) in \(.applicationName)"
             ],
-            shortTitle: "Summarize Budget",
-            systemImageName: "sparkles"
+            shortTitle: "Upcoming Commitments",
+            systemImageName: "calendar"
+        )
+        AppShortcut(
+            intent: GetSavingsGoalProgressIntent(),
+            phrases: [
+                "Check my savings goals in \(.applicationName)",
+                "How much is left for \(\.$goal) in \(.applicationName)",
+                "How close am I to \(\.$goal) in \(.applicationName)"
+            ],
+            shortTitle: "Savings Goal Progress",
+            systemImageName: "scope"
+        )
+        AppShortcut(
+            intent: OpenTransactionTemplateIntent(),
+            phrases: [
+                "Start a transaction from \(\.$template) in \(.applicationName)",
+                "Log a transaction from \(\.$template) in \(.applicationName)",
+                "Use my \(\.$template) template in \(.applicationName)"
+            ],
+            shortTitle: "Use Transaction Template",
+            systemImageName: "rectangle.stack"
         )
         AppShortcut(
             intent: GetBudgetStatusIntent(),

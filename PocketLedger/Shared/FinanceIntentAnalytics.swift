@@ -91,6 +91,44 @@ enum FinanceDateRange: String, AppEnum, CaseIterable, Hashable, Sendable {
     ]
 }
 
+enum FinanceUpcomingCommitmentPeriod: String, AppEnum, CaseIterable, Hashable, Sendable {
+    case today
+    case thisWeek
+    case next7Days
+    case next30Days
+
+    var displayName: String {
+        switch self {
+        case .today: "today"
+        case .thisWeek: "this week"
+        case .next7Days: "in the next 7 days"
+        case .next30Days: "in the next 30 days"
+        }
+    }
+
+    func interval(now: Date = .now, calendar: Calendar = .current) -> DateInterval? {
+        switch self {
+        case .today:
+            return calendar.dateInterval(of: .day, for: now)
+        case .thisWeek:
+            return calendar.dateInterval(of: .weekOfYear, for: now)
+        case .next7Days, .next30Days:
+            let days = self == .next7Days ? 7 : 30
+            let start = calendar.startOfDay(for: now)
+            guard let end = calendar.date(byAdding: .day, value: days, to: start) else { return nil }
+            return DateInterval(start: start, end: end)
+        }
+    }
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Upcoming period"
+    static let caseDisplayRepresentations: [FinanceUpcomingCommitmentPeriod: DisplayRepresentation] = [
+        .today: DisplayRepresentation(title: "Today"),
+        .thisWeek: DisplayRepresentation(title: "This week"),
+        .next7Days: DisplayRepresentation(title: "In the next 7 days"),
+        .next30Days: DisplayRepresentation(title: "In the next 30 days")
+    ]
+}
+
 struct FinanceTransactionEntity: IndexedEntity, Hashable, Sendable {
     let id: UUID
     @Property(title: "Date") var date: Date
@@ -274,6 +312,137 @@ struct GetSpendingSummaryIntent: AppIntent {
             categoryID: category?.id,
             accountID: account?.id
         )
+        return .result(value: summary, dialog: IntentDialog(stringLiteral: summary))
+    }
+}
+
+struct GetUpcomingCommitmentsIntent: AppIntent {
+    static let title: LocalizedStringResource = "Get Pocket Ledger Upcoming Commitments"
+    static let description = IntentDescription("Lists upcoming scheduled transactions and loan due dates, including overdue items.")
+    static let openAppWhenRun = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
+
+    @Parameter(title: "Period", description: "Show commitments due in this period, plus overdue items.")
+    var period: FinanceUpcomingCommitmentPeriod
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("List Pocket Ledger commitments due \(\.$period)")
+    }
+
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        let storage = FinanceStorage(context: "app-intent")
+        guard storage.isPersistent else {
+            return .result(value: "Ledger unavailable", dialog: "Pocket Ledger's saved data is unavailable.")
+        }
+        let data = storage.load()
+        guard !storage.isCorrupted else {
+            return .result(value: "Ledger unavailable", dialog: "Pocket Ledger could not read the saved commitments.")
+        }
+        guard let interval = period.interval() else {
+            return .result(value: "Invalid period", dialog: "Pocket Ledger could not determine that date range.")
+        }
+
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        var commitments: [(date: Date, isOverdue: Bool, detail: String)] = []
+
+        for schedule in data.scheduledTransactions where schedule.isEnabled {
+            let date = calendar.startOfDay(for: schedule.nextRunDate)
+            let isOverdue = date < today
+            guard isOverdue || (date >= interval.start && date < interval.end) else { continue }
+
+            let note = schedule.note.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = note.isEmpty ? schedule.kind.displayName : note
+            let accountNames = Set((schedule.outflows + schedule.inflows).map(\.accountID))
+                .compactMap { accountID in data.accounts.first(where: { $0.id == accountID })?.name }
+                .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            let accounts = accountNames.isEmpty ? "" : " in \(accountNames.joined(separator: ", "))"
+            let amount = financeIntentMovementSummary(for: schedule.transactionTemplate)
+            commitments.append((date, isOverdue, "\(title): \(amount)\(accounts)"))
+        }
+
+        for loan in data.loans where !loan.isSettled {
+            guard let dueDate = loan.dueDate else { continue }
+            let date = calendar.startOfDay(for: dueDate)
+            let isOverdue = date < today
+            guard isOverdue || (date >= interval.start && date < interval.end) else { continue }
+
+            let title = loan.direction == .borrowed
+                ? "Loan payment to \(loan.counterparty)"
+                : "Loan payment from \(loan.counterparty)"
+            commitments.append((date, isOverdue, "\(title): \(loan.outstandingAmount.formatted)"))
+        }
+
+        commitments.sort { $0.date < $1.date }
+        guard !commitments.isEmpty else {
+            let message = "No overdue commitments or payments due \(period.displayName)."
+            return .result(value: message, dialog: IntentDialog(stringLiteral: message))
+        }
+
+        let lines = commitments.prefix(10).map { commitment in
+            let date = commitment.date.formatted(date: .abbreviated, time: .omitted)
+            let prefix = commitment.isOverdue ? "Overdue" : "Due \(date)"
+            return "\(prefix): \(commitment.detail)"
+        }
+        let remainingCount = commitments.count - lines.count
+        let suffix = remainingCount > 0 ? "\nAnd \(remainingCount) more." : ""
+        let summary = lines.joined(separator: "\n") + suffix
+        return .result(value: summary, dialog: IntentDialog(stringLiteral: summary))
+    }
+}
+
+struct GetSavingsGoalProgressIntent: AppIntent {
+    static let title: LocalizedStringResource = "Check Pocket Ledger Savings Goals"
+    static let description = IntentDescription("Reads current progress and remaining amounts for saved savings goals.")
+    static let openAppWhenRun = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
+
+    @Parameter(title: "Savings goal", description: "Choose one goal, or leave blank to summarize all goals.")
+    var goal: FinanceSavingsGoalEntity?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Check Pocket Ledger savings goal progress")
+    }
+
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        let storage = FinanceStorage(context: "app-intent")
+        guard storage.isPersistent else {
+            return .result(value: "Ledger unavailable", dialog: "Pocket Ledger's saved data is unavailable.")
+        }
+        let data = storage.load()
+        guard !storage.isCorrupted else {
+            return .result(value: "Ledger unavailable", dialog: "Pocket Ledger could not read the saved savings goals.")
+        }
+
+        let goals: [SavingsGoal]
+        if let goal {
+            guard let resolvedGoal = data.savingsGoals.first(where: { $0.id == goal.id }) else {
+                return .result(value: "Goal unavailable", dialog: "Pocket Ledger could not find that savings goal.")
+            }
+            goals = [resolvedGoal]
+        } else {
+            goals = data.savingsGoals.sorted {
+                $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+        }
+
+        guard !goals.isEmpty else {
+            return .result(value: "No savings goals", dialog: "You haven't set up any savings goals in Pocket Ledger yet.")
+        }
+
+        let summaries = goals.map { goal in
+            let remainingUnits = max(goal.targetAmount.minorUnits - goal.currentAmount.minorUnits, 0)
+            let remaining = Money(currency: goal.targetAmount.currency, minorUnits: remainingUnits)
+            if remainingUnits == 0 {
+                return "\(goal.name): complete at \(goal.targetAmount.formatted)."
+            }
+
+            let targetDate = goal.targetDate.map {
+                "; target date \($0.formatted(date: .abbreviated, time: .omitted))"
+            } ?? ""
+            return "\(goal.name): \(goal.currentAmount.formatted) of \(goal.targetAmount.formatted), \(remaining.formatted) remaining\(targetDate)."
+        }
+        let summary = summaries.joined(separator: "\n")
         return .result(value: summary, dialog: IntentDialog(stringLiteral: summary))
     }
 }

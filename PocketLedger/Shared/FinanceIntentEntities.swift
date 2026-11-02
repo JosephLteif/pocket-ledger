@@ -164,6 +164,124 @@ struct FinanceCategoryQuery: EntityStringQuery, Sendable {
 
 }
 
+struct FinanceSavingsGoalEntity: AppEntity, Hashable, Sendable {
+    let id: UUID
+    @Property(title: "Goal name") var name: String
+    @Property(title: "Current amount") var currentAmount: String
+    @Property(title: "Target amount") var targetAmount: String
+
+    init(goal: SavingsGoal) {
+        id = goal.id
+        name = goal.name
+        currentAmount = goal.currentAmount.formatted
+        targetAmount = goal.targetAmount.formatted
+    }
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)", subtitle: "\(currentAmount) of \(targetAmount)")
+    }
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Savings Goal"
+    static let defaultQuery = FinanceSavingsGoalQuery()
+
+    static func == (lhs: FinanceSavingsGoalEntity, rhs: FinanceSavingsGoalEntity) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+struct FinanceSavingsGoalQuery: EntityStringQuery, Sendable {
+    func entities(for identifiers: [FinanceSavingsGoalEntity.ID]) async throws -> [FinanceSavingsGoalEntity] {
+        let entities = allEntities()
+        return identifiers.compactMap { identifier in entities.first(where: { $0.id == identifier }) }
+    }
+
+    func suggestedEntities() async throws -> [FinanceSavingsGoalEntity] {
+        allEntities()
+    }
+
+    func entities(matching string: String) async throws -> [FinanceSavingsGoalEntity] {
+        let query = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return try await suggestedEntities() }
+        return allEntities().filter { $0.name.localizedCaseInsensitiveContains(query) }
+    }
+
+    private func allEntities() -> [FinanceSavingsGoalEntity] {
+        let storage = FinanceStorage(context: "app-intent")
+        guard storage.isPersistent else { return [] }
+        let data = storage.load()
+        guard !storage.isCorrupted else { return [] }
+        return data.savingsGoals
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            .map(FinanceSavingsGoalEntity.init(goal:))
+    }
+}
+
+struct FinanceTemplateEntity: AppEntity, Hashable, Sendable {
+    let id: UUID
+    @Property(title: "Template name") var name: String
+    @Property(title: "Transaction type") var kind: String
+    @Property(title: "Note") var note: String
+    @Property(title: "Amount") var amount: String
+
+    init(template: LedgerTemplate) {
+        id = template.id
+        name = template.name
+        kind = template.kind.displayName
+        note = template.note
+        amount = financeIntentMovementSummary(for: template.transactionTemplate)
+    }
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)", subtitle: "\(kind) · \(amount)")
+    }
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Transaction Template"
+    static let defaultQuery = FinanceTemplateQuery()
+
+    static func == (lhs: FinanceTemplateEntity, rhs: FinanceTemplateEntity) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+struct FinanceTemplateQuery: EntityStringQuery, Sendable {
+    func entities(for identifiers: [FinanceTemplateEntity.ID]) async throws -> [FinanceTemplateEntity] {
+        let entities = allEntities()
+        return identifiers.compactMap { identifier in entities.first(where: { $0.id == identifier }) }
+    }
+
+    func suggestedEntities() async throws -> [FinanceTemplateEntity] {
+        allEntities()
+    }
+
+    func entities(matching string: String) async throws -> [FinanceTemplateEntity] {
+        let query = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return try await suggestedEntities() }
+        return allEntities().filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || $0.note.localizedCaseInsensitiveContains(query)
+                || $0.kind.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private func allEntities() -> [FinanceTemplateEntity] {
+        let storage = FinanceStorage(context: "app-intent")
+        guard storage.isPersistent else { return [] }
+        let data = storage.load()
+        guard !storage.isCorrupted else { return [] }
+        return data.templates
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            .map(FinanceTemplateEntity.init(template:))
+    }
+}
+
 enum FinanceIntentTransactionKind: String, AppEnum, CaseIterable, Hashable, Sendable {
     case expense
     case income

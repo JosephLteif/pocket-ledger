@@ -14,14 +14,56 @@ final class FinanceIntentSearchRouter: ObservableObject {
     }
 
     @Published private(set) var pendingSearch: SearchRequest?
+    @Published private(set) var pendingTransactionKind: TransactionKind?
+    @Published private(set) var pendingTemplateID: UUID?
 
     func showSearch(for query: String) {
         pendingSearch = SearchRequest(id: UUID(), query: query)
     }
 
+    func showNewTransaction(kind: TransactionKind) {
+        pendingTransactionKind = kind
+    }
+
+    func showTransactionTemplate(id: UUID) {
+        pendingTemplateID = id
+    }
+
     func consumePendingSearch() -> SearchRequest? {
         defer { pendingSearch = nil }
         return pendingSearch
+    }
+
+    func consumePendingTransactionKind() -> TransactionKind? {
+        defer { pendingTransactionKind = nil }
+        return pendingTransactionKind
+    }
+
+    func consumePendingTemplateID() -> UUID? {
+        defer { pendingTemplateID = nil }
+        return pendingTemplateID
+    }
+}
+
+private func financeIntentNewTransactionKind(for query: String) -> TransactionKind? {
+    let words = query.lowercased().split(whereSeparator: \.isWhitespace)
+    guard let verb = words.first,
+          ["add", "record", "log", "create"].contains(String(verb)) else {
+        return nil
+    }
+
+    var objectIndex = 1
+    while objectIndex < words.count,
+          ["a", "an", "new"].contains(String(words[objectIndex])) {
+        objectIndex += 1
+    }
+    guard objectIndex < words.count else { return nil }
+
+    switch words[objectIndex] {
+    case "transaction", "expense": return .expense
+    case "income": return .income
+    case "transfer": return .transfer
+    default: return nil
     }
 }
 
@@ -156,7 +198,11 @@ struct SearchPocketLedgerIntent: ShowInAppSearchResultsIntent {
 
     func perform() async throws -> some IntentResult {
         await MainActor.run {
-            FinanceIntentSearchRouter.shared.showSearch(for: criteria.term)
+            if let kind = financeIntentNewTransactionKind(for: criteria.term) {
+                FinanceIntentSearchRouter.shared.showNewTransaction(kind: kind)
+            } else {
+                FinanceIntentSearchRouter.shared.showSearch(for: criteria.term)
+            }
         }
         return .result()
     }

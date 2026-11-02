@@ -8,6 +8,16 @@ on:
         required: false
         default: false
         type: boolean
+      include_sandbox:
+        description: Build and package the sandbox iPhone app
+        required: false
+        default: false
+        type: boolean
+      include_watch:
+        description: Build and include Apple Watch apps and complications
+        required: false
+        default: false
+        type: boolean
   push:
     tags:
       - "v*"
@@ -17,7 +27,7 @@ permissions:
 
 jobs:
   build-and-package:
-    name: Build two complete sideload IPAs
+    name: Build selected iPhone and Watch IPA variants
     needs: test-ios
     if: always() && (needs.test-ios.result == 'success' || needs.test-ios.result == 'skipped')
     runs-on: xcode-27
@@ -73,6 +83,7 @@ jobs:
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-normal.log"
 
       - name: Build normal Apple Watch app and complication
+        if: ${{ inputs.include_watch }}
         run: |
           set -o pipefail
           xcodebuild \
@@ -91,6 +102,7 @@ jobs:
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-watch-normal.log"
 
       - name: Build sandbox iPhone app and widget
+        if: ${{ inputs.include_sandbox }}
         run: |
           set -o pipefail
           xcodebuild \
@@ -116,6 +128,7 @@ jobs:
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-sandbox.log"
 
       - name: Build sandbox Apple Watch app and complication
+        if: ${{ inputs.include_sandbox && inputs.include_watch }}
         run: |
           set -o pipefail
           xcodebuild \
@@ -137,20 +150,28 @@ jobs:
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild-watch-sandbox.log"
 
-      - name: Stage the two app variants
+      - name: Stage selected app variants
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/sideload/normal" "$RUNNER_TEMP/sideload/sandbox"
+          mkdir -p "$RUNNER_TEMP/sideload/normal"
           ditto "$RUNNER_TEMP/NormalDerivedData/Build/Products/Release-iphoneos/PocketLedger.app" \
             "$RUNNER_TEMP/sideload/normal/PocketLedger.app"
-          ditto "$RUNNER_TEMP/NormalWatchDerivedData/Build/Products/Release-watchos/PocketLedgerWatch.app" \
-            "$RUNNER_TEMP/sideload/normal/PocketLedgerWatch.app"
-          ditto "$RUNNER_TEMP/SandboxDerivedData/Build/Products/Release-iphoneos/PocketLedger.app" \
-            "$RUNNER_TEMP/sideload/sandbox/PocketLedger.app"
-          ditto "$RUNNER_TEMP/SandboxWatchDerivedData/Build/Products/Release-watchos/PocketLedgerWatch.app" \
-            "$RUNNER_TEMP/sideload/sandbox/PocketLedgerWatch.app"
+          if [[ "${{ inputs.include_watch }}" == "true" ]]; then
+            ditto "$RUNNER_TEMP/NormalWatchDerivedData/Build/Products/Release-watchos/PocketLedgerWatch.app" \
+              "$RUNNER_TEMP/sideload/normal/PocketLedgerWatch.app"
+          fi
 
-      - name: Package and verify the two iPhone, Watch, and widget IPAs
+          if [[ "${{ inputs.include_sandbox }}" == "true" ]]; then
+            mkdir -p "$RUNNER_TEMP/sideload/sandbox"
+            ditto "$RUNNER_TEMP/SandboxDerivedData/Build/Products/Release-iphoneos/PocketLedger.app" \
+              "$RUNNER_TEMP/sideload/sandbox/PocketLedger.app"
+            if [[ "${{ inputs.include_watch }}" == "true" ]]; then
+              ditto "$RUNNER_TEMP/SandboxWatchDerivedData/Build/Products/Release-watchos/PocketLedgerWatch.app" \
+                "$RUNNER_TEMP/sideload/sandbox/PocketLedgerWatch.app"
+            fi
+          fi
+
+      - name: Package and verify selected iPhone, Watch, and widget IPAs
         run: |
           set -euo pipefail
 
@@ -183,6 +204,7 @@ jobs:
             local watch_display_name="$5"
             local watch_widget_display_name="$6"
             local ipa_name="$7"
+            local include_watch="$8"
             local app_group_id="group.$app_bundle_id"
             local watch_bundle_id="$app_bundle_id.watchkitapp"
             local source_app="$RUNNER_TEMP/sideload/$variant/PocketLedger.app"
@@ -196,14 +218,20 @@ jobs:
             local watch_widget_path="$watch_path/PlugIns/PocketLedgerWatchWidget.appex"
 
             test -d "$source_app" || { echo "Missing $variant iPhone app"; return 1; }
-            test -d "$source_watch" || { echo "Missing $variant Watch app"; return 1; }
+            if [[ "$include_watch" == "true" ]]; then
+              test -d "$source_watch" || { echo "Missing $variant Watch app"; return 1; }
+            fi
             mkdir -p "$package_root/Payload"
             ditto "$source_app" "$app_path"
-            mkdir -p "$app_path/Watch"
-            ditto "$source_watch" "$watch_path"
+            if [[ "$include_watch" == "true" ]]; then
+              mkdir -p "$app_path/Watch"
+              ditto "$source_watch" "$watch_path"
+            fi
 
             test -d "$widget_path" || { echo "Missing $variant iPhone widget"; return 1; }
-            test -d "$watch_widget_path" || { echo "Missing $variant Watch widget"; return 1; }
+            if [[ "$include_watch" == "true" ]]; then
+              test -d "$watch_widget_path" || { echo "Missing $variant Watch widget"; return 1; }
+            fi
 
             check_plist_value "$app_path/Info.plist" CFBundleIdentifier "$app_bundle_id"
             check_plist_value "$app_path/Info.plist" CFBundleDisplayName "$app_display_name"
@@ -213,22 +241,28 @@ jobs:
             check_plist_value "$widget_path/Info.plist" CFBundleIdentifier "$app_bundle_id.widget"
             check_plist_value "$widget_path/Info.plist" PocketLedgerAppGroupIdentifier "$app_group_id"
             check_plist_value "$widget_path/Info.plist" NSExtension:NSExtensionPointIdentifier com.apple.widgetkit-extension
-            check_plist_value "$watch_path/Info.plist" CFBundleDisplayName "$watch_display_name"
-            check_plist_value "$watch_path/Info.plist" CFBundleIdentifier "$watch_bundle_id"
-            check_plist_value "$watch_path/Info.plist" WKApplication true
-            check_plist_value "$watch_path/Info.plist" WKCompanionAppBundleIdentifier "$app_bundle_id"
-            check_plist_value "$watch_path/Info.plist" PocketLedgerAppGroupIdentifier "$app_group_id"
-            check_plist_value "$watch_widget_path/Info.plist" CFBundleDisplayName "$watch_widget_display_name"
-            check_plist_value "$watch_widget_path/Info.plist" CFBundleIdentifier "$watch_bundle_id.widget"
-            check_plist_value "$watch_widget_path/Info.plist" PocketLedgerAppGroupIdentifier "$app_group_id"
-            check_plist_value "$watch_widget_path/Info.plist" NSExtension:NSExtensionPointIdentifier com.apple.widgetkit-extension
+            if [[ "$include_watch" == "true" ]]; then
+              check_plist_value "$watch_path/Info.plist" CFBundleDisplayName "$watch_display_name"
+              check_plist_value "$watch_path/Info.plist" CFBundleIdentifier "$watch_bundle_id"
+              check_plist_value "$watch_path/Info.plist" WKApplication true
+              check_plist_value "$watch_path/Info.plist" WKCompanionAppBundleIdentifier "$app_bundle_id"
+              check_plist_value "$watch_path/Info.plist" PocketLedgerAppGroupIdentifier "$app_group_id"
+              check_plist_value "$watch_widget_path/Info.plist" CFBundleDisplayName "$watch_widget_display_name"
+              check_plist_value "$watch_widget_path/Info.plist" CFBundleIdentifier "$watch_bundle_id.widget"
+              check_plist_value "$watch_widget_path/Info.plist" PocketLedgerAppGroupIdentifier "$app_group_id"
+              check_plist_value "$watch_widget_path/Info.plist" NSExtension:NSExtensionPointIdentifier com.apple.widgetkit-extension
 
-            if /usr/libexec/PlistBuddy -c 'Print :WKWatchKitApp' "$watch_path/Info.plist" >/dev/null 2>&1; then
-              echo "Single-target Watch apps must use WKApplication, not WKWatchKitApp."
-              return 1
+              if /usr/libexec/PlistBuddy -c 'Print :WKWatchKitApp' "$watch_path/Info.plist" >/dev/null 2>&1; then
+                echo "Single-target Watch apps must use WKApplication, not WKWatchKitApp."
+                return 1
+              fi
             fi
 
-            for extension_plist in "$widget_path/Info.plist" "$watch_widget_path/Info.plist"; do
+            local -a extension_plists=("$widget_path/Info.plist")
+            if [[ "$include_watch" == "true" ]]; then
+              extension_plists+=("$watch_widget_path/Info.plist")
+            fi
+            for extension_plist in "${extension_plists[@]}"; do
               if /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPrincipalClass' "$extension_plist" >/dev/null 2>&1; then
                 echo "Unexpected NSExtensionPrincipalClass in $extension_plist"
                 return 1
@@ -237,7 +271,11 @@ jobs:
 
             # Give re-signing tools an existing Mach-O signature to replace.
             # Sign nested bundles first; these signatures carry no Apple identity or provisioning.
-            for bundle in "$watch_widget_path" "$watch_path" "$widget_path" "$app_path"; do
+            local -a bundles=("$widget_path" "$app_path")
+            if [[ "$include_watch" == "true" ]]; then
+              bundles=("$watch_widget_path" "$watch_path" "${bundles[@]}")
+            fi
+            for bundle in "${bundles[@]}"; do
               test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$bundle/Info.plist")" = "$GITHUB_RUN_NUMBER"
               local executable
               executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle/Info.plist")
@@ -254,21 +292,30 @@ jobs:
             unzip -t "$ipa_path"
             unzip -Z1 "$ipa_path" > "$entries"
             require_entry "$entries" Payload/PocketLedger.app/PlugIns/PocketLedgerWidget.appex/Info.plist
-            require_entry "$entries" Payload/PocketLedger.app/Watch/PocketLedgerWatch.app/Info.plist
-            require_entry "$entries" Payload/PocketLedger.app/Watch/PocketLedgerWatch.app/PlugIns/PocketLedgerWatchWidget.appex/Info.plist
-            if grep -Eq '^Payload/PocketLedger\.app/PlugIns/PocketLedgerWatch\.app(/|$)' "$entries"; then
-              echo "The Watch app must be embedded under Watch/, not PlugIns/."
-              return 1
+            if [[ "$include_watch" == "true" ]]; then
+              require_entry "$entries" Payload/PocketLedger.app/Watch/PocketLedgerWatch.app/Info.plist
+              require_entry "$entries" Payload/PocketLedger.app/Watch/PocketLedgerWatch.app/PlugIns/PocketLedgerWatchWidget.appex/Info.plist
+              if grep -Eq '^Payload/PocketLedger\.app/PlugIns/PocketLedgerWatch\.app(/|$)' "$entries"; then
+                echo "The Watch app must be embedded under Watch/, not PlugIns/."
+                return 1
+              fi
             fi
-            echo "Verified $ipa_name ($app_bundle_id; $watch_bundle_id; iPhone and Watch widgets)"
+            echo "Verified $ipa_name ($app_bundle_id; iPhone widget; Watch included=$include_watch)"
           }
 
-          package_ipa normal "com.josephlteif.pocketledger" "Pocket Ledger" "Pocket Ledger Balance" "Pocket Ledger" "Pocket Ledger Complication" "PocketLedger-normal-build-$GITHUB_RUN_NUMBER.ipa"
-          package_ipa sandbox "com.josephlteif.pocketledger.sandbox" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Balance" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Complication" "PocketLedger-sandbox-build-$GITHUB_RUN_NUMBER.ipa"
+          package_ipa normal "com.josephlteif.pocketledger" "Pocket Ledger" "Pocket Ledger Balance" "Pocket Ledger" "Pocket Ledger Complication" "PocketLedger-normal-build-$GITHUB_RUN_NUMBER.ipa" "${{ inputs.include_watch }}"
+          if [[ "${{ inputs.include_sandbox }}" == "true" ]]; then
+            package_ipa sandbox "com.josephlteif.pocketledger.sandbox" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Balance" "Pocket Ledger Sandbox" "Pocket Ledger Sandbox Complication" "PocketLedger-sandbox-build-$GITHUB_RUN_NUMBER.ipa" "${{ inputs.include_watch }}"
+          fi
 
-          test "$(find "$GITHUB_WORKSPACE" -maxdepth 1 -name '*.ipa' -type f | wc -l | tr -d '[:space:]')" = "2"
+          expected_ipa_count=1
+          if [[ "${{ inputs.include_sandbox }}" == "true" ]]; then
+            expected_ipa_count=2
+          fi
+          actual_ipa_count="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -name '*.ipa' -type f | wc -l | tr -d '[:space:]')"
+          test "$actual_ipa_count" = "$expected_ipa_count"
 
-      - name: Upload the two IPA files
+      - name: Upload IPA files
         uses: actions/upload-artifact@v7
         with:
           name: PocketLedger-build-${{ github.run_number }}

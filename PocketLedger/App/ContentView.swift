@@ -66,6 +66,12 @@ struct ContentView: View {
         .onChange(of: intentSearchRouter.pendingSearch?.id) { _, _ in
             openPendingIntentSearch()
         }
+        .onChange(of: intentSearchRouter.pendingTransactionKind) { _, _ in
+            openPendingIntentTransaction()
+        }
+        .onChange(of: intentSearchRouter.pendingTemplateID) { _, _ in
+            openPendingIntentTemplate()
+        }
         .onChange(of: visualBillScanRouter.pendingBillScan?.id) { _, _ in
             openPendingVisualBillScan()
         }
@@ -76,6 +82,8 @@ struct ContentView: View {
             await proAccess.refreshEntitlements()
             areBalancesRevealed = false
             openPendingIntentSearch()
+            openPendingIntentTransaction()
+            openPendingIntentTemplate()
             if ProcessInfo.processInfo.arguments.contains("-ImportWizardUITest") {
                 isShowingImportWizardUITest = true
                 return
@@ -155,6 +163,25 @@ struct ContentView: View {
         selectedTabBinding.wrappedValue = .search
         isSearchPresented = true
         isSearchFieldFocused = true
+    }
+
+    private func openPendingIntentTransaction() {
+        guard let kind = intentSearchRouter.consumePendingTransactionKind() else { return }
+        selectedTabBinding.wrappedValue = .transactions
+        switch kind {
+        case .expense:
+            addAction = .expense
+        case .income:
+            addAction = .income
+        case .transfer:
+            addAction = .transfer
+        }
+    }
+
+    private func openPendingIntentTemplate() {
+        guard let templateID = intentSearchRouter.consumePendingTemplateID() else { return }
+        selectedTabBinding.wrappedValue = .transactions
+        addAction = .template(templateID)
     }
 
     private func openPendingVisualBillScan() {

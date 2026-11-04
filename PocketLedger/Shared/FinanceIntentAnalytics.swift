@@ -224,6 +224,9 @@ struct FinanceTransactionQuery: EntityStringQuery, Sendable {
     }
 }
 
+#if POCKET_LEDGER_APP_TARGET
+@AppIntent(.tool)
+#endif
 struct GetTransactionHistoryIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Transaction History"
     static let description = IntentDescription("Returns Pocket Ledger transactions for a date range, category, or account.")
@@ -278,6 +281,9 @@ struct GetTransactionHistoryIntent: AppIntent {
     }
 }
 
+#if POCKET_LEDGER_APP_TARGET
+@AppIntent(.tool)
+#endif
 struct GetSpendingSummaryIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Spending Summary"
     static let description = IntentDescription("Calculates Pocket Ledger expense totals for a date range, category, or account.")
@@ -316,6 +322,9 @@ struct GetSpendingSummaryIntent: AppIntent {
     }
 }
 
+#if POCKET_LEDGER_APP_TARGET
+@AppIntent(.tool)
+#endif
 struct GetUpcomingCommitmentsIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Upcoming Commitments"
     static let description = IntentDescription("Lists upcoming scheduled transactions and loan due dates, including overdue items.")
@@ -391,9 +400,12 @@ struct GetUpcomingCommitmentsIntent: AppIntent {
     }
 }
 
+#if POCKET_LEDGER_APP_TARGET
+@AppIntent(.tool)
+#endif
 struct GetSavingsGoalProgressIntent: AppIntent {
     static let title: LocalizedStringResource = "Check Pocket Ledger Savings Goals"
-    static let description = IntentDescription("Reads current progress and remaining amounts for saved savings goals.")
+    static let description = IntentDescription("Reads current progress, remaining amounts, and the monthly pace for saved savings goals with a target date.")
     static let openAppWhenRun = false
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
@@ -430,6 +442,8 @@ struct GetSavingsGoalProgressIntent: AppIntent {
             return .result(value: "No savings goals", dialog: "You haven't set up any savings goals in Pocket Ledger yet.")
         }
 
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
         let summaries = goals.map { goal in
             let remainingUnits = max(goal.targetAmount.minorUnits - goal.currentAmount.minorUnits, 0)
             let remaining = Money(currency: goal.targetAmount.currency, minorUnits: remainingUnits)
@@ -437,10 +451,27 @@ struct GetSavingsGoalProgressIntent: AppIntent {
                 return "\(goal.name): complete at \(goal.targetAmount.formatted)."
             }
 
-            let targetDate = goal.targetDate.map {
-                "; target date \($0.formatted(date: .abbreviated, time: .omitted))"
-            } ?? ""
-            return "\(goal.name): \(goal.currentAmount.formatted) of \(goal.targetAmount.formatted), \(remaining.formatted) remaining\(targetDate)."
+            var summary = "\(goal.name): \(goal.currentAmount.formatted) of \(goal.targetAmount.formatted), \(remaining.formatted) remaining"
+            guard let targetDate = goal.targetDate else {
+                return summary + ". No target date is set."
+            }
+
+            summary += ", target date \(targetDate.formatted(date: .abbreviated, time: .omitted))"
+            guard calendar.startOfDay(for: targetDate) >= today else {
+                return summary + ". The target date has passed."
+            }
+            guard let currentMonth = calendar.dateInterval(of: .month, for: today)?.start,
+                  let targetMonth = calendar.dateInterval(of: .month, for: targetDate)?.start else {
+                return summary + "."
+            }
+
+            let monthDistance = calendar.dateComponents([.month], from: currentMonth, to: targetMonth).month ?? 0
+            let monthsRemaining = max(monthDistance + 1, 1)
+            let divisor = Int64(monthsRemaining)
+            let monthlyUnits = remainingUnits / divisor + (remainingUnits % divisor == 0 ? 0 : 1)
+            let monthlyAmount = Money(currency: goal.targetAmount.currency, minorUnits: monthlyUnits)
+            let monthLabel = monthsRemaining == 1 ? "month" : "months"
+            return summary + ". Save at least \(monthlyAmount.formatted) per month for \(monthsRemaining) \(monthLabel) to reach it by then."
         }
         let summary = summaries.joined(separator: "\n")
         return .result(value: summary, dialog: IntentDialog(stringLiteral: summary))

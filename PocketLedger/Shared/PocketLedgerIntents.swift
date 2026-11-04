@@ -69,6 +69,9 @@ struct AddConfiguredExpenseIntent: AppIntent {
     }
 }
 
+#if POCKET_LEDGER_APP_TARGET
+@AppIntent(.tool)
+#endif
 struct GetBalanceIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Balance"
     static let description = IntentDescription("Reads the current Pocket Ledger balances by currency.")
@@ -92,6 +95,9 @@ struct GetBalanceIntent: AppIntent {
     }
 }
 
+#if POCKET_LEDGER_APP_TARGET
+@AppIntent(.tool)
+#endif
 struct GetCategoriesIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Categories"
     static let description = IntentDescription("Returns all Pocket Ledger categories and subcategories.")
@@ -123,6 +129,9 @@ struct GetCategoriesIntent: AppIntent {
     }
 }
 
+#if POCKET_LEDGER_APP_TARGET
+@AppIntent(.tool)
+#endif
 struct GetAccountsIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Accounts"
     static let description = IntentDescription("Returns all Pocket Ledger accounts with their current balance, currency, and type.")
@@ -161,6 +170,9 @@ struct GetAccountsIntent: AppIntent {
     }
 }
 
+#if POCKET_LEDGER_APP_TARGET
+@AppIntent(.tool)
+#endif
 struct GetAccountBalanceIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Account Balance"
     static let description = IntentDescription("Reads the current balance for one Pocket Ledger account.")
@@ -200,9 +212,12 @@ struct GetAccountBalanceIntent: AppIntent {
     }
 }
 
+#if POCKET_LEDGER_APP_TARGET
+@AppIntent(.tool)
+#endif
 struct AddLedgerTransactionIntent: AppIntent {
     static let title: LocalizedStringResource = "Add Pocket Ledger Transaction"
-    static let description = IntentDescription("Adds an expense, income, or transfer with account, category, note, change, and exchange-rate details.")
+    static let description = IntentDescription("Adds an expense, income, or transfer after the person confirms its account, amount, and details.")
     static let openAppWhenRun = false
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
@@ -459,6 +474,22 @@ struct AddLedgerTransactionIntent: AppIntent {
             changeAdjustment: changeAdjustment
         )
 
+        let summary = financeTransactionSummary(transaction)
+        let confirmationDetails = [
+            summary,
+            "account \(sourceAccount.name)",
+            destination.map { "destination \($0.name)" },
+            category.map { "category \($0.path)" },
+            transaction.amountDue.map { "bill total \($0.formatted)" },
+            "date \(transaction.date.formatted(date: .long, time: .omitted))"
+        ]
+        .compactMap { $0 }
+        .joined(separator: ", ")
+        try await requestConfirmation(
+            actionName: .continue,
+            dialog: IntentDialog(stringLiteral: "Save \(confirmationDetails)?")
+        )
+
         guard storage.appendTransaction(transaction) else {
             return .result(
                 value: "Persistent database unavailable",
@@ -468,7 +499,6 @@ struct AddLedgerTransactionIntent: AppIntent {
 
         await FinanceIntentIndexing.shared.refresh()
         WidgetCenter.shared.reloadTimelines(ofKind: "BalanceWidget")
-        let summary = financeTransactionSummary(transaction)
         return .result(
             value: summary,
             dialog: "Saved \(summary)."

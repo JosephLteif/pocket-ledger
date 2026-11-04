@@ -44,9 +44,11 @@ targets:
       - path: PocketLedger/Resources/Assets.xcassets
     resources:
       - path: PocketLedger/Config/PrivacyInfo.xcprivacy
+      - path: PocketLedger/Resources/Skills.skillsbundle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX)
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) POCKET_LEDGER_APP_TARGET"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_FILE: PocketLedger/Config/Info.plist
         CODE_SIGN_ENTITLEMENTS: PocketLedger/Config/PocketLedger.entitlements

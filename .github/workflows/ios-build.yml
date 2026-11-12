@@ -46,6 +46,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-swiftpm-
 
+      - name: Select Xcode 27.3 beta
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_27.3_beta.app/Contents/Developer
+          xcodebuild -version
+
       - name: Print build environment
         run: |
           set -euo pipefail
@@ -341,6 +346,11 @@ jobs:
           key: ${{ runner.os }}-swiftpm-${{ hashFiles('project.yml') }}
           restore-keys: |
             ${{ runner.os }}-swiftpm-
+
+      - name: Select Xcode 27.3 beta
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_27.3_beta.app/Contents/Developer
+          xcodebuild -version
 
       - name: Install XcodeGen
         run: |

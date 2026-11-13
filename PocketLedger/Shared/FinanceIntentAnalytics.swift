@@ -224,9 +224,6 @@ struct FinanceTransactionQuery: EntityStringQuery, Sendable {
     }
 }
 
-#if POCKET_LEDGER_APP_TARGET
-@AppIntent(.tool)
-#endif
 struct GetTransactionHistoryIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Transaction History"
     static let description = IntentDescription("Returns Pocket Ledger transactions for a date range, category, or account.")
@@ -281,9 +278,6 @@ struct GetTransactionHistoryIntent: AppIntent {
     }
 }
 
-#if POCKET_LEDGER_APP_TARGET
-@AppIntent(.tool)
-#endif
 struct GetSpendingSummaryIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Spending Summary"
     static let description = IntentDescription("Calculates Pocket Ledger expense totals for a date range, category, or account.")
@@ -322,9 +316,6 @@ struct GetSpendingSummaryIntent: AppIntent {
     }
 }
 
-#if POCKET_LEDGER_APP_TARGET
-@AppIntent(.tool)
-#endif
 struct GetUpcomingCommitmentsIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Upcoming Commitments"
     static let description = IntentDescription("Lists upcoming scheduled transactions and loan due dates, including overdue items.")
@@ -400,9 +391,6 @@ struct GetUpcomingCommitmentsIntent: AppIntent {
     }
 }
 
-#if POCKET_LEDGER_APP_TARGET
-@AppIntent(.tool)
-#endif
 struct GetSavingsGoalProgressIntent: AppIntent {
     static let title: LocalizedStringResource = "Check Pocket Ledger Savings Goals"
     static let description = IntentDescription("Reads current progress, remaining amounts, and the monthly pace for saved savings goals with a target date.")

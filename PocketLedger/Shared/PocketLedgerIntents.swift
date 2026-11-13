@@ -68,9 +68,6 @@ struct AddConfiguredExpenseIntent: AppIntent {
     }
 }
 
-#if POCKET_LEDGER_APP_TARGET
-@AppIntent(.tool)
-#endif
 struct GetBalanceIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Balance"
     static let description = IntentDescription("Reads the current Pocket Ledger balances by currency.")
@@ -94,9 +91,6 @@ struct GetBalanceIntent: AppIntent {
     }
 }
 
-#if POCKET_LEDGER_APP_TARGET
-@AppIntent(.tool)
-#endif
 struct GetCategoriesIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Categories"
     static let description = IntentDescription("Returns all Pocket Ledger categories and subcategories.")
@@ -128,9 +122,6 @@ struct GetCategoriesIntent: AppIntent {
     }
 }
 
-#if POCKET_LEDGER_APP_TARGET
-@AppIntent(.tool)
-#endif
 struct GetAccountsIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Accounts"
     static let description = IntentDescription("Returns all Pocket Ledger accounts with their current balance, currency, and type.")
@@ -169,9 +160,6 @@ struct GetAccountsIntent: AppIntent {
     }
 }
 
-#if POCKET_LEDGER_APP_TARGET
-@AppIntent(.tool)
-#endif
 struct GetAccountBalanceIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Pocket Ledger Account Balance"
     static let description = IntentDescription("Reads the current balance for one Pocket Ledger account.")
@@ -211,9 +199,6 @@ struct GetAccountBalanceIntent: AppIntent {
     }
 }
 
-#if POCKET_LEDGER_APP_TARGET
-@AppIntent(.tool)
-#endif
 struct AddLedgerTransactionIntent: AppIntent {
     static let title: LocalizedStringResource = "Add Pocket Ledger Transaction"
     static let description = IntentDescription("Adds an expense, income, or transfer after the person confirms its account, amount, and details.")

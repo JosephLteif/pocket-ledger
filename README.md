@@ -25,7 +25,7 @@ The current project configuration targets iOS 26. The app is native SwiftUI and 
 
 ## Build an unsigned iOS artifact
 
-The **Build unsigned iOS IPA** workflow uses a macOS runner and XcodeGen to create the Xcode project from `project.yml`. It builds the iPhone app without Apple signing credentials, uploads a short-lived IPA artifact, and can optionally build a separate sandbox app or run Simulator tests.
+The **Build unsigned iOS IPA** workflow uses the hosted `xcode-27` macOS runner and selects Xcode 27.2. XcodeGen creates the Xcode project from `project.yml`; the workflow builds the iPhone app without Apple signing credentials, uploads a short-lived IPA artifact, and can optionally build a separate sandbox app or run Simulator tests.
 
 1. Open the project’s Actions page.
 2. Select **Build unsigned iOS IPA** and choose **Run workflow**.

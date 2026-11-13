@@ -19,19 +19,6 @@ struct AccountsView: View {
 
     var body: some View {
         List {
-            HStack {
-                Label("Active accounts", systemImage: "wallet.pass")
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Text(proAccess.hasProAccess
-                     ? "\(store.activeAccounts.count)"
-                     : "\(store.activeAccounts.count) of \(PocketLedgerTierPolicy.freeAccountLimit)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-            }
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-
             if proAccess.hasProAccess {
                 DisclosureGroup(isExpanded: $isAccountSummaryExpanded) {
                     VStack(spacing: 12) {
@@ -44,7 +31,14 @@ struct AccountsView: View {
                         .font(.headline)
                         .foregroundStyle(PocketLedgerTheme.textPrimary)
                 }
-                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
+                .listRowInsets(
+                    EdgeInsets(
+                        top: 4,
+                        leading: PocketLedgerTheme.screenHorizontalPadding / 2,
+                        bottom: 12,
+                        trailing: PocketLedgerTheme.screenHorizontalPadding / 2
+                    )
+                )
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             } else {
@@ -53,7 +47,14 @@ struct AccountsView: View {
                     detail: "See assets, liabilities, and how your accounts contribute to net worth.",
                     feature: .netWorth
                 )
-                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
+                .listRowInsets(
+                    EdgeInsets(
+                        top: 4,
+                        leading: PocketLedgerTheme.screenHorizontalPadding / 2,
+                        bottom: 12,
+                        trailing: PocketLedgerTheme.screenHorizontalPadding / 2
+                    )
+                )
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }
@@ -70,9 +71,9 @@ struct AccountsView: View {
             }
 
             Text(store.storageAvailable && store.sharedStorageAvailable
-                 ? "Stored locally in the shared app container."
+                 ? "Stored locally in the shared app container for App Intents."
                  : store.storageAvailable
-                 ? "Stored persistently on this device; widget sharing is unavailable."
+                 ? "Stored persistently on this device; shared App Intent access is unavailable."
                  : "Persistent storage is unavailable; changes cannot be saved.")
                 .font(.caption)
                 .foregroundStyle(PocketLedgerTheme.textTertiary)
@@ -659,6 +660,7 @@ struct AccountEditor: View {
     let account: Account?
     let initialCurrency: LedgerCurrency?
     let onSaved: (Account) -> Void
+    private let wrapsInNavigationStack: Bool
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var type: AccountType = .cash
@@ -678,11 +680,13 @@ struct AccountEditor: View {
         account: Account? = nil,
         initialType: AccountType = .cash,
         initialCurrency: LedgerCurrency? = nil,
+        wrapsInNavigationStack: Bool = true,
         onSaved: @escaping (Account) -> Void = { _ in }
     ) {
         _store = ObservedObject(wrappedValue: store)
         self.account = account
         self.initialCurrency = initialCurrency
+        self.wrapsInNavigationStack = wrapsInNavigationStack
         self.onSaved = onSaved
         let initialSubtype = account?.tracking?.physicalAssetSubtype ?? Self.inferredPhysicalAssetSubtype(for: account)
         let selectedSubtype = account == nil ? PhysicalAssetSubtype.gold : initialSubtype
@@ -701,8 +705,16 @@ struct AccountEditor: View {
         _includeInTotals = State(initialValue: account?.includeInTotals ?? true)
     }
 
+    @ViewBuilder
     var body: some View {
-        NavigationStack {
+        if wrapsInNavigationStack {
+            NavigationStack { editorForm }
+        } else {
+            editorForm
+        }
+    }
+
+    private var editorForm: some View {
             Form {
                 Section("Account") {
                     TextField(type == .physicalAsset && physicalAssetSubtype == .other ? "Asset name" : "Name", text: $name)
@@ -820,7 +832,6 @@ struct AccountEditor: View {
                     ProUpgradeView(access: proAccess)
                 }
             }
-        }
     }
 
     private var errorPresented: Binding<Bool> {

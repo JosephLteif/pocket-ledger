@@ -53,13 +53,27 @@ struct MetricsSnapshot {
         var accountTotals: [UUID: (amount: Int64, transactionCount: Int)] = [:]
 
         for transaction in index.sortedTransactions {
+            let matchesCategory = transaction.kind == .expense
+                ? index.transactionMatchesCategory(
+                    transaction,
+                    selectedCategoryID: selectedCategoryID
+                )
+                : index.categoryMatches(
+                    transaction.categoryID,
+                    selectedCategoryID: selectedCategoryID
+                )
+            let categoryIncluded = transaction.kind == .expense
+                ? index.transactionCategoryIncludedInTotals(
+                    transaction,
+                    selectedCategoryID: selectedCategoryID
+                )
+                : index.categoryIncludedInTotals(transaction.categoryID)
+            let hasIncludedAccount = transaction.kind == .expense
+                || index.transactionHasIncludedAccount(transaction)
             guard interval.contains(transaction.date),
-                  index.categoryMatches(
-                      transaction.categoryID,
-                      selectedCategoryID: selectedCategoryID
-                  ),
-                  index.categoryIncludedInTotals(transaction.categoryID),
-                  index.transactionHasIncludedAccount(transaction) else {
+                  matchesCategory,
+                  categoryIncluded,
+                  hasIncludedAccount else {
                 continue
             }
 
@@ -74,21 +88,33 @@ struct MetricsSnapshot {
                     exchangeRate: transaction.exchangeRate
                 )
             case .expense:
-                let amount = index.netExpenseAmount(transaction, currency: selectedCurrency)
+                let categoryAmounts = index.expenseAmountsByCategory(transaction, currency: selectedCurrency)
+                    .filter { index.categoryMatches($0.key, selectedCategoryID: selectedCategoryID) }
+                let amount = max(categoryAmounts.reduce(0) { $0 + $1.value }, 0)
                 expenses += amount
-                guard amount > 0 else { continue }
-                let groupID = index.topLevelCategoryID(for: transaction.categoryID)
-                let current = categoryTotals[groupID]
-                    ?? (index.categoryName(for: groupID), 0, 0)
-                categoryTotals[groupID] = (
-                    current.title,
-                    current.amount + amount,
-                    current.count + 1
-                )
+                var amountsByTopLevelCategory: [UUID?: Int64] = [:]
+                for (categoryID, categoryAmount) in categoryAmounts {
+                    let groupID = index.topLevelCategoryID(for: categoryID)
+                    amountsByTopLevelCategory[groupID, default: 0] += categoryAmount
+                }
+                for (groupID, categoryAmount) in amountsByTopLevelCategory where categoryAmount != 0 {
+                    let current = categoryTotals[groupID]
+                        ?? (index.categoryName(for: groupID), 0, 0)
+                    categoryTotals[groupID] = (
+                        current.title,
+                        current.amount + categoryAmount,
+                        current.count + 1
+                    )
+                }
 
                 var accountNetAmounts: [UUID: Int64] = [:]
                 for movement in transaction.outflows {
-                    guard index.includesInTotals(accountID: movement.accountID),
+                    guard index.categoryMatches(
+                            transaction.categoryID(for: movement),
+                            selectedCategoryID: selectedCategoryID
+                          ),
+                          index.categoryIncludedInTotals(transaction.categoryID(for: movement)),
+                          index.includesInTotals(accountID: movement.accountID),
                           let converted = financeConvertedMinorUnits(
                               movement.money,
                               to: selectedCurrency,
@@ -98,8 +124,15 @@ struct MetricsSnapshot {
                     }
                     accountNetAmounts[movement.accountID, default: 0] += converted
                 }
+                let refundCategoryID = transaction.categoryID
+                    ?? transaction.outflows.first.flatMap { transaction.categoryID(for: $0) }
                 for movement in transaction.inflows {
-                    guard index.includesInTotals(accountID: movement.accountID),
+                    guard index.categoryMatches(
+                            movement.categoryID ?? refundCategoryID,
+                            selectedCategoryID: selectedCategoryID
+                          ),
+                          index.categoryIncludedInTotals(movement.categoryID ?? refundCategoryID),
+                          index.includesInTotals(accountID: movement.accountID),
                           let converted = financeConvertedMinorUnits(
                               movement.money,
                               to: selectedCurrency,
@@ -201,29 +234,34 @@ struct MetricsSnapshot {
         for transaction in index.sortedTransactions {
             guard transaction.kind == .expense,
                   interval.contains(transaction.date),
-                  index.categoryMatches(
-                      transaction.categoryID,
-                      selectedCategoryID: categoryID
+                  index.transactionMatchesCategory(
+                    transaction,
+                    selectedCategoryID: categoryID
                   ),
-                  index.categoryIncludedInTotals(transaction.categoryID),
-                  index.transactionHasIncludedAccount(transaction),
-                  let subcategoryID = index.directDescendantCategoryID(
-                      for: transaction.categoryID,
-                      under: categoryID
+                  index.transactionCategoryIncludedInTotals(
+                    transaction,
+                    selectedCategoryID: categoryID
                   ) else {
                 continue
             }
 
-            let amount = index.netExpenseAmount(transaction, currency: selectedCurrency)
-            guard amount > 0 else { continue }
-
-            let current = totals[subcategoryID]
-                ?? (index.categoryName(for: subcategoryID), 0, 0)
-            totals[subcategoryID] = (
-                current.title,
-                current.amount + amount,
-                current.count + 1
-            )
+            let amounts = index.expenseAmountsByCategory(transaction, currency: selectedCurrency)
+            for (movementCategoryID, amount) in amounts where amount != 0 {
+                guard index.categoryMatches(movementCategoryID, selectedCategoryID: categoryID),
+                      let subcategoryID = index.directDescendantCategoryID(
+                        for: movementCategoryID,
+                        under: categoryID
+                      ) else {
+                    continue
+                }
+                let current = totals[subcategoryID]
+                    ?? (index.categoryName(for: subcategoryID), 0, 0)
+                totals[subcategoryID] = (
+                    current.title,
+                    current.amount + amount,
+                    current.count + 1
+                )
+            }
         }
 
         return totals
@@ -339,14 +377,12 @@ struct DashboardSnapshot {
                 monthTransactionCount += 1
             }
             guard transaction.kind == .expense,
-                  index.categoryIncludedInTotals(transaction.categoryID),
-                  transaction.outflows.contains(where: {
-                      index.includesInTotals(accountID: $0.accountID)
-                  }),
-                  let categoryID = transaction.categoryID else {
+                  index.transactionCategoryIncludedInTotals(transaction) else {
                 continue
             }
-            categoryCounts[categoryID, default: 0] += 1
+            for categoryID in Set(index.categoryIDs(for: transaction).compactMap { $0 }) {
+                categoryCounts[categoryID, default: 0] += 1
+            }
         }
 
         return DashboardSnapshot(

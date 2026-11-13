@@ -74,6 +74,29 @@ enum LedgerCurrency: String, Codable, CaseIterable, Identifiable, Hashable, Send
         }
     }
 
+    /// Group digits while preserving incomplete decimals and trailing zeros during editing.
+    func formattedEditingInput(_ rawValue: String, locale: Locale = .current) -> String {
+        let separator = locale.decimalSeparator ?? "."
+        let grouping = locale.groupingSeparator ?? ","
+        let ungrouped = rawValue.replacingOccurrences(of: grouping, with: "")
+        let parts = ungrouped.components(separatedBy: separator)
+        guard parts.count <= 2 else { return rawValue }
+        let negative = parts[0].hasPrefix("-")
+        let integer = negative ? String(parts[0].dropFirst()) : parts[0]
+        guard integer.allSatisfy(\.isNumber),
+              parts.dropFirst().allSatisfy({ $0.allSatisfy(\.isNumber) }) else { return rawValue }
+        guard !integer.isEmpty else { return rawValue }
+        let formatter = NumberFormatter()
+        formatter.locale = locale
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        formatter.usesGroupingSeparator = true
+        let number = NSDecimalNumber(string: integer, locale: Locale(identifier: "en_US_POSIX"))
+        guard number != .notANumber, let grouped = formatter.string(from: number) else { return rawValue }
+        let fraction = parts.count == 2 ? separator + parts[1] : ""
+        return (negative ? "-" : "") + grouped + fraction
+    }
+
     func formattedInput(_ rawValue: String, locale: Locale = .current) -> String {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
@@ -641,11 +664,13 @@ struct MoneyMovement: Identifiable, Codable, Equatable {
     let id: UUID
     var accountID: UUID
     var money: Money
+    var categoryID: UUID?
 
-    init(id: UUID = UUID(), accountID: UUID, money: Money) {
+    init(id: UUID = UUID(), accountID: UUID, money: Money, categoryID: UUID? = nil) {
         self.id = id
         self.accountID = accountID
         self.money = money
+        self.categoryID = categoryID
     }
 }
 
@@ -764,6 +789,10 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
     var loanPaymentID: UUID?
     var loanActivity: LoanLedgerActivity?
     var loanPrincipalAmount: Money?
+
+    func categoryID(for movement: MoneyMovement) -> UUID? {
+        movement.categoryID ?? categoryID
+    }
 
     init(
         id: UUID = UUID(),
@@ -1114,15 +1143,19 @@ struct ScheduledTransaction: Identifiable, Codable, Equatable {
             kind: kind,
             categoryID: categoryID,
             amountDue: amountDue,
-            outflows: outflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
-            inflows: inflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
+            outflows: outflows.map {
+                MoneyMovement(accountID: $0.accountID, money: $0.money, categoryID: $0.categoryID)
+            },
+            inflows: inflows.map {
+                MoneyMovement(accountID: $0.accountID, money: $0.money, categoryID: $0.categoryID)
+            },
             exchangeRate: exchangeRate,
             changeAdjustment: changeAdjustment
         )
     }
 }
 
-struct FinanceWidgetSnapshot: Equatable, Sendable {
+struct FinanceBalanceSnapshot: Equatable, Sendable {
     let usdAvailable: Money
     let lbpAvailable: Money
     let eurAvailable: Money
@@ -1228,13 +1261,22 @@ func financeConvertedMinorUnits(
 func financeNetExpenseAmount(
     _ transaction: LedgerTransaction,
     currency: LedgerCurrency,
-    in data: FinanceData
+    in data: FinanceData,
+    categoryID: UUID? = nil
 ) -> Int64 {
     guard transaction.kind == .expense else { return 0 }
-    guard financeCategoryIncludedInTotals(transaction.categoryID, in: data.categories) else { return 0 }
+    let refundCategoryID = transaction.categoryID
+        ?? transaction.outflows.first.flatMap { transaction.categoryID(for: $0) }
 
-    func includedAmount(_ movements: [MoneyMovement]) -> Int64 {
+    func includedAmount(_ movements: [MoneyMovement], isRefund: Bool) -> Int64 {
         movements
+            .filter { movement in
+                let movementCategoryID = isRefund
+                    ? movement.categoryID ?? refundCategoryID
+                    : transaction.categoryID(for: movement)
+                return (categoryID == nil || movementCategoryID == categoryID)
+                    && financeCategoryIncludedInTotals(movementCategoryID, in: data.categories)
+            }
             .filter { movement in
                 data.accounts.first(where: { $0.id == movement.accountID })?.includeInTotals == true
             }
@@ -1248,7 +1290,11 @@ func financeNetExpenseAmount(
             .reduce(Int64.zero, +)
     }
 
-    return max(includedAmount(transaction.outflows) - includedAmount(transaction.inflows), 0)
+    return max(
+        includedAmount(transaction.outflows, isRefund: false)
+            - includedAmount(transaction.inflows, isRefund: true),
+        0
+    )
 }
 
 func financeCategoryIncludedInTotals(_ categoryID: UUID?, in categories: [LedgerCategory]) -> Bool {
@@ -1281,13 +1327,20 @@ func financeBudgetSpent(
             ?? DateInterval(start: .distantPast, duration: .zero)
     )
     let spent = data.transactions
-        .filter {
-            $0.kind == .expense
-                && period.contains($0.date)
-                && $0.categoryID == budget.categoryID
+        .filter { transaction in
+            transaction.kind == .expense
+                && period.contains(transaction.date)
+                && transaction.outflows.contains {
+                    transaction.categoryID(for: $0) == budget.categoryID
+                }
         }
         .reduce(Int64.zero) { total, transaction in
-            total + financeNetExpenseAmount(transaction, currency: budget.currency, in: data)
+            total + financeNetExpenseAmount(
+                transaction,
+                currency: budget.currency,
+                in: data,
+                categoryID: budget.categoryID
+            )
         }
     return Money(currency: budget.currency, minorUnits: spent)
 }
@@ -1386,8 +1439,12 @@ struct LedgerTemplate: Identifiable, Codable, Equatable {
             kind: kind,
             categoryID: categoryID,
             amountDue: amountDue,
-            outflows: outflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
-            inflows: inflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
+            outflows: outflows.map {
+                MoneyMovement(accountID: $0.accountID, money: $0.money, categoryID: $0.categoryID)
+            },
+            inflows: inflows.map {
+                MoneyMovement(accountID: $0.accountID, money: $0.money, categoryID: $0.categoryID)
+            },
             exchangeRate: exchangeRate,
             changeAdjustment: changeAdjustment
         )

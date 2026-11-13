@@ -1,6 +1,5 @@
 import Combine
 import Foundation
-import WidgetKit
 
 enum FinanceAttentionDestination: Hashable {
     case uncategorizedTransactions
@@ -100,7 +99,7 @@ final class LedgerStore: ObservableObject {
             return "Persistent database is working"
         }
         if storage.isLocalFallback {
-            return "Persistent local database is working; widget sharing is unavailable"
+            return "Persistent local database is working; Siri and Shortcuts data sharing is unavailable"
         }
         return "Persistent database unavailable"
     }
@@ -340,6 +339,12 @@ final class LedgerStore: ObservableObject {
         for index in updated.transactions.indices where ids.contains(updated.transactions[index].id) {
             guard updated.transactions[index].loanID == nil else { continue }
             updated.transactions[index].categoryID = categoryID
+            for movementIndex in updated.transactions[index].outflows.indices {
+                updated.transactions[index].outflows[movementIndex].categoryID = categoryID
+            }
+            for movementIndex in updated.transactions[index].inflows.indices {
+                updated.transactions[index].inflows[movementIndex].categoryID = categoryID
+            }
             changed = true
         }
         guard changed else {
@@ -425,8 +430,12 @@ final class LedgerStore: ObservableObject {
             kind: transaction.kind,
             categoryID: transaction.categoryID,
             amountDue: transaction.amountDue,
-            outflows: transaction.outflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
-            inflows: transaction.inflows.map { MoneyMovement(accountID: $0.accountID, money: $0.money) },
+            outflows: transaction.outflows.map {
+                MoneyMovement(accountID: $0.accountID, money: $0.money, categoryID: $0.categoryID)
+            },
+            inflows: transaction.inflows.map {
+                MoneyMovement(accountID: $0.accountID, money: $0.money, categoryID: $0.categoryID)
+            },
             exchangeRate: transaction.exchangeRate,
             changeAdjustment: transaction.changeAdjustment,
             attachmentIDs: transaction.attachmentIDs
@@ -2044,7 +2053,6 @@ final class LedgerStore: ObservableObject {
         }
 
         replaceData(updated)
-        WidgetCenter.shared.reloadTimelines(ofKind: "BalanceWidget")
         if shortcutInputsChanged {
             PocketLedgerShortcuts.updateAppShortcutParameters()
         }

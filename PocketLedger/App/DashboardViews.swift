@@ -180,9 +180,15 @@ private enum DashboardSheet: Identifiable {
     }
 }
 
+private enum DashboardTransactionsRoute: Hashable {
+    case month
+    case topCategory(String?)
+}
+
 @MainActor
 struct DashboardView: View {
     @ObservedObject var store: LedgerStore
+    @State private var transactionPath: [DashboardTransactionsRoute] = []
     @ObservedObject var security: AppSecurityService
     let onAddExpense: () -> Void
     let onShowTransactions: () -> Void
@@ -203,7 +209,7 @@ struct DashboardView: View {
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $transactionPath) {
             PocketGlassContainer(spacing: 14) {
                 List {
                     dashboardListRow(dashboardDateHeader, top: 12, bottom: 0)
@@ -267,6 +273,14 @@ struct DashboardView: View {
                         .accessibilityIdentifier("dashboard-customize")
                     }
                     AddTransactionToolbar(store: store, onAction: onAddAction)
+                }
+            }
+            .navigationDestination(for: DashboardTransactionsRoute.self) { route in
+                switch route {
+                case .month:
+                    transactionsDestination(filter: .all)
+                case .topCategory(let category):
+                    transactionsDestination(filter: .expense, search: category ?? "")
                 }
             }
             .sheet(item: $presentedSheet) { sheet in
@@ -911,14 +925,8 @@ struct DashboardView: View {
             sectionHeader(title: "This month", detail: Date.now.formatted(.dateTime.month(.wide).year()))
 
             HStack(spacing: 10) {
-                NavigationLink {
-                    TransactionsView(
-                        store: store,
-                        onAddExpense: onAddExpense,
-                        security: security,
-                        initialFilter: .all,
-                        initialPeriod: .thisMonth
-                    )
+                Button {
+                    transactionPath.append(.month)
                 } label: {
                     snapshotMetric(
                         title: "Transactions",
@@ -929,15 +937,8 @@ struct DashboardView: View {
                 }
                 .buttonStyle(.plain)
 
-                NavigationLink {
-                    TransactionsView(
-                        store: store,
-                        onAddExpense: onAddExpense,
-                        security: security,
-                        initialFilter: .expense,
-                        initialPeriod: .thisMonth,
-                        initialSearch: snapshot.topCategory ?? ""
-                    )
+                Button {
+                    transactionPath.append(.topCategory(snapshot.topCategory))
                 } label: {
                     snapshotMetric(
                         title: "Top category",
@@ -961,6 +962,20 @@ struct DashboardView: View {
             .padding(14)
             .pocketGroupedSurface(cornerRadius: 17)
         }
+    }
+
+    private func transactionsDestination(
+        filter: TransactionFilter,
+        search: String = ""
+    ) -> some View {
+        TransactionsView(
+            store: store,
+            onAddExpense: onAddExpense,
+            security: security,
+            initialFilter: filter,
+            initialPeriod: .thisMonth,
+            initialSearch: search
+        )
     }
 
     @ViewBuilder

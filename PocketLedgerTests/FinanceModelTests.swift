@@ -185,6 +185,90 @@ final class FinanceModelTests: XCTestCase {
         XCTAssertEqual(index.budgetSpent(budget, interval: januaryInterval, calendar: calendar).minorUnits, 1_000)
     }
 
+    func testSplitPaymentCategoriesAffectMetricsAndLegacyMovementsInheritParent() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let date = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 2, day: 15)))
+        let month = try XCTUnwrap(calendar.dateInterval(of: .month, for: date))
+        let account = Account(
+            name: "Cash",
+            type: .cash,
+            currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 10_000)
+        )
+        let food = LedgerCategory(name: "Food")
+        let travel = LedgerCategory(name: "Travel")
+        let transaction = LedgerTransaction(
+            date: date,
+            note: "Trip",
+            kind: .expense,
+            categoryID: food.id,
+            outflows: [
+                MoneyMovement(accountID: account.id, money: Money(currency: .usd, minorUnits: 600)),
+                MoneyMovement(
+                    accountID: account.id,
+                    money: Money(currency: .usd, minorUnits: 400),
+                    categoryID: travel.id
+                )
+            ],
+            inflows: [MoneyMovement(accountID: account.id, money: Money(currency: .usd, minorUnits: 100))]
+        )
+        let data = FinanceData(
+            accounts: [account],
+            categories: [food, travel],
+            transactions: [transaction]
+        )
+        let legacyMovementData = try JSONEncoder().encode(transaction.outflows[0])
+        let legacyMovementObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: legacyMovementData) as? [String: Any]
+        )
+        XCTAssertNil(legacyMovementObject["categoryID"])
+        XCTAssertNil(try JSONDecoder().decode(MoneyMovement.self, from: legacyMovementData).categoryID)
+
+        let roundTripped = try JSONDecoder().decode(
+            LedgerTransaction.self,
+            from: JSONEncoder().encode(transaction)
+        )
+        XCTAssertEqual(roundTripped.outflows[1].categoryID, travel.id)
+        XCTAssertEqual(roundTripped.categoryID(for: roundTripped.outflows[0]), food.id)
+
+        let index = LedgerIndex(data: data, calendar: calendar)
+        let amounts = index.expenseAmountsByCategory(transaction, currency: .usd)
+        XCTAssertEqual(amounts[food.id], 500)
+        XCTAssertEqual(amounts[travel.id], 400)
+        XCTAssertEqual(index.netExpenseAmount(transaction, currency: .usd), 900)
+        XCTAssertEqual(
+            financeNetExpenseAmount(transaction, currency: .usd, in: data, categoryID: travel.id),
+            400
+        )
+
+        let travelMetrics = MetricsSnapshot.make(
+            index: index,
+            interval: month,
+            selectedCurrency: .usd,
+            selectedCategoryID: travel.id
+        )
+        XCTAssertEqual(travelMetrics.expenses, 400)
+        XCTAssertEqual(travelMetrics.categories.first?.title, "Travel")
+
+        let travelBudget = LedgerBudget(
+            categoryID: travel.id,
+            currency: .usd,
+            monthlyLimit: Money(currency: .usd, minorUnits: 1_000),
+            rollover: false,
+            startedAt: date
+        )
+        XCTAssertEqual(index.budgetSpent(travelBudget, interval: month, calendar: calendar).minorUnits, 400)
+        XCTAssertEqual(financeBudgetSpent(travelBudget, in: data, interval: month).minorUnits, 400)
+
+        var invalidTransaction = transaction
+        invalidTransaction.outflows[1].categoryID = UUID()
+        XCTAssertEqual(
+            FinanceTransactionValidator.validate(invalidTransaction, in: data),
+            .missingCategory
+        )
+    }
+
     func testMetricsSnapshotBenchmarkUsesOneAggregatedPass() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -2692,191 +2776,4 @@ final class FinanceModelTests: XCTestCase {
         XCTAssertTrue(draft.duplicateTransactionIDs.isEmpty)
     }
 
-    func testWatchCacheReadsOlderQueuedItemsAndDoesNotResendRejectedOnes() throws {
-        let rejected = WatchExpenseCommand(
-            amount: Money(currency: .usd, minorUnits: 900),
-            accountID: UUID(),
-            categoryID: nil,
-            note: "Coffee"
-        )
-        let queued = WatchExpenseCommand(
-            amount: Money(currency: .usd, minorUnits: 1_200),
-            accountID: UUID(),
-            categoryID: nil,
-            note: "Lunch"
-        )
-        let currentData = try JSONEncoder().encode(WatchLedgerCache(
-            snapshot: nil,
-            pendingExpenses: [rejected, queued],
-            lastSyncDate: nil,
-            lastError: nil,
-            failedExpenseMessages: [rejected.id: "The account is unavailable."]
-        ))
-        var legacyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: currentData) as? [String: Any])
-        legacyObject.removeValue(forKey: "failedExpenseMessages")
-        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
-        let decodedLegacy = try JSONDecoder().decode(WatchLedgerCache.self, from: legacyData)
-
-        XCTAssertEqual(decodedLegacy.pendingExpenses, [rejected, queued])
-        XCTAssertTrue(decodedLegacy.failedExpenseMessages.isEmpty)
-        XCTAssertEqual(
-            WatchExpenseQueuePolicy.commandsReadyToSend(
-                [rejected, queued, queued],
-                rejectedIDs: [rejected.id]
-            ),
-            [queued]
-        )
-        let failures = [rejected.id: "The account is unavailable."]
-        let retried = try XCTUnwrap(WatchExpenseQueuePolicy.retryFailedExpense(
-            id: rejected.id,
-            commands: [rejected, queued],
-            failures: failures
-        ))
-        XCTAssertEqual(retried.commands, [rejected, queued])
-        XCTAssertTrue(retried.failures.isEmpty)
-
-        let corrected = try XCTUnwrap(WatchExpenseQueuePolicy.correctAndRetryFailedExpense(
-            id: rejected.id,
-            amount: Money(currency: .usd, minorUnits: 1_000),
-            accountID: queued.accountID,
-            categoryID: nil,
-            note: "Coffee corrected",
-            commands: [rejected, queued],
-            failures: failures
-        ))
-        XCTAssertEqual(corrected.commands[0].id, rejected.id)
-        XCTAssertEqual(corrected.commands[0].date, rejected.date)
-        XCTAssertEqual(corrected.commands[0].amount.minorUnits, 1_000)
-        XCTAssertTrue(corrected.failures.isEmpty)
-
-        let discarded = try XCTUnwrap(WatchExpenseQueuePolicy.discardFailedExpense(
-            id: rejected.id,
-            commands: [rejected, queued, rejected],
-            failures: failures
-        ))
-        XCTAssertEqual(discarded.commands, [queued])
-        XCTAssertTrue(discarded.failures.isEmpty)
-        XCTAssertNil(WatchExpenseQueuePolicy.discardFailedExpense(
-            id: rejected.id,
-            commands: [queued],
-            failures: [:]
-        ))
-
-        let alreadyRecorded = LedgerTransaction(
-            id: rejected.id,
-            date: rejected.date,
-            note: rejected.note,
-            kind: .expense,
-            categoryID: rejected.categoryID,
-            outflows: [MoneyMovement(accountID: rejected.accountID, money: rejected.amount)],
-            inflows: []
-        )
-        XCTAssertTrue(WatchExpenseQueuePolicy.wasAlreadyRecorded(
-            commandID: rejected.id,
-            in: [alreadyRecorded]
-        ))
-        XCTAssertFalse(WatchExpenseQueuePolicy.wasAlreadyRecorded(
-            commandID: rejected.id,
-            in: []
-        ))
-    }
-
-    func testWatchSnapshotWorkRequiresEligibleDelivery() {
-        XCTAssertFalse(WatchSyncPublisher.isEligibleForDelivery(
-            sessionSupported: false,
-            isActivated: true,
-            isWatchAppInstalled: true
-        ))
-        XCTAssertFalse(WatchSyncPublisher.isEligibleForDelivery(
-            sessionSupported: true,
-            isActivated: true,
-            isWatchAppInstalled: false
-        ))
-        XCTAssertFalse(WatchSyncPublisher.isEligibleForDelivery(
-            sessionSupported: true,
-            isActivated: false,
-            isWatchAppInstalled: true
-        ))
-        XCTAssertTrue(WatchSyncPublisher.isEligibleForDelivery(
-            sessionSupported: true,
-            isActivated: true,
-            isWatchAppInstalled: true
-        ))
-    }
-
-    func testWatchExpenseCommandRoundTripsThroughConnectivityCodec() throws {
-        let command = WatchExpenseCommand(
-            id: UUID(),
-            date: Date(timeIntervalSince1970: 1_700_000_000),
-            amount: Money(currency: .usd, minorUnits: 1_250),
-            accountID: UUID(),
-            categoryID: UUID(),
-            note: "Coffee"
-        )
-
-        let context = try XCTUnwrap(WatchSyncCodec.dictionary(for: command))
-        let decoded = try XCTUnwrap(WatchSyncCodec.expenseCommand(from: context))
-
-        XCTAssertEqual(decoded, command)
-    }
-
-    func testWatchSnapshotIncludesBalancesAndRecentActivity() {
-        let account = Account(
-            name: "Cash",
-            type: .cash,
-            currency: .usd,
-            openingBalance: Money(currency: .usd, minorUnits: 10_000)
-        )
-        let category = LedgerCategory(name: "Food")
-        let transaction = LedgerTransaction(
-            date: Date(timeIntervalSince1970: 1_700_000_000),
-            note: "Lunch",
-            kind: .expense,
-            categoryID: category.id,
-            outflows: [
-                MoneyMovement(
-                    accountID: account.id,
-                    money: Money(currency: .usd, minorUnits: 1_250)
-                )
-            ],
-            inflows: []
-        )
-
-        let snapshot = WatchSyncPublisher.makeSnapshot(
-            from: FinanceData(
-                accounts: [account],
-                categories: [category],
-                transactions: [transaction]
-            ),
-            generatedAt: Date(timeIntervalSince1970: 1_700_000_100)
-        )
-
-        XCTAssertEqual(snapshot.balances.first { $0.currency == .usd }?.balance.minorUnits, 8_750)
-        XCTAssertEqual(snapshot.accounts.first?.name, "Cash")
-        XCTAssertEqual(snapshot.recentTransactions.first?.categoryPath, "Food")
-        XCTAssertEqual(snapshot.recentTransactions.first?.amount.minorUnits, 1_250)
-    }
-
-    func testLegacyWatchSnapshotDefaultsPlanningFields() throws {
-        let snapshot = WatchLedgerSnapshot(
-            version: 1,
-            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            balances: [],
-            accounts: [],
-            categories: [],
-            recentTransactions: []
-        )
-        let encoded = try JSONEncoder().encode(snapshot)
-        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
-        object.removeValue(forKey: "attentionCount")
-        object.removeValue(forKey: "upcomingScheduledCount")
-
-        let decoded = try JSONDecoder().decode(
-            WatchLedgerSnapshot.self,
-            from: JSONSerialization.data(withJSONObject: object)
-        )
-
-        XCTAssertEqual(decoded.attentionCount, 0)
-        XCTAssertEqual(decoded.upcomingScheduledCount, 0)
-    }
 }

@@ -100,9 +100,6 @@ struct ContentView: View {
                 isShowingSetup = true
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .pocketLedgerWatchLedgerDidChange)) { _ in
-            store.reload()
-        }
         .onOpenURL(perform: handleDeepLink)
         .sheet(isPresented: $isShowingSetup) {
             SetupWizardView(store: store)

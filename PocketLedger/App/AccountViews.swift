@@ -81,16 +81,33 @@ private struct AccountDetailSnapshot {
     }
 }
 
+private enum AccountDetailSheet: Identifiable {
+    case accountEditor
+    case balanceEditor
+    case transaction(LedgerTransaction)
+    case template(LedgerTransaction)
+
+    var id: String {
+        switch self {
+        case .accountEditor:
+            return "account-editor"
+        case .balanceEditor:
+            return "balance-editor"
+        case .transaction(let transaction):
+            return "transaction-\(transaction.id.uuidString)"
+        case .template(let transaction):
+            return "template-\(transaction.id.uuidString)"
+        }
+    }
+}
+
 @MainActor
 struct AccountDetailView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
     let accountID: UUID
 
-    @State private var isPresentingAccountEditor = false
-    @State private var isPresentingBalanceEditor = false
-    @State private var editingTransaction: LedgerTransaction?
-    @State private var transactionToTemplate: LedgerTransaction?
+    @State private var presentedSheet: AccountDetailSheet?
     @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
     @State private var transactionDeletionError: String?
     @State private var transactionPage = 0
@@ -130,7 +147,7 @@ struct AccountDetailView: View {
                     if account != nil {
                         ToolbarItem(placement: .primaryAction) {
                             Button {
-                                isPresentingAccountEditor = true
+                                presentedSheet = .accountEditor
                             } label: {
                                 Image(systemName: "pencil")
                             }
@@ -139,21 +156,17 @@ struct AccountDetailView: View {
                     }
                 }
             }
-            .sheet(isPresented: $isPresentingAccountEditor) {
-                if let account {
-                    AccountEditor(store: store, account: account)
+            .sheet(item: $presentedSheet) { sheet in
+                switch sheet {
+                case .accountEditor:
+                    if let account { AccountEditor(store: store, account: account) }
+                case .balanceEditor:
+                    if let account { AccountBalanceEditor(store: store, account: account) }
+                case .transaction(let transaction):
+                    TransactionEditor(store: store, transaction: transaction)
+                case .template(let transaction):
+                    TemplateNameEditor(store: store, transaction: transaction)
                 }
-            }
-            .sheet(isPresented: $isPresentingBalanceEditor) {
-                if let account {
-                    AccountBalanceEditor(store: store, account: account)
-                }
-            }
-            .sheet(item: $editingTransaction) { transaction in
-                TransactionEditor(store: store, transaction: transaction)
-            }
-            .sheet(item: $transactionToTemplate) { transaction in
-                TemplateNameEditor(store: store, transaction: transaction)
             }
             .pocketScreen()
             .onAppear {
@@ -244,7 +257,7 @@ struct AccountDetailView: View {
                             TransactionRow(
                                 transaction: transaction,
                                 store: store,
-                                onEdit: { editingTransaction = transaction },
+                                onEdit: { presentedSheet = .transaction(transaction) },
                                 onDuplicate: { _ = store.duplicateTransaction(id: transaction.id) },
                                 onDelete: {
                                     if store.deleteTransaction(id: transaction.id) {
@@ -253,7 +266,7 @@ struct AccountDetailView: View {
                                         transactionDeletionError = store.lastActionStatus ?? "The transaction could not be deleted."
                                     }
                                 },
-                                onSaveTemplate: { transactionToTemplate = transaction },
+                                onSaveTemplate: { presentedSheet = .template(transaction) },
                                 allowsActions: true,
                                 accountContext: account
                             )
@@ -462,7 +475,7 @@ struct AccountDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Button {
-                    isPresentingBalanceEditor = true
+                    presentedSheet = .balanceEditor
                 } label: {
                     Label("Adjust current balance", systemImage: "slider.horizontal.3")
                         .font(.subheadline.weight(.semibold))

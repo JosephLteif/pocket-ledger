@@ -68,6 +68,14 @@ enum FinanceTransactionValidator {
             guard let account = data.accounts.first(where: { $0.id == movement.accountID }) else {
                 return .missingMovementAccount
             }
+            if let categoryID = movement.categoryID {
+                guard let category = data.categories.first(where: { $0.id == categoryID }) else {
+                    return .missingCategory
+                }
+                if category.isArchived && !allowArchivedReferences {
+                    return .archivedCategory
+                }
+            }
             if account.isArchived && !allowArchivedReferences {
                 return .archivedMovementAccount
             }

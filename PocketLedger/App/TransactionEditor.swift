@@ -8,6 +8,7 @@ private struct MovementDraft: Identifiable, Equatable {
     var accountID: UUID
     var currency: LedgerCurrency
     var amount: String
+    var categoryID: UUID? = nil
 }
 
 enum FinanceTransactionDefaults {
@@ -187,10 +188,8 @@ struct TransactionEditor: View {
     @State private var templateName = ""
     @State private var date = Date.now
     @State private var kind: TransactionKind = .expense
-    @State private var isPresentingLoanEditor = false
-    @State private var dismissAfterLoanSave = false
-    @State private var assetAccountType: AccountType?
-    @State private var dismissAfterAssetSave = false
+    @State private var specialEditorPath: [TransactionEditorType] = []
+    @State private var dismissAfterSpecialEditorSave = false
     @State private var assetCreatedNotice = false
     @State private var loanCreatedNotice = false
     @State private var timing: TransactionTiming = .now
@@ -199,6 +198,7 @@ struct TransactionEditor: View {
     @State private var scheduleEnabled = true
     @State private var categoryID: UUID?
     @State private var isSelectingCategory = false
+    @State private var categorySelectionPaymentID: UUID?
     @State private var dueCurrency: LedgerCurrency = .usd
     @State private var amountDue = ""
     @State private var outflows: [MovementDraft]
@@ -332,7 +332,8 @@ struct TransactionEditor: View {
                 MovementDraft(
                     accountID: $0.accountID,
                     currency: $0.money.currency,
-                    amount: Self.inputText(for: $0.money)
+                    amount: Self.inputText(for: $0.money),
+                    categoryID: $0.categoryID
                 )
             } ?? [
                 MovementDraft(
@@ -347,7 +348,8 @@ struct TransactionEditor: View {
                 MovementDraft(
                     accountID: $0.accountID,
                     currency: $0.money.currency,
-                    amount: Self.inputText(for: $0.money)
+                    amount: Self.inputText(for: $0.money),
+                    categoryID: $0.categoryID
                 )
             } ?? (resolvedInitialKind == .transfer
                 ? [
@@ -370,7 +372,6 @@ struct TransactionEditor: View {
                 || sourceTransaction?.changeAdjustment != nil
                 || sourceTransaction?.exchangeRate != nil
                 || scheduledTransaction?.exchangeRate != nil
-                || amountDue != nil
                 || initialHasAttachments
                 || initialCurrencies.count > 1
                 || !initialReceiptItems.isEmpty
@@ -412,7 +413,7 @@ struct TransactionEditor: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $specialEditorPath) {
             Form {
                 Section {
                     Picker("Type", selection: transactionEditorTypeBinding) {
@@ -440,17 +441,6 @@ struct TransactionEditor: View {
                     }
                 }
 
-                if let saveValidationMessage {
-                    Section("Save needs attention") {
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "info.circle")
-                            Text(verbatim: saveValidationMessage)
-                        }
-                            .font(.footnote)
-                            .foregroundStyle(PocketLedgerTheme.textSecondary)
-                    }
-                }
-
                 if isTemplateEditor {
                     Section("Template") {
                         TextField("Template name", text: $templateName)
@@ -458,9 +448,9 @@ struct TransactionEditor: View {
                 }
 
                 if kind == .expense {
-                    expensePaymentsSection
-                    detailsSection
                     expenseDateSection
+                    detailsSection
+                    expensePaymentsSection
                     moreDetailsSection
                 } else {
                     timingSection
@@ -471,6 +461,33 @@ struct TransactionEditor: View {
                     exchangeRateSection
                 }
 
+            }
+            .navigationDestination(for: TransactionEditorType.self) { editorType in
+                switch editorType {
+                case .loan:
+                    LoanEditor(store: store, onSave: {
+                        if hasUnsavedChanges {
+                            loanCreatedNotice = true
+                        } else {
+                            dismissAfterSpecialEditorSave = true
+                        }
+                    }, wrapsInNavigationStack: false)
+                case .physicalAsset, .investment:
+                    AssetPurchaseEditor(
+                        store: store,
+                        accountType: editorType == .physicalAsset ? .physicalAsset : .investment,
+                        onSave: {
+                            if hasUnsavedChanges {
+                                assetCreatedNotice = true
+                            } else {
+                                dismissAfterSpecialEditorSave = true
+                            }
+                        },
+                        wrapsInNavigationStack: false
+                    )
+                case .expense, .income, .transfer:
+                    EmptyView()
+                }
             }
             .onAppear {
                 if kind == .transfer && inflows.isEmpty {
@@ -530,7 +547,7 @@ struct TransactionEditor: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(saveButtonTitle, action: save)
-                        .disabled(!canSave)
+                        .disabled(replacingAttachmentID != nil)
                 }
             }
             .alert("Transaction not saved", isPresented: errorPresented) {
@@ -553,40 +570,14 @@ struct TransactionEditor: View {
                     AttachmentPreviewView(store: store, attachment: attachment)
                 }
             }
-            .sheet(isPresented: $isSelectingCategory) {
+            .sheet(isPresented: $isSelectingCategory, onDismiss: {
+                categorySelectionPaymentID = nil
+            }) {
                 CategorySelectionSheet(
                     categories: selectableCategories,
-                    selectedCategoryID: $categoryID,
-                    includeUncategorized: true
+                    selectedCategoryID: categorySelectionBinding,
+                    includeUncategorized: allowsUncategorizedSelection
                 )
-            }
-            .sheet(isPresented: $isPresentingLoanEditor, onDismiss: {
-                if dismissAfterLoanSave {
-                    dismissAfterLoanSave = false
-                    dismiss()
-                }
-            }) {
-                LoanEditor(store: store, onSave: {
-                    if hasUnsavedChanges {
-                        loanCreatedNotice = true
-                    } else {
-                        dismissAfterLoanSave = true
-                    }
-                })
-            }
-            .sheet(item: $assetAccountType, onDismiss: {
-                if dismissAfterAssetSave {
-                    dismissAfterAssetSave = false
-                    dismiss()
-                }
-            }) { accountType in
-                AssetPurchaseEditor(store: store, accountType: accountType, onSave: {
-                    if hasUnsavedChanges {
-                        assetCreatedNotice = true
-                    } else {
-                        dismissAfterAssetSave = true
-                    }
-                })
             }
             .fileImporter(
                 isPresented: $isShowingAttachmentImporter,
@@ -594,6 +585,11 @@ struct TransactionEditor: View {
                 allowsMultipleSelection: false,
                 onCompletion: replaceAttachment
             )
+        }
+        .onChange(of: specialEditorPath) { _, path in
+            guard path.isEmpty, dismissAfterSpecialEditorSave else { return }
+            dismissAfterSpecialEditorSave = false
+            dismiss()
         }
         .userActivity(
             "com.josephlteif.pocketledger.viewing-transaction",
@@ -617,14 +613,13 @@ struct TransactionEditor: View {
 
     private var transactionEditorTypeBinding: Binding<TransactionEditorType> {
         Binding(
-            get: { isPresentingLoanEditor ? .loan : TransactionEditorType(kind) },
+            get: { specialEditorPath.last ?? TransactionEditorType(kind) },
             set: { editorType in
-                if editorType == .loan {
-                    isPresentingLoanEditor = true
-                } else if editorType == .physicalAsset || editorType == .investment {
-                    assetAccountType = editorType == .physicalAsset ? .physicalAsset : .investment
-                } else if let transactionKind = editorType.transactionKind {
+                if let transactionKind = editorType.transactionKind {
+                    specialEditorPath = []
                     kind = transactionKind
+                } else {
+                    specialEditorPath = [editorType]
                 }
             }
         )
@@ -727,6 +722,22 @@ struct TransactionEditor: View {
                             allowsArchivedAccount: allowsArchivedMovementAccounts,
                             focusAmountOnAppear: index == 0 && outflows[index].amount.isEmpty
                         )
+                        if outflows.count > 1 {
+                            if selectableCategories.isEmpty {
+                                Text("No categories yet — this payment will be Uncategorized.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                categorySelectionButton(
+                                    for: effectiveCategoryID(for: outflows[index]),
+                                    accessibilityLabel: "Category for payment \(index + 1)"
+                                ) {
+                                    categorySelectionPaymentID = outflows[index].id
+                                    isSelectingCategory = true
+                                }
+                                .accessibilityIdentifier("payment-category-picker-\(index + 1)")
+                            }
+                        }
                     }
                     .padding(.vertical, 4)
                 }
@@ -744,6 +755,8 @@ struct TransactionEditor: View {
                 .font(.subheadline.weight(.semibold))
                 .buttonStyle(.borderless)
             }
+            Divider()
+            expenseReturnedMoneyDetails
             })
     }
 
@@ -762,10 +775,6 @@ struct TransactionEditor: View {
             DisclosureGroup(isExpanded: $isShowingMoreDetails) {
                 VStack(alignment: .leading, spacing: 14) {
                     expenseScheduleDetails
-                    Divider()
-                    expenseBillDetails
-                    Divider()
-                    expenseReturnedMoneyDetails
                     if !attachments.isEmpty || initialAttachmentFileName != nil {
                         Divider()
                         expenseAttachmentDetails
@@ -823,15 +832,6 @@ struct TransactionEditor: View {
                         .foregroundStyle(.secondary)
                 }
             }
-        }
-    }
-
-    private var expenseBillDetails: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Bill total")
-                .font(.subheadline.weight(.semibold))
-
-            CurrencyInputField("Total due (optional)", text: $amountDue, currency: $dueCurrency)
         }
     }
 
@@ -948,28 +948,16 @@ struct TransactionEditor: View {
     @ViewBuilder
     private var detailsSection: some View {
         Section("Details") {
-            if kind == .expense {
+            if kind == .expense && outflows.count <= 1 {
                 if selectableCategories.isEmpty {
                     Text("No categories yet — this expense will be Uncategorized.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
-                    Button {
+                    categorySelectionButton(for: categoryIDForPicker) {
+                        categorySelectionPaymentID = nil
                         isSelectingCategory = true
-                    } label: {
-                        LabeledContent("Category") {
-                            HStack(spacing: 6) {
-                                Text(selectedCategoryPath)
-                                    .lineLimit(1)
-                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(PocketLedgerTheme.textTertiary)
-                            }
-                        }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Search categories or browse the category hierarchy")
                 }
             }
 
@@ -1255,12 +1243,75 @@ struct TransactionEditor: View {
 
     private var selectableCategories: [LedgerCategory] {
         var categories = store.activeCategories
-        if let categoryID,
-           let category = store.ledgerIndex.categoriesByID[categoryID],
-           !categories.contains(where: { $0.id == category.id }) {
-            categories.append(category)
+        let selectedIDs = Set(([categoryID] + (outflows + inflows).map(\.categoryID)).compactMap { $0 })
+        for id in selectedIDs {
+            if let category = store.ledgerIndex.categoriesByID[id],
+               !categories.contains(where: { $0.id == category.id }) {
+                categories.append(category)
+            }
         }
         return categories
+    }
+
+    private var categoryIDForPicker: UUID? {
+        outflows.count == 1 ? effectiveCategoryID(for: outflows[0]) : categoryID
+    }
+
+    private func effectiveCategoryID(for payment: MovementDraft) -> UUID? {
+        payment.categoryID ?? categoryID
+    }
+
+    private var allowsUncategorizedSelection: Bool {
+        guard let paymentID = categorySelectionPaymentID,
+              outflows.contains(where: { $0.id == paymentID }) else {
+            return true
+        }
+        return outflows.count <= 1
+    }
+
+    private var categorySelectionBinding: Binding<UUID?> {
+        Binding(
+            get: {
+                guard let paymentID = categorySelectionPaymentID,
+                      let payment = outflows.first(where: { $0.id == paymentID }) else {
+                    return categoryIDForPicker
+                }
+                return effectiveCategoryID(for: payment)
+            },
+            set: { selectedID in
+                guard let paymentID = categorySelectionPaymentID,
+                      let index = outflows.firstIndex(where: { $0.id == paymentID }) else {
+                    categoryID = selectedID
+                    if outflows.count == 1 { outflows[0].categoryID = selectedID }
+                    return
+                }
+                outflows[index].categoryID = selectedID
+                if index == 0 { categoryID = selectedID }
+            }
+        )
+    }
+
+    private func categorySelectionButton(
+        for selectedID: UUID?,
+        accessibilityLabel: String = "Category",
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            LabeledContent("Category") {
+                HStack(spacing: 6) {
+                    Text(selectedID.map { store.categoryPath(for: $0) } ?? "Uncategorized")
+                        .lineLimit(1)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(selectedID.map { store.categoryPath(for: $0) } ?? "Uncategorized")
+        .accessibilityHint("Search categories or browse the category hierarchy")
     }
 
     private func replaceAttachment(_ result: Result<[URL], Error>) {
@@ -1618,6 +1669,13 @@ struct TransactionEditor: View {
         }
 
         if kind == .expense,
+           parsedOutflows.count > 1,
+           !selectableCategories.isEmpty,
+           outflows.contains(where: { effectiveCategoryID(for: $0) == nil }) {
+            return "Choose a category for each payment to save this split expense."
+        }
+
+        if kind == .expense,
            inflows.count == 1,
            !requestedChange.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             guard parsedInflows.count == 1,
@@ -1640,10 +1698,6 @@ struct TransactionEditor: View {
         }
 
         return nil
-    }
-
-    private var canSave: Bool {
-        saveValidationMessage == nil && replacingAttachmentID == nil
     }
 
     private var editorSnapshot: TransactionEditorSnapshot {
@@ -1716,12 +1770,21 @@ struct TransactionEditor: View {
                   money.minorUnits > 0 else {
                 return nil
             }
-            return MoneyMovement(accountID: account.id, money: money)
+            return MoneyMovement(
+                accountID: account.id,
+                money: money,
+                categoryID: kind == .expense ? draft.categoryID : nil
+            )
         }
         return movements.count == drafts.count ? movements : nil
     }
 
     private func save() {
+        if let saveValidationMessage {
+            errorMessage = saveValidationMessage
+            return
+        }
+
         guard let parsedOutflows, let parsedInflows else {
             errorMessage = "Enter a valid amount for every account line."
             return

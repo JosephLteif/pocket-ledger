@@ -4,14 +4,12 @@ options:
   bundleIdPrefix: com.josephlteif
   deploymentTarget:
     iOS: 26.0
-    watchOS: 26.0
   createIntermediateGroups: true
   groupSortPosition: top
 
 settings:
   base:
     IPHONEOS_DEPLOYMENT_TARGET: 26.0
-    WATCHOS_DEPLOYMENT_TARGET: 26.0
     SWIFT_VERSION: 6.0
     CURRENT_PROJECT_VERSION: 1
     POCKET_LEDGER_BUNDLE_ID_BASE: com.josephlteif.pocketledger
@@ -19,9 +17,6 @@ settings:
     POCKET_LEDGER_APP_GROUP_ID_BASE: group.com.josephlteif.pocketledger
     POCKET_LEDGER_APP_GROUP_ID_SUFFIX: ""
     POCKET_LEDGER_DISPLAY_NAME: Pocket Ledger
-    POCKET_LEDGER_WIDGET_DISPLAY_NAME: Pocket Ledger Balance
-    POCKET_LEDGER_WATCH_DISPLAY_NAME: Pocket Ledger
-    POCKET_LEDGER_WATCH_WIDGET_DISPLAY_NAME: Pocket Ledger Complication
     POCKET_LEDGER_URL_SCHEME: pocketledger
     POCKET_LEDGER_URL_SUFFIX: ""
     POCKET_LEDGER_DEVELOPER_PRO_OVERRIDE: "NO"
@@ -40,7 +35,6 @@ targets:
       - path: PocketLedger/Models
       - path: PocketLedger/Services
       - path: PocketLedger/Shared
-      - path: PocketLedger/WatchShared
       - path: PocketLedger/Resources/Assets.xcassets
     resources:
       - path: PocketLedger/Config/PrivacyInfo.xcprivacy
@@ -72,7 +66,6 @@ targets:
             UTTypeTagSpecification:
               public.filename-extension:
                 - pocketledger
-        NSSupportsLiveActivities: true
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
             CFBundleURLName: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX)
@@ -92,114 +85,11 @@ targets:
           - $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
     dependencies:
       - package: ZIPFoundation
-      - target: PocketLedgerWidget
-        embed: true
-        codeSign: false
     scheme:
       gatherCoverageData: false
       testTargets:
         - PocketLedgerTests
         - PocketLedgerUITests
-
-  PocketLedgerWidget:
-    type: app-extension
-    platform: iOS
-    sources:
-      - path: PocketLedger/Models
-      - path: PocketLedger/Services/FinanceStorage.swift
-      - path: PocketLedger/Shared
-      - path: PocketLedger/WatchShared
-      - path: PocketLedgerWidget
-    resources:
-      - path: PocketLedgerWidget/Config/PrivacyInfo.xcprivacy
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX).widget
-        INFOPLIST_FILE: PocketLedgerWidget/Config/Info.plist
-        CODE_SIGN_ENTITLEMENTS: PocketLedgerWidget/Config/PocketLedgerWidget.entitlements
-        TARGETED_DEVICE_FAMILY: 1
-    info:
-      path: PocketLedgerWidget/Config/Info.plist
-      properties:
-        CFBundleDisplayName: $(POCKET_LEDGER_WIDGET_DISPLAY_NAME)
-        CFBundleName: Pocket Ledger Widget
-        CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        NSExtension:
-          NSExtensionPointIdentifier: com.apple.widgetkit-extension
-        PocketLedgerAppGroupIdentifier: $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
-    entitlements:
-      path: PocketLedgerWidget/Config/PocketLedgerWidget.entitlements
-      properties:
-        com.apple.security.application-groups:
-          - $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
-
-  PocketLedgerWatch:
-    type: application
-    platform: watchOS
-    sources:
-      - path: PocketLedger/Models/FinanceModel.swift
-      - path: PocketLedger/Models/AccountTrackingModels.swift
-      - path: PocketLedger/WatchShared
-      - path: PocketLedgerWatch
-    resources:
-      - path: PocketLedgerWatch/Config/PrivacyInfo.xcprivacy
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX).watchkitapp
-        TARGETED_DEVICE_FAMILY: "4"
-        SUPPORTS_MACCATALYST: NO
-    info:
-      path: PocketLedgerWatch/Config/Info.plist
-      properties:
-        WKApplication: true
-        CFBundleDisplayName: $(POCKET_LEDGER_WATCH_DISPLAY_NAME)
-        CFBundleName: $(POCKET_LEDGER_WATCH_DISPLAY_NAME)
-        CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        WKCompanionAppBundleIdentifier: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX)
-        WKRunsIndependentlyOfCompanionApp: false
-        PocketLedgerAppGroupIdentifier: $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
-    entitlements:
-      path: PocketLedgerWatch/Config/PocketLedgerWatch.entitlements
-      properties:
-        com.apple.security.application-groups:
-          - $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
-    dependencies:
-      - target: PocketLedgerWatchWidget
-        embed: true
-        codeSign: false
-    scheme: {}
-
-  PocketLedgerWatchWidget:
-    type: app-extension
-    platform: watchOS
-    sources:
-      - path: PocketLedger/Models/FinanceModel.swift
-      - path: PocketLedger/Models/AccountTrackingModels.swift
-      - path: PocketLedger/WatchShared
-      - path: PocketLedgerWatchWidget
-    resources:
-      - path: PocketLedgerWatchWidget/Config/PrivacyInfo.xcprivacy
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: $(POCKET_LEDGER_BUNDLE_ID_BASE)$(POCKET_LEDGER_BUNDLE_ID_SUFFIX).watchkitapp.widget
-        TARGETED_DEVICE_FAMILY: "4"
-    info:
-      path: PocketLedgerWatchWidget/Config/Info.plist
-      properties:
-        CFBundleDisplayName: $(POCKET_LEDGER_WATCH_WIDGET_DISPLAY_NAME)
-        CFBundleName: $(POCKET_LEDGER_WATCH_WIDGET_DISPLAY_NAME)
-        CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        NSExtension:
-          NSExtensionPointIdentifier: com.apple.widgetkit-extension
-        PocketLedgerAppGroupIdentifier: $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
-    entitlements:
-      path: PocketLedgerWatchWidget/Config/PocketLedgerWatchWidget.entitlements
-      properties:
-        com.apple.security.application-groups:
-          - $(POCKET_LEDGER_APP_GROUP_ID_BASE)$(POCKET_LEDGER_APP_GROUP_ID_SUFFIX)
 
   PocketLedgerTests:
     type: bundle.unit-test

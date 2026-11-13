@@ -469,6 +469,11 @@ struct CurrencyInputField: View {
                 .keyboardType(.decimalPad)
                 .monospacedDigit()
                 .focused($isFocused)
+                .onChange(of: text) { _, value in
+                    guard isFocused else { return }
+                    let formatted = currency.formattedEditingInput(value)
+                    if formatted != value { text = formatted }
+                }
 
             if selectableCurrencies.count > 1 {
                 CurrencySelectionMenu(currency: $currency, currencies: selectableCurrencies)

@@ -1,6 +1,5 @@
 import AppIntents
 import Foundation
-import WidgetKit
 
 enum FinanceIntentQuickExpenseRequest {
     private static let storageKey = "pocketLedger.pendingQuickExpense"
@@ -87,7 +86,7 @@ struct GetBalanceIntent: AppIntent {
             )
         }
 
-        let snapshot = storage.widgetSnapshot()
+        let snapshot = storage.balanceSnapshot()
         return .result(
             value: snapshot.balanceSummary,
             dialog: "Your Pocket Ledger balances are \(snapshot.balanceSummary)."
@@ -498,7 +497,6 @@ struct AddLedgerTransactionIntent: AppIntent {
         }
 
         await FinanceIntentIndexing.shared.refresh()
-        WidgetCenter.shared.reloadTimelines(ofKind: "BalanceWidget")
         return .result(
             value: summary,
             dialog: "Saved \(summary)."

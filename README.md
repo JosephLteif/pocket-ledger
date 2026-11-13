@@ -1,6 +1,6 @@
 # Pocket Ledger
 
-Pocket Ledger is a local-first personal finance ledger for iPhone and Apple Watch, built with SwiftUI. Keep accounts, transactions, budgets, receipts, and reports together without linking a bank account.
+Pocket Ledger is a local-first personal finance ledger for iPhone, built with SwiftUI. Keep accounts, transactions, budgets, receipts, and reports together without linking a bank account.
 
 [Public site](https://josephlteif.github.io/pocket-ledger/) · [Privacy](https://josephlteif.github.io/pocket-ledger/privacy/) · [Support](https://josephlteif.github.io/pocket-ledger/support/) · [Email](mailto:josephmllteif@icloud.com,josephmllteif@gmail.com)
 
@@ -11,21 +11,21 @@ Pocket Ledger is a local-first personal finance ledger for iPhone and Apple Watc
 - Supports editable transaction history, budgets, scheduled entries, templates, and reports.
 - Imports CSV, TSV, JSON, Excel, and supported SQLite exports. Full `.pocketledger` backups can include receipt attachments.
 - Scans receipts on device and offers optional on-device writing assistance when Apple’s Foundation Models are available.
-- Includes widgets, Apple Watch views, and authenticated Siri, Shortcuts, and system control actions.
+- Includes authenticated Siri and Shortcuts actions.
 
 ## Privacy and data
 
-Ledger data and attachments are stored locally on the user’s devices. The app does not connect to financial institutions or send ledger data to a developer-operated server, advertising network, analytics service, or third-party AI service. Watch features can synchronize selected data to a paired Apple Watch. Exports are shared only when the user chooses a destination.
+Ledger data and attachments are stored locally on the user’s device. The app does not connect to financial institutions or send ledger data to a developer-operated server, advertising network, analytics service, or third-party AI service. Exports are shared only when the user chooses a destination.
 
 Read the full [privacy policy](https://josephlteif.github.io/pocket-ledger/privacy/). For support or privacy questions, email [josephmllteif@icloud.com](mailto:josephmllteif@icloud.com) or [josephmllteif@gmail.com](mailto:josephmllteif@gmail.com). Please do not email account numbers, balances, receipts, backups, or other private financial information.
 
 ## Platforms
 
-The current project configuration targets iOS 26 and watchOS 26. The app is native SwiftUI and includes a WidgetKit extension and Apple Watch companion. The app, extensions, and generated Xcode project use the Pocket Ledger name.
+The current project configuration targets iOS 26. The app is native SwiftUI and the generated Xcode project uses the Pocket Ledger name.
 
 ## Build an unsigned iOS artifact
 
-The **Build unsigned iOS IPA** workflow uses a macOS runner and XcodeGen to create the Xcode project from `project.yml`. It builds without Apple signing credentials and uploads a short-lived artifact. The workflow can also build the Watch app and optionally run Simulator tests.
+The **Build unsigned iOS IPA** workflow uses a macOS runner and XcodeGen to create the Xcode project from `project.yml`. It builds the iPhone app without Apple signing credentials, uploads a short-lived IPA artifact, and can optionally build a separate sandbox app or run Simulator tests.
 
 1. Open the project’s Actions page.
 2. Select **Build unsigned iOS IPA** and choose **Run workflow**.
@@ -41,13 +41,12 @@ The **Build Pocket Ledger Sandbox IPA** workflow creates a second installable ap
 
 - `PocketLedger/App`: SwiftUI screens, ledger state, import/export, and app intents.
 - `PocketLedger/Models`: ledger, finance, and reporting models.
-- `PocketLedger/Services`: storage, security, receipt processing, Watch connectivity, and local notifications.
-- `PocketLedger/Shared`: shared intents and Watch data contracts.
-- `PocketLedgerWidget`, `PocketLedgerWatch`, `PocketLedgerWatchWidget`: widgets and Watch targets.
-- `PocketLedger/Config` and extension `Config` folders: entitlements and privacy manifests.
+- `PocketLedger/Services`: storage, security, receipt processing, and local notifications.
+- `PocketLedger/Shared`: App Intents and shared finance actions.
+- `PocketLedger/Config`: app entitlements and privacy manifest.
 - `docs/`: public product, privacy, and support pages deployed with the Pages workflow.
 - `.github/workflows/`: unsigned app build and public site deployment workflows.
 
 ## Security notes
 
-The optional app lock protects the main app surface. Widgets and other system surfaces are separate from that lock; review their privacy settings on your devices if balances should remain hidden. File imports, exports, and backups are user initiated. See the in-app privacy policy and the public [privacy page](https://josephlteif.github.io/pocket-ledger/privacy/) for storage and deletion details.
+The optional app lock protects the main app surface. App Intent actions that change ledger data require authentication. File imports, exports, and backups are user initiated. See the in-app privacy policy and the public [privacy page](https://josephlteif.github.io/pocket-ledger/privacy/) for storage and deletion details.

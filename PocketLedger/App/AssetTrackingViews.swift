@@ -201,9 +201,11 @@ struct AssetPurchaseEditor: View {
     @ObservedObject var store: LedgerStore
     let accountType: AccountType
     var onSave: () -> Void = {}
+    var wrapsInNavigationStack = true
     @Environment(\.dismiss) private var dismiss
     @State private var selectedAccountID: UUID?
     @State private var isCreatingAccount = false
+    @State private var createdAccountID: UUID?
 
     private var purchaseAccounts: [Account] {
         store.activeAccounts.filter {
@@ -217,16 +219,24 @@ struct AssetPurchaseEditor: View {
         return account
     }
 
+    @ViewBuilder
     var body: some View {
+        if wrapsInNavigationStack {
+            NavigationStack { editorContent }
+        } else {
+            editorContent
+        }
+    }
+
+    private var editorContent: some View {
         Group {
             if let account = selectedAccount {
                 if accountType == .physicalAsset {
-                    MetalPurchaseEditor(store: store, account: account, historical: false, onSave: onSave)
+                    MetalPurchaseEditor(store: store, account: account, historical: false, onSave: onSave, wrapsInNavigationStack: false)
                 } else {
                     InvestmentPurchaseEditor(store: store, account: account, onSave: onSave)
                 }
             } else {
-                NavigationStack {
                     List {
                         Section {
                             ForEach(purchaseAccounts) { account in
@@ -251,16 +261,21 @@ struct AssetPurchaseEditor: View {
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                     }
-                }
+                    .navigationDestination(isPresented: $isCreatingAccount) {
+                        AccountEditor(store: store, initialType: accountType, wrapsInNavigationStack: false, onSaved: { account in
+                            if account.type == accountType,
+                               accountType != .physicalAsset || account.tracking?.physicalAssetSubtype != .other {
+                                createdAccountID = account.id
+                            }
+                        })
+                    }
+                    .onChange(of: isCreatingAccount) { _, isPresented in
+                        if !isPresented, let createdAccountID {
+                            selectedAccountID = createdAccountID
+                            self.createdAccountID = nil
+                        }
+                    }
             }
-        }
-        .sheet(isPresented: $isCreatingAccount) {
-            AccountEditor(store: store, initialType: accountType, onSaved: { account in
-                if account.type == accountType,
-                   accountType != .physicalAsset || account.tracking?.physicalAssetSubtype != .other {
-                    selectedAccountID = account.id
-                }
-            })
         }
     }
 }
@@ -282,7 +297,6 @@ private struct InvestmentPurchaseEditor: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 Section("Investment purchase") {
                     LabeledContent("Investment account", value: account.name)
@@ -309,7 +323,6 @@ private struct InvestmentPurchaseEditor: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
             }
             .errorMessageAlert(title: "Purchase not saved", message: $errorMessage)
-        }
     }
 
     private func save() {
@@ -919,6 +932,7 @@ private struct MetalPurchaseEditor: View {
     @ObservedObject var store: LedgerStore
     let account: Account
     var onSave: () -> Void = {}
+    private let wrapsInNavigationStack: Bool
     @Environment(\.dismiss) private var dismiss
     @State private var metal: PreciousMetal = .gold
     @State private var description = ""
@@ -933,10 +947,11 @@ private struct MetalPurchaseEditor: View {
     @State private var reconcile = false
     @State private var errorMessage: String?
 
-    init(store: LedgerStore, account: Account, historical: Bool = true, onSave: @escaping () -> Void = {}) {
+    init(store: LedgerStore, account: Account, historical: Bool = true, onSave: @escaping () -> Void = {}, wrapsInNavigationStack: Bool = true) {
         self.store = store
         self.account = account
         self.onSave = onSave
+        self.wrapsInNavigationStack = wrapsInNavigationStack
         _historical = State(initialValue: historical)
         _metal = State(initialValue: account.tracking?.physicalAssetSubtype?.metal ?? .gold)
     }
@@ -945,8 +960,16 @@ private struct MetalPurchaseEditor: View {
         store.activeAccounts.filter { $0.id != account.id && $0.currency == account.currency && ($0.type == .cash || $0.type == .bankAccount) }
     }
 
+    @ViewBuilder
     var body: some View {
-        NavigationStack {
+        if wrapsInNavigationStack {
+            NavigationStack { editorForm }
+        } else {
+            editorForm
+        }
+    }
+
+    private var editorForm: some View {
             Form {
                 Section("Purchase") {
                     if account.tracking?.physicalAssetSubtype?.metal == nil {
@@ -1014,7 +1037,6 @@ private struct MetalPurchaseEditor: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
             }
             .errorMessageAlert(title: "Purchase not saved", message: $errorMessage)
-        }
     }
 
     private func save() {

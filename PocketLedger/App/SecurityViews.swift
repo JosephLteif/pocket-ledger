@@ -38,8 +38,6 @@ struct SecuritySettingsView: View {
     private var isDailyTransactionReminderEnabled = false
     @AppStorage(NotificationService.dailyTransactionReminderMinutesKey)
     private var dailyTransactionReminderMinutes = NotificationService.dailyTransactionReminderDefaultMinutes
-    @AppStorage(NotificationService.scheduledLiveActivityEnabledKey)
-    private var isScheduledLiveActivityEnabled = false
 
     var body: some View {
         Form {
@@ -74,25 +72,6 @@ struct SecuritySettingsView: View {
                     Text("Get a daily notification to add today’s transactions. Notification access is requested when you enable this reminder.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-
-                    Toggle(isOn: $isScheduledLiveActivityEnabled) {
-                        Label("Scheduled transaction countdown", systemImage: "timer")
-                    }
-                    .accessibilityIdentifier("scheduled-transaction-live-activity-toggle")
-
-                    Text("Shows the next scheduled transaction, expected amount, and countdown during the eight hours before it is due. Private details are hidden when iOS requests privacy redaction.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    DisclosureGroup("Timing and setup") {
-                        Text(
-                            "Groups up to three upcoming scheduled entries in one private countdown, and counts any additional entries in the same window. "
-                                + "It stays hidden until the next enabled entry is due within eight hours; scheduled notifications follow their selected reminder time independently. "
-                                + "Due entries are added when Pocket Ledger next opens. Enable Live Activities in Settings > Apps > Pocket Ledger, and allow them on the Lock Screen in Settings > Face ID & Passcode > Allow Access When Locked."
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    }
 
                     if let dailyReminderStatus {
                         Text(dailyReminderStatus)
@@ -170,7 +149,7 @@ struct SecuritySettingsView: View {
                         Label("Privacy Policy", systemImage: "hand.raised")
                     }
 
-                    Text("Financial values in widgets and watch complications are marked private so the system can redact them on the Lock Screen and during Always On. Widget and App Intent actions that change your ledger require authentication.")
+                    Text("App Intent actions that change your ledger require authentication.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -204,13 +183,7 @@ struct SecuritySettingsView: View {
             } message: {
                 Text(errorMessage ?? "")
             }
-            .onChange(of: isScheduledLiveActivityEnabled) { _, _ in
-                Task {
-                    await NotificationService.refreshScheduledTransactionNotifications(
-                        schedules: store.data.scheduledTransactions
-                    )
-                }
-            }
+
     }
 
     private var dailyReminderEnabledBinding: Binding<Bool> {
@@ -412,7 +385,7 @@ struct AppLockView: View {
     @State private var passcode = ""
     @State private var errorMessage: String?
     @State private var isAuthenticating = false
-    @State private var shouldRetryBiometricsOnActivation = false
+    @State private var shouldRetryBiometricsOnActivation = true
 
     var body: some View {
         ZStack {
@@ -505,6 +478,7 @@ struct AppLockView: View {
 
     private func requestBiometricUnlockIfPossible() {
         guard scenePhase == .active, !isUnlocked, !isAuthenticating else { return }
+        shouldRetryBiometricsOnActivation = false
         Task {
             await unlockWithBiometrics()
         }
@@ -544,13 +518,12 @@ private struct PrivacyPolicyView: View {
     var body: some View {
         Form {
             Section("Information stored") {
-                Text("Pocket Ledger stores your accounts, balances, transactions, categories, budgets, schedules, preferences, and any receipt files you choose to save in local app storage. When the shared app group is available, Pocket Ledger widgets use the same ledger storage.")
+                Text("Pocket Ledger stores your accounts, balances, transactions, categories, budgets, schedules, preferences, and any receipt files you choose to save in local app storage.")
                 Text("You add ledger details by entering them in the app or importing files you select. Receipt photos or PDFs are added when you choose to scan or attach them.")
-                Text("If you use the paired Apple Watch app, selected ledger data is synchronized to that Watch so its screens can work.")
             }
 
             Section("How information is used") {
-                Text("The app uses this information to provide ledger, budget, reporting, widget, Watch, receipt scanning, and import or backup features.")
+                Text("The app uses this information to provide ledger, budget, reporting, receipt scanning, and import or backup features.")
                 Text("Receipt scanning and optional writing assistance use on-device processing. Pocket Ledger does not send ledger data to a developer-operated server, third-party analytics service, advertising network, or third-party AI service.")
             }
 

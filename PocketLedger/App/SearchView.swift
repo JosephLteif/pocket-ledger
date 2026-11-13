@@ -31,7 +31,8 @@ enum FinanceSearch {
         ]
 
         searchable.append(contentsOf: movements.flatMap { movement in
-            var details = [movement.money.formatted, movement.money.currency.rawValue]
+            var details = [movement.money.formatted, movement.money.currency.rawValue,
+                           index.categoryPath(for: transaction.categoryID(for: movement))]
             if let account = index.account(with: movement.accountID) {
                 details.append("\(account.name) \(account.type.displayName) \(account.currency.rawValue)")
             }

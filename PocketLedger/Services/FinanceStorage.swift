@@ -44,7 +44,7 @@ final class FinanceStorage {
         let attachments: [RecoveryAttachment]
     }
 
-    init(context: String) {
+    init(context _: String) {
         if let groupURL = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier
         ) {
@@ -61,11 +61,10 @@ final class FinanceStorage {
             }
         }
 
-        guard context != "widget",
-              let applicationSupportURL = FileManager.default.urls(
-                  for: .applicationSupportDirectory,
-                  in: .userDomainMask
-              ).first else {
+        guard let applicationSupportURL = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
             modelContainer = nil
             databaseURL = nil
             storageLocation = .unavailable
@@ -298,7 +297,6 @@ final class FinanceStorage {
             }
             loadedSnapshot = (value, encoded)
             loadStatus = .loaded
-            WatchSyncPublisher.publish(data: value)
             return true
         } catch {
             return false
@@ -348,7 +346,6 @@ final class FinanceStorage {
             }
             loadedSnapshot = (updated, encoded)
             loadStatus = .loaded
-            WatchSyncPublisher.publish(data: updated)
             return true
         } catch {
             return false
@@ -360,7 +357,7 @@ final class FinanceStorage {
         save(.empty)
     }
 
-    func widgetSnapshot() -> FinanceWidgetSnapshot {
+    func balanceSnapshot() -> FinanceBalanceSnapshot {
         let value = load()
 
         func balance(for account: Account) -> Int64 {
@@ -409,7 +406,7 @@ final class FinanceStorage {
                 && $0.nextRunDate <= (Calendar.current.date(byAdding: .day, value: 30, to: .now) ?? .now)
         }.count
 
-        return FinanceWidgetSnapshot(
+        return FinanceBalanceSnapshot(
             usdAvailable: availableBalance(for: .usd),
             lbpAvailable: availableBalance(for: .lbp),
             eurAvailable: availableBalance(for: .eur),

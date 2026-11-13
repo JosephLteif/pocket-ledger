@@ -552,7 +552,8 @@ struct ImportDraft {
                     return MoneyMovement(
                         id: movement.id,
                         accountID: target.id,
-                        money: movement.money.recast(to: target.currency)
+                        money: movement.money.recast(to: target.currency),
+                        categoryID: movement.categoryID
                     )
                 }
                 transaction.inflows = transaction.inflows.map { movement in
@@ -561,7 +562,8 @@ struct ImportDraft {
                     return MoneyMovement(
                         id: movement.id,
                         accountID: target.id,
-                        money: movement.money.recast(to: target.currency)
+                        money: movement.money.recast(to: target.currency),
+                        categoryID: movement.categoryID
                     )
                 }
                 if changed {

@@ -127,7 +127,7 @@ struct TransactionListSnapshot {
         let filteredTransactions = index.sortedTransactions.filter { transaction in
             let matchesKind: Bool
             if filter == .uncategorized {
-                matchesKind = transaction.kind == .expense && transaction.categoryID == nil
+                matchesKind = transaction.kind == .expense && index.categoryIDs(for: transaction).contains(nil)
             } else {
                 matchesKind = filter.kind.map { transaction.kind == $0 } ?? true
             }
@@ -147,12 +147,11 @@ struct TransactionListSnapshot {
             guard matchesPeriod else { return false }
 
             if let categoryID {
-                guard let transactionCategoryID = transaction.categoryID else { return false }
-                let ancestors = index.categoryAncestorsByID[transactionCategoryID] ?? [transactionCategoryID]
-                let matchesCategory = includesCategoryDescendants
-                    ? ancestors.contains(categoryID)
-                    : transactionCategoryID == categoryID
-                guard matchesCategory else { return false }
+                guard index.transactionMatchesCategory(
+                    transaction,
+                    selectedCategoryID: categoryID,
+                    includesDescendants: includesCategoryDescendants
+                ) else { return false }
             }
 
             if let accountID {
@@ -197,10 +196,13 @@ struct TransactionListSnapshot {
         var expenseTotals: [LedgerCurrency: Int64] = [:]
         for transaction in filteredTransactions where transaction.kind == .expense {
             for currency in reportingCurrency.map({ [$0] }) ?? LedgerCurrency.allCases {
-                expenseTotals[currency, default: 0] += index.netExpenseAmount(
-                    transaction,
-                    currency: currency
-                )
+                let amounts = index.expenseAmountsByCategory(transaction, currency: currency)
+                expenseTotals[currency, default: 0] += max(amounts.filter {
+                    guard let categoryID else { return true }
+                    return includesCategoryDescendants
+                        ? index.categoryMatches($0.key, selectedCategoryID: categoryID)
+                        : $0.key == categoryID
+                }.values.reduce(0, +), 0)
             }
         }
 
@@ -933,7 +935,9 @@ struct TransactionsView: View {
     }
 
     private func dayHeader(_ day: TransactionDay) -> some View {
-        HStack(spacing: 11) {
+        let totals = dayTotals(for: day)
+
+        return HStack(spacing: 11) {
             VStack(spacing: 0) {
                 Text(day.date.formatted(.dateTime.day()))
                     .font(.title3.weight(.bold))
@@ -947,15 +951,65 @@ struct TransactionsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(day.date, style: .date)
                     .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 Text("\(day.transactions.count) \(day.transactions.count == 1 ? "transaction" : "transactions")")
                     .font(.caption)
                     .foregroundStyle(PocketLedgerTheme.textTertiary)
             }
 
-            Spacer()
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                ForEach(totals, id: \.currency) { total in
+                    ProtectedAmountText(
+                        value: total.minorUnits > 0 ? "+ \(total.formatted)" : total.formatted,
+                        isRevealed: areBalancesRevealed
+                    )
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Daily total")
         }
         .padding(.top, 4)
         .padding(.bottom, 8)
+    }
+
+    private func dayTotals(for day: TransactionDay) -> [Money] {
+        var totals: [LedgerCurrency: Int64] = [:]
+
+        for transaction in day.transactions {
+            for movement in transaction.inflows {
+                let currency = drilldownReportingCurrency ?? movement.money.currency
+                let converted = financeConvertedMinorUnits(
+                    movement.money,
+                    to: currency,
+                    using: transaction.exchangeRate
+                )
+                let totalCurrency = converted == nil ? movement.money.currency : currency
+                totals[totalCurrency, default: 0] += converted ?? movement.money.minorUnits
+            }
+
+            for movement in transaction.outflows {
+                let currency = drilldownReportingCurrency ?? movement.money.currency
+                let converted = financeConvertedMinorUnits(
+                    movement.money,
+                    to: currency,
+                    using: transaction.exchangeRate
+                )
+                let totalCurrency = converted == nil ? movement.money.currency : currency
+                totals[totalCurrency, default: 0] -= converted ?? movement.money.minorUnits
+            }
+        }
+
+        return LedgerCurrency.allCases.compactMap { currency in
+            guard let total = totals[currency] else { return nil }
+            return Money(currency: currency, minorUnits: total)
+        }
     }
 }
 

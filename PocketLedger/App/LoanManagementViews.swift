@@ -12,6 +12,21 @@ private enum LoanListFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private func savedLoanCounterparties(in data: FinanceData) -> [String] {
+    let names = (data.loanContacts.map(\.name) + data.loans.map(\.counterparty))
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+
+    return Array(Set(names))
+        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+}
+
+private func loanContactID(for counterparty: String, in data: FinanceData) -> UUID? {
+    data.loanContacts.first {
+        $0.name.localizedCaseInsensitiveCompare(counterparty) == .orderedSame
+    }?.id
+}
+
 @MainActor
 struct LoansView: View {
     @ObservedObject var store: LedgerStore
@@ -323,9 +338,13 @@ private struct LegacyLoanConversionView: View {
         _store = ObservedObject(wrappedValue: store)
         self.account = account
         let current = store.balance(for: account)
+        let savedCounterparty = savedLoanCounterparties(in: store.data).first {
+            $0.localizedCaseInsensitiveCompare(account.name) == .orderedSame
+        }
         _drafts = State(initialValue: [LegacyLoanDraft(
             counterparty: account.name,
-            amountText: account.currency.formattedInput(minorUnits: max(0, current.minorUnits))
+            amountText: account.currency.formattedInput(minorUnits: max(0, current.minorUnits)),
+            selectedCounterparty: savedCounterparty
         )])
     }
 
@@ -362,7 +381,19 @@ private struct LegacyLoanConversionView: View {
                                     Text(direction.displayName).tag(direction)
                                 }
                             }
-                            TextField(draft.direction.counterpartyLabel, text: $draft.counterparty)
+                            if savedCounterparties.isEmpty {
+                                TextField(draft.direction.counterpartyLabel, text: $draft.counterparty)
+                            } else {
+                                Picker(draft.direction.counterpartyLabel, selection: $draft.selectedCounterparty) {
+                                    Text("New counterparty").tag(Optional<String>.none)
+                                    ForEach(savedCounterparties, id: \.self) { name in
+                                        Text(name).tag(Optional(name))
+                                    }
+                                }
+                                if draft.selectedCounterparty == nil {
+                                    TextField(draft.direction.counterpartyLabel, text: $draft.counterparty)
+                                }
+                            }
                             CurrencyInputField("Amount", text: $draft.amountText, currency: account.currency)
                             Toggle("Add due date", isOn: $draft.hasDueDate)
                             if draft.hasDueDate {
@@ -422,6 +453,10 @@ private struct LegacyLoanConversionView: View {
         }
     }
 
+    private var savedCounterparties: [String] {
+        savedLoanCounterparties(in: store.data)
+    }
+
     private var currentBalance: Money { store.balance(for: account) }
 
     private var parsedAmounts: [Money]? {
@@ -439,7 +474,11 @@ private struct LegacyLoanConversionView: View {
               let amounts = parsedAmounts,
               amounts.allSatisfy({ $0.minorUnits > 0 }) else { return false }
         return amounts.reduce(Int64.zero) { $0 + $1.minorUnits } == currentBalance.minorUnits
-            && drafts.allSatisfy { !$0.counterparty.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            && drafts.allSatisfy {
+                !($0.selectedCounterparty ?? $0.counterparty)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty
+            }
     }
 
     private var errorPresented: Binding<Bool> {
@@ -449,8 +488,11 @@ private struct LegacyLoanConversionView: View {
     private func convert() {
         let loans = currentBalance.minorUnits == 0 ? [] : drafts.compactMap { draft -> Loan? in
             guard let amount = Money.parse(draft.amountText, currency: account.currency) else { return nil }
+            let counterparty = (draft.selectedCounterparty ?? draft.counterparty)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             return Loan(
-                counterparty: draft.counterparty.trimmingCharacters(in: .whitespacesAndNewlines),
+                counterparty: counterparty,
+                counterpartyContactID: loanContactID(for: counterparty, in: store.data),
                 direction: draft.direction,
                 currency: account.currency,
                 startingAmount: amount,
@@ -471,6 +513,7 @@ private struct LegacyLoanDraft: Identifiable {
     let id = UUID()
     var counterparty: String
     var amountText: String
+    var selectedCounterparty: String? = nil
     var direction: LoanDirection = .borrowed
     var hasDueDate: Bool = false
     var dueDate: Date = .now
@@ -481,8 +524,10 @@ struct LoanEditor: View {
     @ObservedObject var store: LedgerStore
     let loan: Loan?
     let onSave: (() -> Void)?
+    private let wrapsInNavigationStack: Bool
     @Environment(\.dismiss) private var dismiss
     @State private var counterparty: String
+    @State private var selectedCounterparty: String?
     @State private var direction: LoanDirection
     @State private var amountText: String
     @State private var fundedAmountText: String
@@ -493,11 +538,23 @@ struct LoanEditor: View {
     @State private var selectedAccountID: UUID?
     @State private var errorMessage: String?
 
-    init(store: LedgerStore, loan: Loan? = nil, onSave: (() -> Void)? = nil) {
+    init(
+        store: LedgerStore,
+        loan: Loan? = nil,
+        onSave: (() -> Void)? = nil,
+        wrapsInNavigationStack: Bool = true
+    ) {
         _store = ObservedObject(wrappedValue: store)
         self.loan = loan
         self.onSave = onSave
+        self.wrapsInNavigationStack = wrapsInNavigationStack
         _counterparty = State(initialValue: loan?.counterparty ?? "")
+        let savedCounterparty = loan.flatMap { loan in
+            savedLoanCounterparties(in: store.data).first {
+                $0.localizedCaseInsensitiveCompare(loan.counterparty) == .orderedSame
+            }
+        }
+        _selectedCounterparty = State(initialValue: savedCounterparty)
         _direction = State(initialValue: loan?.direction ?? .borrowed)
         _amountText = State(initialValue: "")
         _fundedAmountText = State(initialValue: "")
@@ -514,8 +571,18 @@ struct LoanEditor: View {
         )
     }
 
+    @ViewBuilder
     var body: some View {
-        NavigationStack {
+        if wrapsInNavigationStack {
+            NavigationStack {
+                editorForm
+            }
+        } else {
+            editorForm
+        }
+    }
+
+    private var editorForm: some View {
             Form {
                 Section("Loan") {
                     if loan == nil {
@@ -525,7 +592,19 @@ struct LoanEditor: View {
                             }
                         }
                     }
-                    TextField(loan?.direction.counterpartyLabel ?? direction.counterpartyLabel, text: $counterparty)
+                    if savedCounterparties.isEmpty {
+                        TextField(counterpartyLabel, text: $counterparty)
+                    } else {
+                        Picker(counterpartyLabel, selection: $selectedCounterparty) {
+                            Text("New counterparty").tag(Optional<String>.none)
+                            ForEach(savedCounterparties, id: \.self) { name in
+                                Text(name).tag(Optional(name))
+                            }
+                        }
+                        if selectedCounterparty == nil {
+                            TextField(counterpartyLabel, text: $counterparty)
+                        }
+                    }
                     if loan == nil {
                         CurrencyInputField("Total amount owed", text: $amountText, currency: $loanCurrency)
                         CurrencyInputField(
@@ -592,7 +671,14 @@ struct LoanEditor: View {
             } message: {
                 Text(errorMessage ?? "")
             }
-        }
+    }
+
+    private var counterpartyLabel: String {
+        loan?.direction.counterpartyLabel ?? direction.counterpartyLabel
+    }
+
+    private var savedCounterparties: [String] {
+        savedLoanCounterparties(in: store.data)
     }
 
     private var eligibleAccounts: [Account] {
@@ -640,13 +726,15 @@ struct LoanEditor: View {
     }
 
     private func save() {
-        let party = counterparty.trimmingCharacters(in: .whitespacesAndNewlines)
+        let party = (selectedCounterparty ?? counterparty).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !party.isEmpty else {
             errorMessage = "Enter the person or organization for this loan."
             return
         }
+        let contactID = loanContactID(for: party, in: store.data)
         if var existing = loan {
             existing.counterparty = party
+            existing.counterpartyContactID = contactID
             existing.dueDate = hasDueDate ? dueDate : nil
             guard store.updateLoan(existing) else {
                 errorMessage = store.lastActionStatus ?? "The loan could not be updated."
@@ -676,6 +764,7 @@ struct LoanEditor: View {
         let loan = Loan(
             id: loanID,
             counterparty: party,
+            counterpartyContactID: contactID,
             direction: direction,
             currency: amount.currency,
             startingAmount: amount,
@@ -707,15 +796,19 @@ struct LoanEditor: View {
     }
 }
 
+private enum LoanDetailDestination {
+    case editLoan
+    case recordPayment
+    case editPayment(UUID)
+}
+
 @MainActor
 struct LoanDetailView: View {
     @ObservedObject var store: LedgerStore
     let loanID: UUID
     let showsCloseButton: Bool
     @Environment(\.dismiss) private var dismiss
-    @State private var isEditingLoan = false
-    @State private var isPresentingPayment = false
-    @State private var editingPayment: LoanPayment?
+    @State private var destination: LoanDetailDestination?
     @State private var deletingPayment: LoanPayment?
     @State private var errorMessage: String?
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
@@ -746,24 +839,15 @@ struct LoanDetailView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    isEditingLoan = true
+                    destination = .editLoan
                 } label: {
                     Image(systemName: "pencil")
                 }
                 .accessibilityLabel("Edit loan")
             }
         }
-        .sheet(isPresented: $isEditingLoan) {
-            if let loan { LoanEditor(store: store, loan: loan) }
-        }
-        .sheet(isPresented: $isPresentingPayment) {
-            if let loan { LoanPaymentEditor(store: store, loan: loan) }
-        }
-        .sheet(item: $editingPayment) { payment in
-            if let loan,
-               let transaction = store.data.transactions.first(where: { $0.id == payment.transactionID }) {
-                LoanPaymentEditor(store: store, loan: loan, payment: payment, transaction: transaction)
-            }
+        .navigationDestination(isPresented: destinationPresented) {
+            destinationView
         }
         .alert("Loan action failed", isPresented: errorPresented) {
             Button("OK") { errorMessage = nil }
@@ -838,7 +922,7 @@ struct LoanDetailView: View {
 
                     if !loan.isSettled {
                         Button {
-                            isPresentingPayment = true
+                            destination = .recordPayment
                         } label: {
                             Label(loan.direction == .lent ? "Record collection" : "Record repayment", systemImage: "plus.circle.fill")
                                 .frame(maxWidth: .infinity)
@@ -899,7 +983,7 @@ struct LoanDetailView: View {
             ProtectedAmountText(value: payment.amount.formatted, isRevealed: areBalancesRevealed)
                 .font(.subheadline.weight(.semibold).monospacedDigit())
             Menu {
-                Button("Edit payment", systemImage: "pencil") { editingPayment = payment }
+                Button("Edit payment", systemImage: "pencil") { destination = .editPayment(payment.id) }
                 Button("Remove payment", systemImage: "trash", role: .destructive) { deletingPayment = payment }
             } label: {
                 Image(systemName: "ellipsis")
@@ -928,6 +1012,29 @@ struct LoanDetailView: View {
 
     private var errorPresented: Binding<Bool> {
         Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
+    }
+
+    private var destinationPresented: Binding<Bool> {
+        Binding(get: { destination != nil }, set: { if !$0 { destination = nil } })
+    }
+
+    @ViewBuilder
+    private var destinationView: some View {
+        if let destination, let loan {
+            switch destination {
+            case .editLoan:
+                LoanEditor(store: store, loan: loan, wrapsInNavigationStack: false)
+            case .recordPayment:
+                LoanPaymentEditor(store: store, loan: loan)
+            case .editPayment(let paymentID):
+                if let payment = loan.payments.first(where: { $0.id == paymentID }),
+                   let transaction = store.data.transactions.first(where: { $0.id == payment.transactionID }) {
+                    LoanPaymentEditor(store: store, loan: loan, payment: payment, transaction: transaction)
+                } else {
+                    ContentUnavailableView("Payment unavailable", systemImage: "exclamationmark.circle")
+                }
+            }
+        }
     }
 
     private var deletingPaymentPresented: Binding<Bool> {
@@ -969,8 +1076,7 @@ private struct LoanPaymentEditor: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
+        Form {
                 Section(payment == nil ? "Payment" : "Edit payment") {
                     CurrencyInputField("Amount", text: $amountText, currency: paymentCurrency)
                     DatePicker("Date", selection: $date, in: Date.distantPast...Date.now, displayedComponents: .date)
@@ -1001,22 +1107,21 @@ private struct LoanPaymentEditor: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+        }
+        .pocketListSurface()
+        .navigationTitle(payment == nil ? (loan.direction == .lent ? "Record collection" : "Record repayment") : "Edit payment")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save", action: save)
+                    .disabled(!canSave)
             }
-            .pocketListSurface()
-            .navigationTitle(payment == nil ? (loan.direction == .lent ? "Record collection" : "Record repayment") : "Edit payment")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save)
-                        .disabled(!canSave)
-                }
-            }
-            .alert("Payment not saved", isPresented: errorPresented) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+        }
+        .alert("Payment not saved", isPresented: errorPresented) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
         }
     }
 

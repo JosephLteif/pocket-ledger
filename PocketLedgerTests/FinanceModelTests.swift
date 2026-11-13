@@ -966,7 +966,8 @@ final class FinanceModelTests: XCTestCase {
         let loan = Loan(
             counterparty: contact.name, counterpartyContactID: contact.id,
             direction: .lent, currency: .usd,
-            startingAmount: Money(currency: .usd, minorUnits: 10_000)
+            startingAmount: Money(currency: .usd, minorUnits: 10_000),
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
         let ledger = FinanceData(accounts: [], categories: [], transactions: [], loans: [loan], loanContacts: [contact])
         let encoded = try LedgerBackupCodec.encodeBundle(ledger, attachmentData: [:])

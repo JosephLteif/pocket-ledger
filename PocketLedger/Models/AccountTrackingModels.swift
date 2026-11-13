@@ -149,6 +149,8 @@ struct AccountTracking: Codable, Equatable {
         investmentEntries.append(contentsOf: imported.investmentEntries.filter { !entryIDs.contains($0.id) })
         investmentEntries.sort { $0.enteredAt < $1.enteredAt }
 
+        guard physicalAssetGainHistory != nil || imported.physicalAssetGainHistory != nil else { return }
+
         var gainHistory = physicalAssetGainHistory ?? []
         for snapshot in imported.physicalAssetGainHistory ?? [] {
             guard let index = gainHistory.firstIndex(where: {

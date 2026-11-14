@@ -12,10 +12,23 @@ private enum LoanListFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-private func savedLoanCounterparties(in data: FinanceData) -> [String] {
+private func loanCounterpartyNames(in data: FinanceData) -> [String] {
     let names = (data.loanContacts.map(\.name) + data.loans.map(\.counterparty))
         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         .filter { !$0.isEmpty }
+
+    return Array(Set(names))
+        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+}
+
+private func pastLoanCounterpartyNames(in data: FinanceData) -> [String] {
+    let savedNames = data.loanContacts.map(\.name)
+    let names = data.loans.map { $0.counterparty.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { historicalName in
+            !historicalName.isEmpty && !savedNames.contains { savedName in
+                savedName.localizedCaseInsensitiveCompare(historicalName) == .orderedSame
+            }
+        }
 
     return Array(Set(names))
         .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
@@ -39,6 +52,19 @@ struct LoansView: View {
     var body: some View {
         List {
             overviewSection
+
+            Section("People") {
+                NavigationLink {
+                    LoanPeopleView(store: store)
+                } label: {
+                    HStack {
+                        Label("Manage people", systemImage: "person.2")
+                        Spacer()
+                        Text("\(store.data.loanContacts.count)")
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    }
+                }
+            }
 
             if !store.legacyLoanAccountsNeedingSetup.isEmpty {
                 Section("Set up existing loan accounts") {
@@ -338,7 +364,7 @@ private struct LegacyLoanConversionView: View {
         _store = ObservedObject(wrappedValue: store)
         self.account = account
         let current = store.balance(for: account)
-        let savedCounterparty = savedLoanCounterparties(in: store.data).first {
+        let savedCounterparty = loanCounterpartyNames(in: store.data).first {
             $0.localizedCaseInsensitiveCompare(account.name) == .orderedSame
         }
         _drafts = State(initialValue: [LegacyLoanDraft(
@@ -381,13 +407,24 @@ private struct LegacyLoanConversionView: View {
                                     Text(direction.displayName).tag(direction)
                                 }
                             }
-                            if savedCounterparties.isEmpty {
+                            if counterpartyNames.isEmpty {
                                 TextField(draft.direction.counterpartyLabel, text: $draft.counterparty)
                             } else {
                                 Picker(draft.direction.counterpartyLabel, selection: $draft.selectedCounterparty) {
                                     Text("New counterparty").tag(Optional<String>.none)
-                                    ForEach(savedCounterparties, id: \.self) { name in
-                                        Text(name).tag(Optional(name))
+                                    if !store.data.loanContacts.isEmpty {
+                                        Section("Saved people") {
+                                            ForEach(store.data.loanContacts) { contact in
+                                                Text(contact.name).tag(Optional(contact.name))
+                                            }
+                                        }
+                                    }
+                                    if !pastLoanCounterpartyNames(in: store.data).isEmpty {
+                                        Section("Past loan names") {
+                                            ForEach(pastLoanCounterpartyNames(in: store.data), id: \.self) { name in
+                                                Text(name).tag(Optional(name))
+                                            }
+                                        }
                                     }
                                 }
                                 if draft.selectedCounterparty == nil {
@@ -453,8 +490,8 @@ private struct LegacyLoanConversionView: View {
         }
     }
 
-    private var savedCounterparties: [String] {
-        savedLoanCounterparties(in: store.data)
+    private var counterpartyNames: [String] {
+        loanCounterpartyNames(in: store.data)
     }
 
     private var currentBalance: Money { store.balance(for: account) }
@@ -550,7 +587,7 @@ struct LoanEditor: View {
         self.wrapsInNavigationStack = wrapsInNavigationStack
         _counterparty = State(initialValue: loan?.counterparty ?? "")
         let savedCounterparty = loan.flatMap { loan in
-            savedLoanCounterparties(in: store.data).first {
+            loanCounterpartyNames(in: store.data).first {
                 $0.localizedCaseInsensitiveCompare(loan.counterparty) == .orderedSame
             }
         }
@@ -592,17 +629,35 @@ struct LoanEditor: View {
                             }
                         }
                     }
-                    if savedCounterparties.isEmpty {
+                    if counterpartyNames.isEmpty {
                         TextField(counterpartyLabel, text: $counterparty)
                     } else {
                         Picker(counterpartyLabel, selection: $selectedCounterparty) {
                             Text("New counterparty").tag(Optional<String>.none)
-                            ForEach(savedCounterparties, id: \.self) { name in
-                                Text(name).tag(Optional(name))
+                            if !store.data.loanContacts.isEmpty {
+                                Section("Saved people") {
+                                    ForEach(store.data.loanContacts) { contact in
+                                        Text(contact.name).tag(Optional(contact.name))
+                                    }
+                                }
+                            }
+                            if !pastLoanCounterpartyNames(in: store.data).isEmpty {
+                                Section("Past loan names") {
+                                    ForEach(pastLoanCounterpartyNames(in: store.data), id: \.self) { name in
+                                        Text(name).tag(Optional(name))
+                                    }
+                                }
                             }
                         }
                         if selectedCounterparty == nil {
                             TextField(counterpartyLabel, text: $counterparty)
+                        }
+                    }
+                    if selectedCounterparty == nil {
+                        NavigationLink {
+                            LoanPeopleView(store: store)
+                        } label: {
+                            Label("Manage people", systemImage: "person.2")
                         }
                     }
                     if loan == nil {
@@ -677,8 +732,8 @@ struct LoanEditor: View {
         loan?.direction.counterpartyLabel ?? direction.counterpartyLabel
     }
 
-    private var savedCounterparties: [String] {
-        savedLoanCounterparties(in: store.data)
+    private var counterpartyNames: [String] {
+        loanCounterpartyNames(in: store.data)
     }
 
     private var eligibleAccounts: [Account] {
@@ -1219,5 +1274,155 @@ private struct LoanPaymentEditor: View {
             return
         }
         dismiss()
+    }
+}
+
+@MainActor
+private struct LoanPeopleView: View {
+    @ObservedObject var store: LedgerStore
+    @State private var personToDelete: LoanContact?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        List {
+            if store.data.loanContacts.isEmpty {
+                ContentUnavailableView(
+                    "No saved people",
+                    systemImage: "person.2",
+                    description: Text("Add someone to reuse their name for future loans. Past loan names remain in history and are not saved people.")
+                )
+                .listRowBackground(Color.clear)
+            } else {
+                Section {
+                    ForEach(store.data.loanContacts) { person in
+                        NavigationLink {
+                            LoanPersonEditorView(store: store, person: person)
+                        } label: {
+                            Label(person.name, systemImage: "person.crop.circle")
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button("Delete", systemImage: "trash", role: .destructive) {
+                                personToDelete = person
+                            }
+                        }
+                    }
+                } footer: {
+                    Text("This list contains saved people only. Names from past loans remain in loan history and picker suggestions.")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .pocketScreen()
+        .navigationTitle("People")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink {
+                    LoanPersonEditorView(store: store)
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Add person")
+            }
+        }
+        .confirmationDialog(
+            "Delete saved person?",
+            isPresented: deletionConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Delete person", role: .destructive) {
+                if let personToDelete {
+                    delete(personToDelete)
+                }
+            }
+            Button("Cancel", role: .cancel) { personToDelete = nil }
+        } message: {
+            Text("Related loans and payment history will remain in history with this name. Only the saved person will be removed.")
+        }
+        .alert("People action failed", isPresented: errorPresented) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private var deletionConfirmationPresented: Binding<Bool> {
+        Binding(
+            get: { personToDelete != nil },
+            set: { if !$0 { personToDelete = nil } }
+        )
+    }
+
+    private var errorPresented: Binding<Bool> {
+        Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
+    }
+
+    private func delete(_ person: LoanContact) {
+        personToDelete = nil
+        do {
+            try store.deleteLoanContact(id: person.id)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+@MainActor
+private struct LoanPersonEditorView: View {
+    @ObservedObject var store: LedgerStore
+    let person: LoanContact?
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var errorMessage: String?
+
+    init(store: LedgerStore, person: LoanContact? = nil) {
+        _store = ObservedObject(wrappedValue: store)
+        self.person = person
+        _name = State(initialValue: person?.name ?? "")
+    }
+
+    var body: some View {
+        Form {
+            Section("Person") {
+                TextField("Name", text: $name)
+                    .textInputAutocapitalization(.words)
+            }
+        }
+        .pocketListSurface()
+        .navigationTitle(person == nil ? "Add person" : "Edit person")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save", action: save)
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .alert("Person not saved", isPresented: errorPresented) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private var errorPresented: Binding<Bool> {
+        Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
+    }
+
+    private func save() {
+        let contact = LoanContact(
+            id: person?.id ?? UUID(),
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        do {
+            if person == nil {
+                try store.addLoanContact(contact)
+            } else {
+                try store.updateLoanContact(contact)
+            }
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }

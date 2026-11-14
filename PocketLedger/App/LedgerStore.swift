@@ -48,6 +48,83 @@ func financeUndoScheduleRecord(
     return restored
 }
 
+enum LoanContactMutationError: LocalizedError, Equatable {
+    case invalidName
+    case duplicateID
+    case duplicateName
+    case notFound
+    case saveFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidName: "Enter a name for this loan contact."
+        case .duplicateID: "A loan contact with this ID already exists."
+        case .duplicateName: "A loan contact with this name already exists."
+        case .notFound: "Loan contact not found."
+        case .saveFailed: "The loan contact could not be saved."
+        }
+    }
+}
+
+enum LoanContactDataOperation {
+    static func adding(_ contact: LoanContact, to data: FinanceData) throws -> FinanceData {
+        guard !data.loanContacts.contains(where: { $0.id == contact.id }) else {
+            throw LoanContactMutationError.duplicateID
+        }
+
+        var updated = data
+        var contact = contact
+        contact.name = try validatedName(contact.name, in: data.loanContacts)
+        updated.loanContacts.append(contact)
+        return updated
+    }
+
+    static func updating(_ contact: LoanContact, in data: FinanceData) throws -> FinanceData {
+        guard let contactIndex = data.loanContacts.firstIndex(where: { $0.id == contact.id }) else {
+            throw LoanContactMutationError.notFound
+        }
+
+        var updated = data
+        var contact = contact
+        contact.name = try validatedName(contact.name, in: data.loanContacts, excludingID: contact.id)
+        updated.loanContacts[contactIndex] = contact
+        for index in updated.loans.indices where updated.loans[index].counterpartyContactID == contact.id {
+            updated.loans[index].counterparty = contact.name
+        }
+        return updated
+    }
+
+    static func deleting(id: UUID, from data: FinanceData) throws -> FinanceData {
+        guard let contactIndex = data.loanContacts.firstIndex(where: { $0.id == id }) else {
+            throw LoanContactMutationError.notFound
+        }
+
+        var updated = data
+        updated.loanContacts.remove(at: contactIndex)
+        for index in updated.loans.indices where updated.loans[index].counterpartyContactID == id {
+            updated.loans[index].counterpartyContactID = nil
+        }
+        return updated
+    }
+
+    private static func validatedName(
+        _ rawName: String,
+        in contacts: [LoanContact],
+        excludingID: UUID? = nil
+    ) throws -> String {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw LoanContactMutationError.invalidName }
+        guard !contacts.contains(where: {
+            $0.id != excludingID
+                && $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .localizedCaseInsensitiveCompare(name) == .orderedSame
+        }) else {
+            throw LoanContactMutationError.duplicateName
+        }
+        return name
+    }
+}
+
 @MainActor
 final class LedgerStore: ObservableObject {
     private static let balanceAdjustmentCategoryID = UUID(
@@ -702,6 +779,27 @@ final class LedgerStore: ObservableObject {
 
     func loan(with id: UUID) -> Loan? {
         ledgerIndex.loan(with: id)
+    }
+
+    func addLoanContact(_ contact: LoanContact) throws {
+        let updated = try LoanContactDataOperation.adding(contact, to: data)
+        guard persist(updated, successMessage: "Loan contact added") else {
+            throw LoanContactMutationError.saveFailed
+        }
+    }
+
+    func updateLoanContact(_ contact: LoanContact) throws {
+        let updated = try LoanContactDataOperation.updating(contact, in: data)
+        guard persist(updated, successMessage: "Loan contact updated") else {
+            throw LoanContactMutationError.saveFailed
+        }
+    }
+
+    func deleteLoanContact(id: UUID) throws {
+        let updated = try LoanContactDataOperation.deleting(id: id, from: data)
+        guard persist(updated, successMessage: "Loan contact deleted") else {
+            throw LoanContactMutationError.saveFailed
+        }
     }
 
     @discardableResult

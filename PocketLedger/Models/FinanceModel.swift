@@ -727,6 +727,18 @@ struct LedgerCategory: Identifiable, Codable, Equatable {
     var includeInTotals: Bool
     var isArchived: Bool
 
+    var displayName: String {
+        let cleanedName = name
+            .filter { !Self.isEmojiGrapheme($0) }
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        return cleanedName.isEmpty ? "Unnamed category" : cleanedName
+    }
+
+    var iconEmoji: String? {
+        name.first(where: Self.isEmojiGrapheme).map { String($0) }
+    }
+
     init(
         id: UUID = UUID(),
         name: String,
@@ -770,6 +782,30 @@ struct LedgerCategory: Identifiable, Codable, Equatable {
         try container.encode(systemImage, forKey: .systemImage)
         try container.encode(includeInTotals, forKey: .includeInTotals)
         try container.encode(isArchived, forKey: .isArchived)
+    }
+
+    private static func isEmojiGrapheme(_ character: Character) -> Bool {
+        let scalars = Array(character.unicodeScalars)
+        guard !scalars.contains(where: { $0.value == 0xFE0E }) else { return false }
+
+        if scalars.last?.value == 0x20E3,
+           let base = scalars.first?.value,
+           (0x30...0x39).contains(base) || base == 0x23 || base == 0x2A,
+           scalars.dropFirst().dropLast().allSatisfy({ $0.value == 0xFE0F }) {
+            return true
+        }
+
+        let emojiScalars = scalars.filter {
+            $0.properties.isEmoji && !$0.properties.isEmojiModifier
+        }
+        guard !emojiScalars.isEmpty else { return false }
+
+        if emojiScalars.allSatisfy({ (0x1F1E6...0x1F1FF).contains($0.value) }) {
+            return emojiScalars.count == 2
+        }
+
+        return scalars.contains(where: { $0.value == 0xFE0F })
+            || emojiScalars.contains(where: \.properties.isEmojiPresentation)
     }
 }
 

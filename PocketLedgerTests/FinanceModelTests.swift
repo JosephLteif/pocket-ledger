@@ -4,6 +4,40 @@ import CryptoKit
 @testable import PocketLedger
 
 final class FinanceModelTests: XCTestCase {
+    func testLedgerCategoryUsesEmojiGraphemesForDisplayAndIcon() {
+        let cases = [
+            ("🧑‍🤝‍🧑 Social Life", "Social Life", "🧑‍🤝‍🧑"),
+            ("👨🏽‍👩🏻‍👧🏿 Family", "Family", "👨🏽‍👩🏻‍👧🏿"),
+            ("🇱🇧 Home", "Home", "🇱🇧"),
+            ("1️⃣ Savings", "Savings", "1️⃣"),
+            ("#️⃣ Plans", "Plans", "#️⃣"),
+            ("©️ License", "License", "©️"),
+            ("Home ❤️ Extra 🏡", "Home Extra", "❤️")
+        ]
+
+        for (storedName, displayName, iconEmoji) in cases {
+            let category = LedgerCategory(name: storedName)
+            XCTAssertEqual(category.displayName, displayName, storedName)
+            XCTAssertEqual(category.iconEmoji, iconEmoji, storedName)
+            XCTAssertEqual(category.name, storedName, "Display properties must not rewrite the stored name")
+        }
+    }
+
+    func testLedgerCategoryKeepsPlainTextEmojiCandidatesInItsName() {
+        for name in ["123", "#", "*", "©"] {
+            let category = LedgerCategory(name: name)
+            XCTAssertNil(category.iconEmoji, name)
+            XCTAssertEqual(category.displayName, name, name)
+        }
+    }
+
+    func testLedgerCategoryEmojiOnlyNameHasReadableFallback() {
+        let category = LedgerCategory(name: "💸")
+
+        XCTAssertEqual(category.displayName, "Unnamed category")
+        XCTAssertEqual(category.iconEmoji, "💸")
+    }
+
     func testLedgerIndexAndMetricsSnapshotPreserveFilteredTotals() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

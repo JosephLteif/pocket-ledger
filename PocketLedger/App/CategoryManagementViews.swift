@@ -45,7 +45,8 @@ struct CategoriesView: View {
                             .font(.title3.weight(.bold))
                         ForEach(archivedCategories) { category in
                             HStack {
-                                Label(category.name, systemImage: category.systemImage)
+                                CategoryIcon(emoji: category.iconEmoji, systemImage: category.systemImage)
+                                Text(category.displayName)
                                 Spacer()
                                 Button("Restore") {
                                     _ = store.setCategoryArchived(categoryID: category.id, isArchived: false)
@@ -91,9 +92,9 @@ struct CategoriesView: View {
         let children = store.data.categories.filter { $0.parentID == parent.id && !$0.isArchived }
 
         return VStack(alignment: .leading, spacing: 12) {
-            PocketIcon(systemImage: parent.systemImage, tint: PocketLedgerTheme.accent, size: 42)
+            CategoryIcon(emoji: parent.iconEmoji, systemImage: parent.systemImage, size: 42)
             Spacer(minLength: 0)
-            Text(parent.name)
+            Text(parent.displayName)
                 .font(.headline)
                 .foregroundStyle(PocketLedgerTheme.textPrimary)
                 .lineLimit(2)
@@ -136,7 +137,7 @@ private struct CategorySubcategoriesView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Subcategories in \(parent.name)")
+                Text("Subcategories in \(parent.displayName)")
                     .font(.subheadline)
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
 
@@ -168,7 +169,7 @@ private struct CategorySubcategoriesView: View {
             .padding(.bottom, 24)
         }
         .pocketScreen()
-        .navigationTitle(parent.name)
+        .navigationTitle(parent.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -206,8 +207,8 @@ private struct CategoryTile: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            PocketIcon(systemImage: category.systemImage, tint: PocketLedgerTheme.accent, size: 38)
-            Text(category.name)
+            CategoryIcon(emoji: category.iconEmoji, systemImage: category.systemImage, size: 38)
+            Text(category.displayName)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(PocketLedgerTheme.textPrimary)
                 .lineLimit(2)
@@ -222,8 +223,28 @@ private struct CategoryTile: View {
             Button("Archive", systemImage: "archivebox", action: onArchive)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(category.name)
+        .accessibilityLabel(category.displayName)
         .accessibilityHint("Hold for category actions")
+    }
+}
+
+private struct CategoryIcon: View {
+    let emoji: String?
+    let systemImage: String
+    var size: CGFloat = 38
+
+    @ViewBuilder
+    var body: some View {
+        if let emoji {
+            Text(emoji)
+                .font(.system(size: size * 0.55))
+                .frame(width: size, height: size)
+                .pocketGlassSurface(cornerRadius: size * 0.28, tint: PocketLedgerTheme.accent.opacity(0.12))
+                .accessibilityHidden(true)
+        } else {
+            PocketIcon(systemImage: systemImage, tint: PocketLedgerTheme.accent, size: size)
+                .accessibilityHidden(true)
+        }
     }
 }
 
@@ -263,6 +284,8 @@ private struct CategoryEditor: View {
     }
 
     var body: some View {
+        let previewCategory = LedgerCategory(name: name, systemImage: systemImage)
+
         NavigationStack {
             Form {
                 Section("Category") {
@@ -270,11 +293,14 @@ private struct CategoryEditor: View {
                     Picker("Parent category", selection: $parentID) {
                         Text("Top-level category").tag(UUID?.none)
                         ForEach(store.rootCategories.filter { $0.id != self.category?.id }) { parent in
-                            Text(parent.name).tag(Optional(parent.id))
+                            Text(parent.displayName).tag(Optional(parent.id))
                         }
                     }
-                    Label("Preview", systemImage: systemImage)
-                        .font(.subheadline.weight(.medium))
+                    HStack(spacing: 10) {
+                        CategoryIcon(emoji: previewCategory.iconEmoji, systemImage: systemImage, size: 32)
+                        Text(previewCategory.displayName)
+                    }
+                    .font(.subheadline.weight(.medium))
                     Picker("Icon", selection: $systemImage) {
                         ForEach(availableSystemImages, id: \.self) { symbol in
                             Label(symbol.replacingOccurrences(of: ".", with: " "), systemImage: symbol)

@@ -2,6 +2,7 @@ import Foundation
 import AppIntents
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 private struct MovementDraft: Identifiable, Equatable {
     let id = UUID()
@@ -70,7 +71,7 @@ private struct TransactionEditorSnapshot: Equatable {
     let amountDue: String
     let outflows: [MovementDraft]
     let inflows: [MovementDraft]
-    let requestedChange: String
+    let legacyRequestedChange: Money?
     let useCustomRate: Bool
     let rateBase: LedgerCurrency
     let rateQuote: LedgerCurrency
@@ -203,7 +204,7 @@ struct TransactionEditor: View {
     @State private var amountDue = ""
     @State private var outflows: [MovementDraft]
     @State private var inflows: [MovementDraft] = []
-    @State private var requestedChange = ""
+    @State private var legacyRequestedChange: Money?
     @State private var useCustomRate = true
     @State private var automaticTransferDestinationAmount: String?
     @State private var rateBase: LedgerCurrency = .usd
@@ -333,13 +334,14 @@ struct TransactionEditor: View {
                     accountID: $0.accountID,
                     currency: $0.money.currency,
                     amount: Self.inputText(for: $0.money),
-                    categoryID: $0.categoryID
+                    categoryID: $0.categoryID ?? (resolvedInitialKind == .expense ? initialCategoryID : nil)
                 )
             } ?? [
                 MovementDraft(
                     accountID: firstAccountID,
                     currency: initialAmount?.currency ?? firstAccount?.currency ?? preferredCurrency ?? .usd,
-                    amount: initialAmount.map { Self.inputText(for: $0) } ?? ""
+                    amount: initialAmount.map { Self.inputText(for: $0) } ?? "",
+                    categoryID: resolvedInitialKind == .expense ? initialCategoryID : nil
                 )
             ]
         )
@@ -361,23 +363,17 @@ struct TransactionEditor: View {
                 ]
                 : [])
         )
-        let initialInflows = sourceTransaction?.inflows ?? scheduledTransaction?.inflows ?? []
         let initialHasAttachments = !(transaction?.attachmentIDs ?? []).isEmpty
             || initialAttachmentData != nil
         _isShowingMoreDetails = State(initialValue:
-            resolvedInitialKind != .expense
-                || initialTiming == .scheduled
-                || scheduledTransaction != nil
-                || !initialInflows.isEmpty
-                || sourceTransaction?.changeAdjustment != nil
+            initialHasAttachments
                 || sourceTransaction?.exchangeRate != nil
                 || scheduledTransaction?.exchangeRate != nil
-                || initialHasAttachments
                 || initialCurrencies.count > 1
                 || !initialReceiptItems.isEmpty
         )
-        _requestedChange = State(
-            initialValue: (sourceTransaction?.changeAdjustment ?? scheduledTransaction?.changeAdjustment).map { Self.inputText(for: $0.requested) } ?? ""
+        _legacyRequestedChange = State(
+            initialValue: (sourceTransaction?.changeAdjustment ?? scheduledTransaction?.changeAdjustment)?.requested
         )
         _rateBase = State(initialValue: initialRateBase)
         _rateQuote = State(initialValue: initialRateQuote)
@@ -448,7 +444,7 @@ struct TransactionEditor: View {
                 }
 
                 if kind == .expense {
-                    expenseDateSection
+                    timingSection
                     detailsSection
                     expensePaymentsSection
                     moreDetailsSection
@@ -462,6 +458,7 @@ struct TransactionEditor: View {
                 }
 
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationDestination(for: TransactionEditorType.self) { editorType in
                 switch editorType {
                 case .loan:
@@ -513,9 +510,6 @@ struct TransactionEditor: View {
                 synchronizeAutomaticTransferAmount()
             }
             .onChange(of: inflows) { oldInflows, newInflows in
-                if kind == .expense && !newInflows.isEmpty {
-                    isShowingMoreDetails = true
-                }
                 let amountWasEdited = oldInflows.first?.amount != newInflows.first?.amount
                 if amountWasEdited,
                    newInflows.first?.amount != automaticTransferDestinationAmount {
@@ -548,6 +542,10 @@ struct TransactionEditor: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(saveButtonTitle, action: save)
                         .disabled(replacingAttachmentID != nil)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done", action: dismissKeyboard)
                 }
             }
             .alert("Transaction not saved", isPresented: errorPresented) {
@@ -701,45 +699,17 @@ struct TransactionEditor: View {
             } else {
                 ForEach(Array(outflows.enumerated()), id: \.element.id) { entry in
                     let index = entry.offset
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text(index == 0 ? "Main payment" : "Additional payment \(index + 1)")
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            if outflows.count > 1 {
-                                removeLineButton(
-                                    accessibilityLabel: "Remove payment \(index + 1)"
-                                ) {
-                                    outflows.remove(at: index)
-                                }
-                            }
-                        }
-
-                        MovementLineEditor(
-                            store: store,
-                            line: $outflows[index],
-                            amountPlaceholder: index == 0 ? "Amount" : "Amount for this payment",
-                            allowsArchivedAccount: allowsArchivedMovementAccounts,
-                            focusAmountOnAppear: index == 0 && outflows[index].amount.isEmpty
-                        )
-                        if outflows.count > 1 {
-                            if selectableCategories.isEmpty {
-                                Text("No categories yet — this payment will be Uncategorized.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                categorySelectionButton(
-                                    for: effectiveCategoryID(for: outflows[index]),
-                                    accessibilityLabel: "Category for payment \(index + 1)"
-                                ) {
-                                    categorySelectionPaymentID = outflows[index].id
-                                    isSelectingCategory = true
-                                }
-                                .accessibilityIdentifier("payment-category-picker-\(index + 1)")
-                            }
-                        }
+                    expenseMovementRow(
+                        $outflows[index],
+                        title: index == 0 ? "Main payment" : "Additional payment \(index + 1)",
+                        amountPlaceholder: index == 0 ? "Amount" : "Amount for this payment",
+                        focusAmountOnAppear: index == 0 && outflows[index].amount.isEmpty,
+                        showsRemoveButton: outflows.count > 1,
+                        removeAccessibilityLabel: "Remove payment \(index + 1)",
+                        paymentIndex: index
+                    ) {
+                        outflows.remove(at: index)
                     }
-                    .padding(.vertical, 4)
                 }
             }
 
@@ -760,76 +730,76 @@ struct TransactionEditor: View {
             })
     }
 
-    private var expenseDateSection: some View {
-        Section("Date") {
-            DatePicker(
-                timing == .scheduled ? "First run" : "Date",
-                selection: $date,
-                displayedComponents: timing == .scheduled ? [.date, .hourAndMinute] : [.date]
-            )
-        }
-    }
-
-    private var moreDetailsSection: some View {
-        Section {
-            DisclosureGroup(isExpanded: $isShowingMoreDetails) {
-                VStack(alignment: .leading, spacing: 14) {
-                    expenseScheduleDetails
-                    if !attachments.isEmpty || initialAttachmentFileName != nil {
-                        Divider()
-                        expenseAttachmentDetails
-                    }
-                    if selectedCurrencies.count > 1 {
-                        Divider()
-                        exchangeRateDetails
-                    }
-                }
-                .padding(.vertical, 6)
-            } label: {
-                Label("More details", systemImage: "slider.horizontal.3")
-            }
-        }
-    }
-
-    private var expenseScheduleDetails: some View {
+    private func expenseMovementRow(
+        _ line: Binding<MovementDraft>,
+        title: String,
+        amountPlaceholder: String,
+        focusAmountOnAppear: Bool,
+        showsRemoveButton: Bool,
+        removeAccessibilityLabel: String,
+        paymentIndex: Int?,
+        onRemove: @escaping () -> Void
+    ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Schedule")
-                .font(.subheadline.weight(.semibold))
-
-            Picker("When", selection: $timing) {
-                ForEach(TransactionTiming.allCases) { option in
-                    Text(option.displayName).tag(option)
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if showsRemoveButton {
+                    removeLineButton(
+                        accessibilityLabel: removeAccessibilityLabel,
+                        action: onRemove
+                    )
                 }
             }
-            .pickerStyle(.segmented)
-            .disabled(isEditingScheduledTransaction)
 
-            if timing == .scheduled {
-                Picker("Repeats", selection: $scheduleFrequency) {
-                    ForEach(ScheduleFrequency.allCases) { frequency in
-                        Text(frequency.displayName).tag(frequency)
+            MovementLineEditor(
+                store: store,
+                line: line,
+                amountPlaceholder: amountPlaceholder,
+                allowsArchivedAccount: allowsArchivedMovementAccounts,
+                focusAmountOnAppear: focusAmountOnAppear
+            )
+
+            if let paymentIndex {
+                if selectableCategories.isEmpty {
+                    Text("No categories yet — this payment will be Uncategorized.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    categorySelectionButton(
+                        for: effectiveCategoryID(for: line.wrappedValue),
+                        accessibilityLabel: "Category for payment \(paymentIndex + 1)"
+                    ) {
+                        categorySelectionPaymentID = line.wrappedValue.id
+                        isSelectingCategory = true
                     }
+                    .accessibilityIdentifier("payment-category-picker-\(paymentIndex + 1)")
                 }
+            }
+        }
+        .padding(.vertical, 4)
+    }
 
-                if scheduleFrequency == .monthly {
-                    Picker("Monthly rule", selection: $monthlyRule) {
-                        ForEach(ScheduleMonthlyRule.allCases) { rule in
-                            Text(rule.displayName).tag(rule)
+    @ViewBuilder
+    private var moreDetailsSection: some View {
+        if !attachments.isEmpty || initialAttachmentFileName != nil || selectedCurrencies.count > 1 {
+            Section {
+                DisclosureGroup(isExpanded: $isShowingMoreDetails) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if !attachments.isEmpty || initialAttachmentFileName != nil {
+                            expenseAttachmentDetails
+                        }
+                        if selectedCurrencies.count > 1 {
+                            if !attachments.isEmpty || initialAttachmentFileName != nil {
+                                Divider()
+                            }
+                            exchangeRateDetails
                         }
                     }
-
-                    Text(monthlyScheduleDescription)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Toggle("Enabled", isOn: $scheduleEnabled)
-                    .disabled(completedOneTimeSchedule)
-
-                if completedOneTimeSchedule {
-                    Text("This one-time schedule has already been added to transactions.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    .padding(.vertical, 6)
+                } label: {
+                    Label("More details", systemImage: "slider.horizontal.3")
                 }
             }
         }
@@ -840,30 +810,19 @@ struct TransactionEditor: View {
             Text("Returned money")
                 .font(.subheadline.weight(.semibold))
 
-            ForEach(Array(inflows)) { movement in
-                if let index = inflows.firstIndex(where: { $0.id == movement.id }) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Return \(index + 1)")
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            removeLineButton(
-                                accessibilityLabel: "Remove returned money \(index + 1)"
-                            ) {
-                                inflows.remove(at: index)
-                                if inflows.isEmpty { requestedChange = "" }
-                            }
-                        }
-
-                        MovementLineEditor(
-                            store: store,
-                            line: $inflows[index],
-                            amountPlaceholder: "Amount returned",
-                            allowsArchivedAccount: allowsArchivedMovementAccounts
-                        )
-                    }
-                    .padding(12)
-                    .pocketGroupedSurface(cornerRadius: 14)
+            ForEach(Array(inflows.enumerated()), id: \.element.id) { entry in
+                let index = entry.offset
+                expenseMovementRow(
+                    $inflows[index],
+                    title: "Return \(index + 1)",
+                    amountPlaceholder: "Amount returned",
+                    focusAmountOnAppear: false,
+                    showsRemoveButton: true,
+                    removeAccessibilityLabel: "Remove returned money \(index + 1)",
+                    paymentIndex: nil
+                ) {
+                    inflows.remove(at: index)
+                    if inflows.isEmpty { legacyRequestedChange = nil }
                 }
             }
 
@@ -879,22 +838,6 @@ struct TransactionEditor: View {
             }
             .font(.subheadline.weight(.semibold))
             .buttonStyle(.plain)
-
-            if inflows.count == 1 {
-                CurrencyInputField(
-                    "Expected change (optional)",
-                    text: $requestedChange,
-                    currency: inflows[0].currency
-                )
-                Text("Enter how much change you expected. Pocket Ledger compares it with the returned money above.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                if let preview = shortfallPreview {
-                    Text(preview)
-                        .font(.footnote)
-                        .foregroundStyle(PocketLedgerTheme.warning)
-                }
-            }
 
             Text("Returned money may go to a different account and currency than the payment.")
                 .font(.footnote)
@@ -948,19 +891,6 @@ struct TransactionEditor: View {
     @ViewBuilder
     private var detailsSection: some View {
         Section("Details") {
-            if kind == .expense && outflows.count <= 1 {
-                if selectableCategories.isEmpty {
-                    Text("No categories yet — this expense will be Uncategorized.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else {
-                    categorySelectionButton(for: categoryIDForPicker) {
-                        categorySelectionPaymentID = nil
-                        isSelectingCategory = true
-                    }
-                }
-            }
-
             TextField("What was this for?", text: $note, axis: .vertical)
                 .lineLimit(2...5)
         }
@@ -1065,18 +995,6 @@ struct TransactionEditor: View {
                     Label("Add another receiving account", systemImage: "plus.circle")
                 }
 
-                if kind == .expense && inflows.count == 1 {
-                    CurrencyInputField(
-                        "Expected change (optional)",
-                        text: $requestedChange,
-                        currency: inflows[0].currency
-                    )
-                    if let preview = shortfallPreview {
-                        Text(preview)
-                            .font(.footnote)
-                            .foregroundStyle(PocketLedgerTheme.warning)
-                    }
-                }
             }
         } header: {
             Text(kind == .transfer
@@ -1353,7 +1271,8 @@ struct TransactionEditor: View {
         return MovementDraft(
             accountID: account?.id ?? UUID(),
             currency: account?.currency ?? .usd,
-            amount: ""
+            amount: "",
+            categoryID: kind == .expense ? categoryID : nil
         )
     }
 
@@ -1364,7 +1283,8 @@ struct TransactionEditor: View {
         return MovementDraft(
             accountID: account?.id ?? UUID(),
             currency: account?.currency ?? .usd,
-            amount: ""
+            amount: "",
+            categoryID: categoryID
         )
     }
 
@@ -1675,16 +1595,6 @@ struct TransactionEditor: View {
             return "Choose a category for each payment to save this split expense."
         }
 
-        if kind == .expense,
-           inflows.count == 1,
-           !requestedChange.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            guard parsedInflows.count == 1,
-                  let requested = Money.parse(requestedChange, currency: inflows[0].currency),
-                  requested.minorUnits >= 0 else {
-                 return "Enter a valid nonnegative amount for expected change."
-            }
-        }
-
         if !amountDue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             guard kind == .expense,
                   let due = Money.parse(amountDue, currency: dueCurrency),
@@ -1715,7 +1625,7 @@ struct TransactionEditor: View {
             amountDue: amountDue,
             outflows: outflows,
             inflows: inflows,
-            requestedChange: requestedChange,
+            legacyRequestedChange: legacyRequestedChange,
             useCustomRate: useCustomRate,
             rateBase: rateBase,
             rateQuote: rateQuote,
@@ -1739,28 +1649,20 @@ struct TransactionEditor: View {
         }
     }
 
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+
     private var errorPresented: Binding<Bool> {
         Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )
-    }
-
-    private var shortfallPreview: String? {
-        guard inflows.count == 1,
-              let requested = Money.parse(requestedChange, currency: inflows[0].currency),
-              let actual = Money.parse(inflows[0].amount, currency: inflows[0].currency) else {
-            return nil
-        }
-
-        let difference = requested.minorUnits - actual.minorUnits
-        if difference > 0 {
-            return "Received \(Money(currency: inflows[0].currency, minorUnits: actual.minorUnits).formatted) — \(Money(currency: inflows[0].currency, minorUnits: difference).formatted) less than expected."
-        }
-        if difference < 0 {
-            return "Received \(Money(currency: inflows[0].currency, minorUnits: -difference).formatted) more than expected."
-        }
-        return "Actual and expected change match."
     }
 
     private func parseMovements(_ drafts: [MovementDraft]) -> [MoneyMovement]? {
@@ -1803,10 +1705,12 @@ struct TransactionEditor: View {
 
         var changeAdjustment: ChangeAdjustment?
         if kind == .expense,
-           !requestedChange.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            parsedInflows.count == 1,
-           let requested = Money.parse(requestedChange, currency: inflows[0].currency) {
-            changeAdjustment = ChangeAdjustment(requested: requested, actual: parsedInflows[0].money)
+           let legacyRequestedChange {
+            changeAdjustment = ChangeAdjustment(
+                requested: legacyRequestedChange,
+                actual: parsedInflows[0].money
+            )
         }
 
         var parsedAmountDue: Money?

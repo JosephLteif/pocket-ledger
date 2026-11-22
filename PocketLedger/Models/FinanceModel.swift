@@ -984,6 +984,8 @@ struct Loan: Identifiable, Codable, Equatable, Sendable {
     var fundingTransactionID: UUID?
     var legacyAccountID: UUID?
     var payments: [LoanPayment]
+    /// Manually closed without a payment transaction.
+    var resolvedAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -997,7 +999,8 @@ struct Loan: Identifiable, Codable, Equatable, Sendable {
         settlementAccountID: UUID? = nil,
         fundingTransactionID: UUID? = nil,
         legacyAccountID: UUID? = nil,
-        payments: [LoanPayment] = []
+        payments: [LoanPayment] = [],
+        resolvedAt: Date? = nil
     ) {
         self.id = id
         self.counterparty = counterparty
@@ -1011,14 +1014,15 @@ struct Loan: Identifiable, Codable, Equatable, Sendable {
         self.fundingTransactionID = fundingTransactionID
         self.legacyAccountID = legacyAccountID
         self.payments = payments
+        self.resolvedAt = resolvedAt
     }
 
     var outstandingAmount: Money {
         Money(
             currency: currency,
-            minorUnits: startingAmount.minorUnits - payments.reduce(Int64.zero) {
-                $0 + $1.amount.minorUnits
-            }
+            minorUnits: resolvedAt == nil
+                ? startingAmount.minorUnits - payments.reduce(Int64.zero) { $0 + $1.amount.minorUnits }
+                : 0
         )
     }
 

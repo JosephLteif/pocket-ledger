@@ -12,6 +12,33 @@ private enum LoanListFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private func loanStatus(for loan: Loan) -> String {
+    if loan.resolvedAt != nil { return "Resolved" }
+    guard !loan.isSettled, let dueDate = loan.dueDate else {
+        return loan.isSettled ? "Settled" : "Active"
+    }
+    let calendar = Calendar.current
+    let today = calendar.startOfDay(for: .now)
+    if dueDate < today { return "Overdue" }
+    if let soonLimit = calendar.date(byAdding: .day, value: 7, to: today), dueDate < soonLimit {
+        return "Due soon"
+    }
+    return "Active"
+}
+
+private extension LoanListFilter {
+    func includes(_ loan: Loan) -> Bool {
+        switch self {
+        case .all: true
+        case .lent: loan.direction == .lent && !loan.isSettled
+        case .borrowed: loan.direction == .borrowed && !loan.isSettled
+        case .dueSoon: loanStatus(for: loan) == "Due soon"
+        case .overdue: loanStatus(for: loan) == "Overdue"
+        case .settled: loan.isSettled
+        }
+    }
+}
+
 private func loanCounterpartyNames(in data: FinanceData) -> [String] {
     let names = (data.loanContacts.map(\.name) + data.loans.map(\.counterparty))
         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -38,6 +65,49 @@ private func loanContactID(for counterparty: String, in data: FinanceData) -> UU
     data.loanContacts.first {
         $0.name.localizedCaseInsensitiveCompare(counterparty) == .orderedSame
     }?.id
+}
+
+private struct LoanPersonGroup: Identifiable {
+    let id: String
+    let name: String
+    let loans: [Loan]
+
+    var activeLoans: [Loan] { loans.filter { !$0.isSettled } }
+    var settledLoans: [Loan] { loans.filter(\.isSettled) }
+    var activeCurrencies: [LedgerCurrency] {
+        LedgerCurrency.allCases.filter { currency in activeLoans.contains { $0.currency == currency } }
+    }
+
+    func netBalance(in currency: LedgerCurrency) -> Int64 {
+        activeLoans.reduce(Int64.zero) { total, loan in
+            guard loan.currency == currency else { return total }
+            let sign: Int64 = loan.direction == .lent ? 1 : -1
+            return total + loan.outstandingAmount.minorUnits * sign
+        }
+    }
+}
+
+private func loanPersonKey(for loan: Loan, in data: FinanceData) -> String {
+    if let contactID = loan.counterpartyContactID ?? loanContactID(for: loan.counterparty, in: data) {
+        return "contact:\(contactID.uuidString)"
+    }
+    return "name:\(loan.counterparty.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase)"
+}
+
+private func loanPersonGroups(in data: FinanceData) -> [LoanPersonGroup] {
+    Dictionary(grouping: data.loans) { loanPersonKey(for: $0, in: data) }
+        .compactMap { entry in
+            guard let firstLoan = entry.value.first else { return nil }
+            return LoanPersonGroup(
+                id: entry.key,
+                name: firstLoan.counterparty,
+                loans: entry.value
+            )
+        }
+        .sorted {
+            let order = $0.name.localizedCaseInsensitiveCompare($1.name)
+            return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
+        }
 }
 
 @MainActor
@@ -123,7 +193,7 @@ struct LoansView: View {
                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 8, trailing: 16))
                 .listRowBackground(Color.clear)
 
-                if filteredLoans.isEmpty {
+                if filteredPersonGroups.isEmpty {
                     ContentUnavailableView(
                         emptyTitle,
                         systemImage: "arrow.left.arrow.right.circle",
@@ -131,13 +201,17 @@ struct LoansView: View {
                     )
                     .listRowBackground(Color.clear)
                 } else {
-                    ForEach(filteredLoans) { loan in
+                    ForEach(filteredPersonGroups) { person in
                         NavigationLink {
-                            LoanDetailView(store: store, loanID: loan.id)
+                            LoanPersonDetailView(
+                                store: store,
+                                personID: person.id,
+                                filter: filter,
+                                areBalancesRevealed: areBalancesRevealed
+                            )
                         } label: {
-                            LoanRow(
-                                loan: loan,
-                                status: status(for: loan),
+                            LoanPersonRow(
+                                person: person,
                                 areBalancesRevealed: areBalancesRevealed
                             )
                         }
@@ -145,7 +219,7 @@ struct LoansView: View {
                     }
                 }
             } header: {
-                Text("Loans")
+                Text("By person")
             }
 
             if activeLoans.contains(where: { $0.dueDate != nil }) {
@@ -258,41 +332,13 @@ struct LoansView: View {
 
     private var activeLoans: [Loan] { store.data.loans.filter { !$0.isSettled } }
     private var settledLoans: [Loan] { store.data.loans.filter(\.isSettled) }
-    private var overdueLoans: [Loan] { activeLoans.filter { status(for: $0) == "Overdue" } }
-    private var dueSoonLoans: [Loan] { activeLoans.filter { status(for: $0) == "Due soon" } }
+    private var overdueLoans: [Loan] { activeLoans.filter { loanStatus(for: $0) == "Overdue" } }
+    private var dueSoonLoans: [Loan] { activeLoans.filter { loanStatus(for: $0) == "Due soon" } }
 
-    private var filteredLoans: [Loan] {
-        let filtered = store.data.loans.filter { loan in
-            switch filter {
-            case .all: true
-            case .lent: loan.direction == .lent && !loan.isSettled
-            case .borrowed: loan.direction == .borrowed && !loan.isSettled
-            case .dueSoon: status(for: loan) == "Due soon"
-            case .overdue: status(for: loan) == "Overdue"
-            case .settled: loan.isSettled
-            }
+    private var filteredPersonGroups: [LoanPersonGroup] {
+        loanPersonGroups(in: store.data).filter { person in
+            person.loans.contains { filter.includes($0) }
         }
-        return filtered.sorted { lhs, rhs in
-            switch (lhs.dueDate, rhs.dueDate) {
-            case let (left?, right?) where left != right: left < right
-            case (_?, nil): true
-            case (nil, _?): false
-            default: lhs.counterparty.localizedCaseInsensitiveCompare(rhs.counterparty) == .orderedAscending
-            }
-        }
-    }
-
-    private func status(for loan: Loan) -> String {
-        guard !loan.isSettled, let dueDate = loan.dueDate else {
-            return loan.isSettled ? "Settled" : "Active"
-        }
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
-        if dueDate < today { return "Overdue" }
-        if let soonLimit = calendar.date(byAdding: .day, value: 7, to: today), dueDate < soonLimit {
-            return "Due soon"
-        }
-        return "Active"
     }
 
     private var emptyTitle: String {
@@ -324,16 +370,14 @@ private struct LoanRow: View {
                 size: 36
             )
             VStack(alignment: .leading, spacing: 3) {
-                Text(loan.counterparty)
+                Text(loan.direction.displayName)
                     .font(.subheadline.weight(.semibold))
-                HStack(spacing: 5) {
-                    Text(loan.direction.displayName)
-                    Text("·")
-                    Text(status)
-                        .foregroundStyle(status == "Overdue" ? PocketLedgerTheme.warning : PocketLedgerTheme.textSecondary)
-                }
-                .font(.caption)
-                .foregroundStyle(PocketLedgerTheme.textTertiary)
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(status == "Overdue" ? PocketLedgerTheme.warning : PocketLedgerTheme.textSecondary)
+                Text("Started \(loan.startedAt.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.caption2)
+                    .foregroundStyle(PocketLedgerTheme.textTertiary)
                 if let dueDate = loan.dueDate, !loan.isSettled {
                     Text("Due \(dueDate.formatted(date: .abbreviated, time: .omitted))")
                         .font(.caption2)
@@ -348,6 +392,193 @@ private struct LoanRow: View {
                 .minimumScaleFactor(0.75)
         }
         .padding(.vertical, 4)
+    }
+}
+
+@MainActor
+private struct LoanPersonRow: View {
+    let person: LoanPersonGroup
+    let areBalancesRevealed: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            PocketIcon(systemImage: "person.crop.circle", tint: PocketLedgerTheme.accent, size: 36)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(person.name)
+                    .font(.subheadline.weight(.semibold))
+                Text(loanCountDescription)
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                ForEach(person.activeCurrencies) { currency in
+                    let balance = person.netBalance(in: currency)
+                    HStack(spacing: 5) {
+                        Text(balanceLabel(for: balance))
+                        Spacer(minLength: 4)
+                        ProtectedAmountText(
+                            value: Money(currency: currency, minorUnits: abs(balance)).formatted,
+                            isRevealed: areBalancesRevealed
+                        )
+                            .fontWeight(.semibold)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(balanceColor(for: balance))
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func balanceLabel(for amount: Int64) -> String {
+        if amount > 0 { return "Net owed to you" }
+        if amount < 0 { return "Net you owe" }
+        return "No net balance"
+    }
+
+    private func balanceColor(for amount: Int64) -> Color {
+        if amount > 0 { return PocketLedgerTheme.income }
+        if amount < 0 { return PocketLedgerTheme.warning }
+        return PocketLedgerTheme.textSecondary
+    }
+
+    private var loanCountDescription: String {
+        let open = person.activeLoans.count
+        let settled = person.settledLoans.count
+        if open == 0 { return "\(settled) settled loan\(settled == 1 ? "" : "s")" }
+        if settled == 0 { return "\(open) open loan\(open == 1 ? "" : "s")" }
+        return "\(open) open · \(settled) settled"
+    }
+}
+
+@MainActor
+private struct LoanPersonDetailView: View {
+    @ObservedObject var store: LedgerStore
+    let personID: String
+    let filter: LoanListFilter
+    let areBalancesRevealed: Bool
+    @State private var currencyToResolve: LedgerCurrency?
+    @State private var errorMessage: String?
+
+    private var person: LoanPersonGroup? {
+        loanPersonGroups(in: store.data).first { $0.id == personID }
+    }
+
+    var body: some View {
+        List {
+            if let person {
+                Section("Net balance") {
+                    if person.activeLoans.isEmpty {
+                        Text("No outstanding balance.")
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    } else {
+                        ForEach(person.activeCurrencies) { currency in
+                            let net = person.netBalance(in: currency)
+                            VStack(alignment: .leading, spacing: 9) {
+                                HStack(spacing: 8) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(net > 0 ? "\(person.name) owes you" : net < 0 ? "You owe \(person.name)" : "Balanced with \(person.name)")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(PocketLedgerTheme.textPrimary)
+                                        let count = person.activeLoans.filter { $0.currency == currency }.count
+                                        Text("Net across \(count) open loan\(count == 1 ? "" : "s")")
+                                            .font(.caption)
+                                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                    }
+                                    Spacer(minLength: 8)
+                                    ProtectedAmountText(
+                                        value: Money(currency: currency, minorUnits: abs(net)).formatted,
+                                        isRevealed: areBalancesRevealed
+                                    )
+                                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.75)
+                                }
+                                Button {
+                                    currencyToResolve = currency
+                                } label: {
+                                    Label(net == 0 ? "Close balanced loans" : "Settle net balance", systemImage: "checkmark.circle")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                } footer: {
+                    Text("Settling marks all open loans in that currency as resolved. It does not change account balances or create a transaction.")
+                }
+
+                Section("Loans") {
+                    ForEach(person.loans.filter { filter.includes($0) }) { loan in
+                        NavigationLink {
+                            LoanDetailView(store: store, loanID: loan.id)
+                        } label: {
+                            LoanRow(
+                                loan: loan,
+                                status: loanStatus(for: loan),
+                                areBalancesRevealed: areBalancesRevealed
+                            )
+                        }
+                        .listRowBackground(PocketLedgerTheme.surface)
+                    }
+                }
+            } else {
+                ContentUnavailableView("Person unavailable", systemImage: "person.crop.circle")
+                    .listRowBackground(Color.clear)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .pocketScreen()
+        .navigationTitle(person?.name ?? "Loans")
+        .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Settle balance with \(person?.name ?? "this person")?",
+            isPresented: resolveConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            if currencyToResolve != nil {
+                Button("Mark loans settled") { resolveSelectedCurrency() }
+            }
+            Button("Cancel", role: .cancel) { currencyToResolve = nil }
+        } message: {
+            Text(resolveMessage)
+        }
+        .alert("Could not settle loans", isPresented: errorPresented) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private var resolveMessage: String {
+        guard let person, let currencyToResolve else { return "No account transaction will be created." }
+        let net = person.netBalance(in: currencyToResolve)
+        let amount = Money(currency: currencyToResolve, minorUnits: abs(net)).formatted
+        let balance = net > 0
+            ? "\(person.name) owes you \(amount)."
+            : net < 0 ? "You owe \(person.name) \(amount)." : "There is no net amount to pay."
+        return "\(balance) This marks all open \(currencyToResolve.rawValue) loans with \(person.name) resolved without changing account balances or creating a transaction."
+    }
+
+    private var resolveConfirmationPresented: Binding<Bool> {
+        Binding(get: { currencyToResolve != nil }, set: { if !$0 { currencyToResolve = nil } })
+    }
+
+    private var errorPresented: Binding<Bool> {
+        Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
+    }
+
+    private func resolveSelectedCurrency() {
+        guard let person, let currencyToResolve else { return }
+        let ids = person.activeLoans.filter { $0.currency == currencyToResolve }.map(\.id)
+        self.currencyToResolve = nil
+        guard store.resolveLoans(ids: ids) else {
+            errorMessage = store.lastActionStatus ?? "The loan balance could not be resolved."
+            return
+        }
     }
 }
 
@@ -866,6 +1097,7 @@ struct LoanDetailView: View {
     @State private var destination: LoanDetailDestination?
     @State private var deletingPayment: LoanPayment?
     @State private var errorMessage: String?
+    @State private var isConfirmingResolution = false
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     init(store: LedgerStore, loanID: UUID, showsCloseButton: Bool = false) {
@@ -945,9 +1177,14 @@ struct LoanDetailView: View {
                             .font(.largeTitle.weight(.bold).monospacedDigit())
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
-                        Text(loan.isSettled ? "Settled" : "Outstanding")
+                        Text(loan.resolvedAt == nil ? (loan.isSettled ? "Settled" : "Outstanding") : "Resolved without payment")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(loan.isSettled ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.income)
+                        if let resolvedAt = loan.resolvedAt {
+                            Text("Resolved \(resolvedAt.formatted(date: .abbreviated, time: .omitted))")
+                                .font(.caption2)
+                                .foregroundStyle(PocketLedgerTheme.textTertiary)
+                        }
                         if let dueDate = loan.dueDate {
                             Label("Due \(dueDate.formatted(date: .long, time: .omitted))", systemImage: "calendar")
                                 .font(.subheadline)
@@ -984,6 +1221,24 @@ struct LoanDetailView: View {
                         }
                         .buttonStyle(.glassProminent)
                         .tint(PocketLedgerTheme.accent)
+
+                        Button {
+                            isConfirmingResolution = true
+                        } label: {
+                            Label("Resolve without payment", systemImage: "checkmark.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .confirmationDialog(
+                            "Resolve this loan without payment?",
+                            isPresented: $isConfirmingResolution,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Resolve loan", role: .destructive, action: resolveWithoutPayment)
+                            Button("Cancel", role: .cancel) { }
+                        } message: {
+                            Text("This closes the loan without recording a repayment or changing any account balance.")
+                        }
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -1067,6 +1322,13 @@ struct LoanDetailView: View {
 
     private var errorPresented: Binding<Bool> {
         Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
+    }
+
+    private func resolveWithoutPayment() {
+        guard store.resolveLoans(ids: [loanID]) else {
+            errorMessage = store.lastActionStatus ?? "The loan could not be resolved."
+            return
+        }
     }
 
     private var destinationPresented: Binding<Bool> {

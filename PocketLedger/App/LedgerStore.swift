@@ -839,6 +839,22 @@ final class LedgerStore: ObservableObject {
     }
 
     @discardableResult
+    func resolveLoans(ids: [UUID]) -> Bool {
+        let loanIDs = Set(ids)
+        let activeLoanCount = data.loans.filter { loanIDs.contains($0.id) && !$0.isSettled }.count
+        guard !loanIDs.isEmpty, loanIDs.count == ids.count, activeLoanCount == loanIDs.count else {
+            lastActionStatus = "One or more loans are no longer outstanding."
+            return false
+        }
+
+        var updated = data
+        for index in updated.loans.indices where loanIDs.contains(updated.loans[index].id) {
+            updated.loans[index].resolvedAt = .now
+        }
+        return persist(updated, successMessage: "Loan balance resolved")
+    }
+
+    @discardableResult
     func recordLoanPayment(
         _ payment: LoanPayment,
         for loanID: UUID,

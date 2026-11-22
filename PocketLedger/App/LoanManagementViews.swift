@@ -517,7 +517,7 @@ private struct LoanPersonDetailView: View {
     var body: some View {
         List {
             if let person {
-                Section("Net balance") {
+                Section {
                     if person.activeLoans.isEmpty {
                         Text("No outstanding balance.")
                             .foregroundStyle(PocketLedgerTheme.textSecondary)
@@ -533,6 +533,8 @@ private struct LoanPersonDetailView: View {
                             )
                         }
                     }
+                } header: {
+                    Text("Net balance")
                 } footer: {
                     Text("Settling marks all open loans in that currency as resolved. It does not change account balances or create a transaction.")
                 }

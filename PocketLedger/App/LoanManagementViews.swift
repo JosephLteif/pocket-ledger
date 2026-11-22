@@ -453,6 +453,55 @@ private struct LoanPersonRow: View {
 }
 
 @MainActor
+private struct LoanPersonBalanceRow: View {
+    let personName: String
+    let currency: LedgerCurrency
+    let netAmount: Int64
+    let openLoanCount: Int
+    let areBalancesRevealed: Bool
+    let onResolve: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(balanceDescription)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(PocketLedgerTheme.textPrimary)
+                    Text("Net across \(openLoanCount) open loan\(openLoanCount == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                }
+                Spacer(minLength: 8)
+                ProtectedAmountText(
+                    value: Money(currency: currency, minorUnits: abs(netAmount)).formatted,
+                    isRevealed: areBalancesRevealed
+                )
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            Button(action: onResolve) {
+                Label(actionTitle, systemImage: "checkmark.circle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var balanceDescription: String {
+        if netAmount > 0 { return "\(personName) owes you" }
+        if netAmount < 0 { return "You owe \(personName)" }
+        return "Balanced with \(personName)"
+    }
+
+    private var actionTitle: String {
+        netAmount == 0 ? "Close balanced loans" : "Settle net balance"
+    }
+}
+
+@MainActor
 private struct LoanPersonDetailView: View {
     @ObservedObject var store: LedgerStore
     let personID: String
@@ -474,36 +523,14 @@ private struct LoanPersonDetailView: View {
                             .foregroundStyle(PocketLedgerTheme.textSecondary)
                     } else {
                         ForEach(person.activeCurrencies) { currency in
-                            let net = person.netBalance(in: currency)
-                            VStack(alignment: .leading, spacing: 9) {
-                                HStack(spacing: 8) {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(net > 0 ? "\(person.name) owes you" : net < 0 ? "You owe \(person.name)" : "Balanced with \(person.name)")
-                                            .font(.subheadline.weight(.semibold))
-                                            .foregroundStyle(PocketLedgerTheme.textPrimary)
-                                        let count = person.activeLoans.filter { $0.currency == currency }.count
-                                        Text("Net across \(count) open loan\(count == 1 ? "" : "s")")
-                                            .font(.caption)
-                                            .foregroundStyle(PocketLedgerTheme.textSecondary)
-                                    }
-                                    Spacer(minLength: 8)
-                                    ProtectedAmountText(
-                                        value: Money(currency: currency, minorUnits: abs(net)).formatted,
-                                        isRevealed: areBalancesRevealed
-                                    )
-                                        .font(.subheadline.weight(.semibold).monospacedDigit())
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.75)
-                                }
-                                Button {
-                                    currencyToResolve = currency
-                                } label: {
-                                    Label(net == 0 ? "Close balanced loans" : "Settle net balance", systemImage: "checkmark.circle")
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                            .padding(.vertical, 4)
+                            LoanPersonBalanceRow(
+                                personName: person.name,
+                                currency: currency,
+                                netAmount: person.netBalance(in: currency),
+                                openLoanCount: person.activeLoans.filter { $0.currency == currency }.count,
+                                areBalancesRevealed: areBalancesRevealed,
+                                onResolve: { currencyToResolve = currency }
+                            )
                         }
                     }
                 } footer: {

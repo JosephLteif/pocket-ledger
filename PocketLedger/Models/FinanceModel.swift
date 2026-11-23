@@ -962,14 +962,24 @@ struct LoanPayment: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     var date: Date
     var amount: Money
-    var transactionID: UUID
+    var transactionID: UUID?
+    var settlementID: UUID?
 
-    init(id: UUID = UUID(), date: Date, amount: Money, transactionID: UUID) {
+    init(
+        id: UUID = UUID(),
+        date: Date,
+        amount: Money,
+        transactionID: UUID? = nil,
+        settlementID: UUID? = nil
+    ) {
         self.id = id
         self.date = date
         self.amount = amount
         self.transactionID = transactionID
+        self.settlementID = settlementID
     }
+
+    var isSettlementOffset: Bool { transactionID == nil && settlementID != nil }
 }
 
 struct LoanContact: Identifiable, Codable, Equatable, Sendable {
@@ -986,6 +996,7 @@ struct Loan: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     var counterparty: String
     var counterpartyContactID: UUID?
+    var description: String?
     var direction: LoanDirection
     var currency: LedgerCurrency
     var startingAmount: Money
@@ -1002,6 +1013,7 @@ struct Loan: Identifiable, Codable, Equatable, Sendable {
         id: UUID = UUID(),
         counterparty: String,
         counterpartyContactID: UUID? = nil,
+        description: String? = nil,
         direction: LoanDirection,
         currency: LedgerCurrency,
         startingAmount: Money,
@@ -1016,6 +1028,7 @@ struct Loan: Identifiable, Codable, Equatable, Sendable {
         self.id = id
         self.counterparty = counterparty
         self.counterpartyContactID = counterpartyContactID
+        self.description = description
         self.direction = direction
         self.currency = currency
         self.startingAmount = startingAmount
@@ -1038,6 +1051,17 @@ struct Loan: Identifiable, Codable, Equatable, Sendable {
     }
 
     var isSettled: Bool { outstandingAmount.minorUnits == 0 }
+}
+
+func loanCounterpartyKey(for loan: Loan, in data: FinanceData) -> String {
+    let contactID = loan.counterpartyContactID
+        ?? data.loanContacts.first {
+            $0.name.localizedCaseInsensitiveCompare(loan.counterparty) == .orderedSame
+        }?.id
+    if let contactID {
+        return "contact:\(contactID.uuidString)"
+    }
+    return "name:\(loan.counterparty.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase)"
 }
 
 struct ScheduledTransaction: Identifiable, Codable, Equatable {

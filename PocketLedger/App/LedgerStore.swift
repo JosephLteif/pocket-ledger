@@ -855,6 +855,159 @@ final class LedgerStore: ObservableObject {
     }
 
     @discardableResult
+    func settleLoansWithPerson(loanIDs: [UUID], accountSplits: [MoneyMovement]) -> Bool {
+        let selectedIDs = Set(loanIDs)
+        guard !selectedIDs.isEmpty, selectedIDs.count == loanIDs.count,
+              let firstLoan = data.loans.first(where: { $0.id == loanIDs[0] }) else {
+            lastActionStatus = "Choose the person's open loans to settle."
+            return false
+        }
+
+        let personKey = loanCounterpartyKey(for: firstLoan, in: data)
+        let activeLoans = data.loans.filter {
+            !$0.isSettled
+                && $0.currency == firstLoan.currency
+                && loanCounterpartyKey(for: $0, in: data) == personKey
+        }
+        guard Set(activeLoans.map(\.id)) == selectedIDs else {
+            lastActionStatus = "The person's open loans changed. Review the settlement and try again."
+            return false
+        }
+
+        let orderedLoans = activeLoans.sorted {
+            if $0.startedAt != $1.startedAt { return $0.startedAt < $1.startedAt }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+        let netBalance = orderedLoans.reduce(Int64.zero) { total, loan in
+            total + (loan.direction == .lent ? loan.outstandingAmount.minorUnits : -loan.outstandingAmount.minorUnits)
+        }
+        let settlementAmount = accountSplits.reduce(Int64.zero) { $0 + $1.money.minorUnits }
+        guard netBalance != 0,
+              !accountSplits.isEmpty,
+              accountSplits.allSatisfy({ split in
+                  split.money.currency == firstLoan.currency
+                      && split.money.minorUnits > 0
+                      && split.categoryID == nil
+                      && data.accounts.contains(where: { account in
+                          account.id == split.accountID
+                              && !account.isArchived
+                              && account.currency == firstLoan.currency
+                              && (account.type == .cash || account.type == .bankAccount)
+                      })
+              }),
+              settlementAmount <= abs(netBalance) else {
+            lastActionStatus = "Split a positive amount across cash or bank accounts in \(firstLoan.currency.rawValue), up to the net balance."
+            return false
+        }
+
+        let lentLoans = orderedLoans.filter { $0.direction == .lent }
+        let borrowedLoans = orderedLoans.filter { $0.direction == .borrowed }
+        var lentIndex = 0
+        var borrowedIndex = 0
+        var lentRemaining = lentLoans.first?.outstandingAmount.minorUnits ?? 0
+        var borrowedRemaining = borrowedLoans.first?.outstandingAmount.minorUnits ?? 0
+        var offsetRemaining = min(
+            lentLoans.reduce(Int64.zero) { $0 + $1.outstandingAmount.minorUnits },
+            borrowedLoans.reduce(Int64.zero) { $0 + $1.outstandingAmount.minorUnits }
+        )
+
+        var updated = data
+        let settlementID = UUID()
+        let settlementDate = Date.now
+        while offsetRemaining > 0 {
+            let offset = min(lentRemaining, borrowedRemaining)
+            guard offset > 0,
+                  lentIndex < lentLoans.count,
+                  borrowedIndex < borrowedLoans.count,
+                  let currentLentIndex = updated.loans.firstIndex(where: { $0.id == lentLoans[lentIndex].id }),
+                  let currentBorrowedIndex = updated.loans.firstIndex(where: { $0.id == borrowedLoans[borrowedIndex].id }) else {
+                lastActionStatus = "The reciprocal loan balances could not be offset."
+                return false
+            }
+            let offsetAmount = Money(currency: firstLoan.currency, minorUnits: offset)
+            updated.loans[currentLentIndex].payments.append(
+                LoanPayment(date: settlementDate, amount: offsetAmount, settlementID: settlementID)
+            )
+            updated.loans[currentBorrowedIndex].payments.append(
+                LoanPayment(date: settlementDate, amount: offsetAmount, settlementID: settlementID)
+            )
+            offsetRemaining -= offset
+            lentRemaining -= offset
+            borrowedRemaining -= offset
+            if lentRemaining == 0 {
+                lentIndex += 1
+                lentRemaining = lentIndex < lentLoans.count
+                    ? lentLoans[lentIndex].outstandingAmount.minorUnits
+                    : 0
+            }
+            if borrowedRemaining == 0 {
+                borrowedIndex += 1
+                borrowedRemaining = borrowedIndex < borrowedLoans.count
+                    ? borrowedLoans[borrowedIndex].outstandingAmount.minorUnits
+                    : 0
+            }
+        }
+
+        let settlementDirection: LoanDirection = netBalance > 0 ? .lent : .borrowed
+        let cashLoans = orderedLoans.filter { $0.direction == settlementDirection }
+        var cashLoanIndex = 0
+        for split in accountSplits {
+            var splitRemaining = split.money.minorUnits
+            while splitRemaining > 0 {
+                while cashLoanIndex < cashLoans.count,
+                      let currentIndex = updated.loans.firstIndex(where: { $0.id == cashLoans[cashLoanIndex].id }),
+                      updated.loans[currentIndex].outstandingAmount.minorUnits == 0 {
+                    cashLoanIndex += 1
+                }
+                guard cashLoanIndex < cashLoans.count,
+                      let loanIndex = updated.loans.firstIndex(where: { $0.id == cashLoans[cashLoanIndex].id }) else {
+                    lastActionStatus = "The settlement exceeds the remaining loans."
+                    return false
+                }
+
+                let loan = updated.loans[loanIndex]
+                let applied = min(splitRemaining, loan.outstandingAmount.minorUnits)
+                let amount = Money(currency: loan.currency, minorUnits: applied)
+                let paymentID = UUID()
+                let transactionID = UUID()
+                let movement = MoneyMovement(
+                    accountID: split.accountID,
+                    money: Money(currency: split.money.currency, minorUnits: applied)
+                )
+                let transaction = LedgerTransaction(
+                    id: transactionID,
+                    date: settlementDate,
+                    note: "Settlement with \(firstLoan.counterparty)",
+                    kind: .transfer,
+                    categoryID: nil,
+                    outflows: loan.direction == .borrowed ? [movement] : [],
+                    inflows: loan.direction == .lent ? [movement] : [],
+                    loanID: loan.id,
+                    loanPaymentID: paymentID,
+                    loanActivity: .payment,
+                    loanPrincipalAmount: amount
+                )
+                updated.loans[loanIndex].payments.append(
+                    LoanPayment(
+                        date: settlementDate,
+                        amount: amount,
+                        transactionID: transactionID,
+                        settlementID: settlementID
+                    )
+                )
+                updated.transactions.append(transaction)
+                splitRemaining -= applied
+            }
+        }
+
+        guard FinanceDataValidator.validate(updated) == nil else {
+            lastActionStatus = "The person settlement could not be saved. Review the account allocations."
+            return false
+        }
+        return persist(updated, successMessage: "Person settlement recorded")
+    }
+
+    @discardableResult
     func recordLoanPayment(
         _ payment: LoanPayment,
         for loanID: UUID,
@@ -870,6 +1023,7 @@ final class LedgerStore: ObservableObject {
               payment.amount.minorUnits > 0,
               payment.amount.minorUnits <= loan.outstandingAmount.minorUnits,
               payment.date <= .now,
+              payment.settlementID == nil,
               payment.transactionID == transaction.id,
               transaction.loanID == loanID,
               transaction.loanPaymentID == payment.id,
@@ -897,7 +1051,9 @@ final class LedgerStore: ObservableObject {
     ) -> Bool {
         guard let loanIndex = data.loans.firstIndex(where: { $0.id == loanID }),
               let paymentIndex = data.loans[loanIndex].payments.firstIndex(where: { $0.id == payment.id }),
-              let transactionIndex = data.transactions.firstIndex(where: { $0.id == payment.transactionID }),
+              payment.settlementID == nil,
+              let transactionID = payment.transactionID,
+              let transactionIndex = data.transactions.firstIndex(where: { $0.id == transactionID }),
               payment.transactionID == transaction.id,
               transaction.loanID == loanID,
               transaction.loanPaymentID == payment.id,
@@ -931,11 +1087,12 @@ final class LedgerStore: ObservableObject {
     @discardableResult
     func deleteLoanPayment(loanID: UUID, paymentID: UUID) -> Bool {
         guard let loanIndex = data.loans.firstIndex(where: { $0.id == loanID }),
-              let paymentIndex = data.loans[loanIndex].payments.firstIndex(where: { $0.id == paymentID }) else {
+              let paymentIndex = data.loans[loanIndex].payments.firstIndex(where: { $0.id == paymentID }),
+              data.loans[loanIndex].payments[paymentIndex].settlementID == nil,
+              let transactionID = data.loans[loanIndex].payments[paymentIndex].transactionID else {
             lastActionStatus = "Loan payment not found"
             return false
         }
-        let transactionID = data.loans[loanIndex].payments[paymentIndex].transactionID
         var updated = data
         updated.loans[loanIndex].payments.remove(at: paymentIndex)
         updated.transactions.removeAll { $0.id == transactionID }
@@ -944,6 +1101,28 @@ final class LedgerStore: ObservableObject {
             return false
         }
         return persist(updated, successMessage: "Loan payment removed")
+    }
+
+    @discardableResult
+    func deleteLoanSettlement(id: UUID) -> Bool {
+        let payments = data.loans.flatMap { loan in
+            loan.payments.filter { $0.settlementID == id }
+        }
+        guard !payments.isEmpty else {
+            lastActionStatus = "Person settlement not found"
+            return false
+        }
+        let transactionIDs = Set(payments.compactMap(\.transactionID))
+        var updated = data
+        for index in updated.loans.indices {
+            updated.loans[index].payments.removeAll { $0.settlementID == id }
+        }
+        updated.transactions.removeAll { transactionIDs.contains($0.id) }
+        guard FinanceDataValidator.validate(updated) == nil else {
+            lastActionStatus = "The person settlement could not be undone."
+            return false
+        }
+        return persist(updated, successMessage: "Person settlement undone")
     }
 
     @discardableResult

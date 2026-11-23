@@ -23,7 +23,7 @@ private func loanStatus(for loan: Loan) -> String {
     if let soonLimit = calendar.date(byAdding: .day, value: 7, to: today), dueDate < soonLimit {
         return "Due soon"
     }
-    return "Active"
+    return loan.payments.isEmpty ? "Active" : "Partially settled"
 }
 
 private extension LoanListFilter {
@@ -87,15 +87,8 @@ private struct LoanPersonGroup: Identifiable {
     }
 }
 
-private func loanPersonKey(for loan: Loan, in data: FinanceData) -> String {
-    if let contactID = loan.counterpartyContactID ?? loanContactID(for: loan.counterparty, in: data) {
-        return "contact:\(contactID.uuidString)"
-    }
-    return "name:\(loan.counterparty.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase)"
-}
-
 private func loanPersonGroups(in data: FinanceData) -> [LoanPersonGroup] {
-    Dictionary(grouping: data.loans) { loanPersonKey(for: $0, in: data) }
+    Dictionary(grouping: data.loans) { loanCounterpartyKey(for: $0, in: data) }
         .compactMap { entry in
             guard let firstLoan = entry.value.first else { return nil }
             return LoanPersonGroup(
@@ -375,6 +368,22 @@ private struct LoanRow: View {
                 Text(status)
                     .font(.caption)
                     .foregroundStyle(status == "Overdue" ? PocketLedgerTheme.warning : PocketLedgerTheme.textSecondary)
+                if let description = loan.description,
+                   !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        .lineLimit(2)
+                }
+                if loan.resolvedAt == nil, !loan.payments.isEmpty {
+                    let settledMinorUnits = loan.payments.reduce(Int64.zero) { $0 + $1.amount.minorUnits }
+                    ProtectedAmountText(
+                        value: "Settled \(Money(currency: loan.currency, minorUnits: settledMinorUnits).formatted) of \(loan.startingAmount.formatted)",
+                        isRevealed: areBalancesRevealed
+                    )
+                        .font(.caption2)
+                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+                }
                 Text("Started \(loan.startedAt.formatted(date: .abbreviated, time: .omitted))")
                     .font(.caption2)
                     .foregroundStyle(PocketLedgerTheme.textTertiary)
@@ -459,7 +468,8 @@ private struct LoanPersonBalanceRow: View {
     let netAmount: Int64
     let openLoanCount: Int
     let areBalancesRevealed: Bool
-    let onResolve: () -> Void
+    let onSettle: () -> Void
+    let onResolveWithoutPayment: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -481,11 +491,23 @@ private struct LoanPersonBalanceRow: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
-            Button(action: onResolve) {
-                Label(actionTitle, systemImage: "checkmark.circle")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+                Button(action: onSettle) {
+                    Label(actionTitle, systemImage: "checkmark.circle")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
+                if netAmount != 0 {
+                    Menu {
+                        Button("Resolve all without payment", systemImage: "checkmark.circle", role: .destructive, action: onResolveWithoutPayment)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 40, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("More settlement options")
+                }
             }
-            .buttonStyle(.bordered)
         }
         .padding(.vertical, 4)
     }
@@ -497,7 +519,7 @@ private struct LoanPersonBalanceRow: View {
     }
 
     private var actionTitle: String {
-        netAmount == 0 ? "Close balanced loans" : "Settle net balance"
+        netAmount == 0 ? "Close balanced loans" : "Settle with accounts"
     }
 }
 
@@ -508,6 +530,7 @@ private struct LoanPersonDetailView: View {
     let filter: LoanListFilter
     let areBalancesRevealed: Bool
     @State private var currencyToResolve: LedgerCurrency?
+    @State private var currencyToSettle: LedgerCurrency?
     @State private var errorMessage: String?
 
     private var person: LoanPersonGroup? {
@@ -529,14 +552,21 @@ private struct LoanPersonDetailView: View {
                                 netAmount: person.netBalance(in: currency),
                                 openLoanCount: person.activeLoans.filter { $0.currency == currency }.count,
                                 areBalancesRevealed: areBalancesRevealed,
-                                onResolve: { currencyToResolve = currency }
+                                onSettle: {
+                                    if person.netBalance(in: currency) == 0 {
+                                        currencyToResolve = currency
+                                    } else {
+                                        currencyToSettle = currency
+                                    }
+                                },
+                                onResolveWithoutPayment: { currencyToResolve = currency }
                             )
                         }
                     }
                 } header: {
                     Text("Net balance")
                 } footer: {
-                    Text("Settling marks all open loans in that currency as resolved. It does not change account balances or create a transaction.")
+                    Text("Settle a nonzero balance across cash or bank accounts. Reciprocal loans are offset first; any remaining amount is applied to the oldest loans. You can also resolve all loans without recording a payment.")
                 }
 
                 Section("Loans") {
@@ -580,6 +610,9 @@ private struct LoanPersonDetailView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .sheet(item: $currencyToSettle) { currency in
+            LoanPersonSettlementEditor(store: store, personID: personID, currency: currency)
+        }
     }
 
     private var resolveMessage: String {
@@ -608,6 +641,184 @@ private struct LoanPersonDetailView: View {
             errorMessage = store.lastActionStatus ?? "The loan balance could not be resolved."
             return
         }
+    }
+}
+
+private struct LoanSettlementSplitDraft: Identifiable {
+    let id = UUID()
+    var accountID: UUID?
+    var amountText: String
+}
+
+@MainActor
+private struct LoanPersonSettlementEditor: View {
+    @ObservedObject var store: LedgerStore
+    let personID: String
+    let currency: LedgerCurrency
+    @Environment(\.dismiss) private var dismiss
+    @State private var accountSplits: [LoanSettlementSplitDraft]
+    @State private var errorMessage: String?
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
+
+    init(store: LedgerStore, personID: String, currency: LedgerCurrency) {
+        _store = ObservedObject(wrappedValue: store)
+        self.personID = personID
+        self.currency = currency
+        let person = loanPersonGroups(in: store.data).first { $0.id == personID }
+        let netBalance = person?.netBalance(in: currency) ?? 0
+        let accountID = store.activeAccounts.first {
+            !$0.isArchived && ($0.type == .cash || $0.type == .bankAccount) && $0.currency == currency
+        }?.id
+        _accountSplits = State(initialValue: [LoanSettlementSplitDraft(
+            accountID: accountID,
+            amountText: currency.formattedInput(minorUnits: abs(netBalance))
+        )])
+    }
+
+    private var person: LoanPersonGroup? {
+        loanPersonGroups(in: store.data).first { $0.id == personID }
+    }
+
+    private var netBalance: Int64 { person?.netBalance(in: currency) ?? 0 }
+
+    private var eligibleAccounts: [Account] {
+        store.activeAccounts.filter {
+            !$0.isArchived && $0.currency == currency && ($0.type == .cash || $0.type == .bankAccount)
+        }
+    }
+
+    private var parsedSplits: [MoneyMovement] {
+        accountSplits.compactMap { split in
+            guard let accountID = split.accountID,
+                  let amount = Money.parse(split.amountText, currency: currency),
+                  amount.minorUnits > 0 else { return nil }
+            return MoneyMovement(accountID: accountID, money: amount)
+        }
+    }
+
+    private var allocatedAmount: Int64 {
+        parsedSplits.reduce(Int64.zero) { $0 + $1.money.minorUnits }
+    }
+
+    private var canSave: Bool {
+        netBalance != 0
+            && !accountSplits.isEmpty
+            && parsedSplits.count == accountSplits.count
+            && parsedSplits.allSatisfy { split in
+                eligibleAccounts.contains { $0.id == split.accountID }
+            }
+            && allocatedAmount > 0
+            && allocatedAmount <= abs(netBalance)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Net balance") {
+                    LabeledContent(netBalance > 0 ? "Collect from \(person?.name ?? "person")" : "Pay \(person?.name ?? "person")") {
+                        ProtectedAmountText(
+                            value: Money(currency: currency, minorUnits: abs(netBalance)).formatted,
+                            isRevealed: areBalancesRevealed
+                        )
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                    }
+                    Text("Split all or part of this amount across accounts in \(currency.rawValue).")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Account splits") {
+                    if eligibleAccounts.isEmpty {
+                        Text("Add a cash or bank account in \(currency.rawValue) to record this settlement.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach($accountSplits) { $split in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Picker("Account", selection: $split.accountID) {
+                                    Text("Choose account").tag(Optional<UUID>.none)
+                                    ForEach(eligibleAccounts) { account in
+                                        Text(account.name).tag(Optional(account.id))
+                                    }
+                                }
+                                CurrencyInputField("Amount", text: $split.amountText, currency: currency)
+                                if accountSplits.count > 1 {
+                                    Button("Remove split", role: .destructive) {
+                                        accountSplits.removeAll { $0.id == split.id }
+                                    }
+                                }
+                            }
+                        }
+                        Button("Add another account") {
+                            accountSplits.append(LoanSettlementSplitDraft(accountID: nil, amountText: ""))
+                        }
+                        Text("Use cash or bank accounts in \(currency.rawValue).")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Settlement preview") {
+                    LabeledContent("Applied across accounts") {
+                        ProtectedAmountText(
+                            value: Money(currency: currency, minorUnits: allocatedAmount).formatted,
+                            isRevealed: areBalancesRevealed
+                        )
+                    }
+                    LabeledContent("Net balance remaining") {
+                        ProtectedAmountText(
+                            value: Money(currency: currency, minorUnits: max(0, abs(netBalance) - allocatedAmount)).formatted,
+                            isRevealed: areBalancesRevealed
+                        )
+                    }
+                    if allocatedAmount > abs(netBalance) {
+                        Text("The split total cannot be greater than the net balance.")
+                            .font(.footnote)
+                            .foregroundStyle(PocketLedgerTheme.warning)
+                    }
+                    Text("Reciprocal loans are offset first. The account payments then reduce the oldest remaining loans first.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .pocketListSurface()
+            .navigationTitle("Settle with \(person?.name ?? "person")")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(actionTitle, action: save)
+                        .disabled(!canSave)
+                }
+            }
+            .alert("Settlement not saved", isPresented: errorPresented) {
+                Button("OK") { errorMessage = nil }
+            } message: {
+                Text(errorMessage ?? "")
+            }
+        }
+    }
+
+    private var actionTitle: String {
+        allocatedAmount == abs(netBalance) ? "Settle all" : "Record partial"
+    }
+
+    private var errorPresented: Binding<Bool> {
+        Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
+    }
+
+    private func save() {
+        guard let person else {
+            errorMessage = "This person is no longer available."
+            return
+        }
+        let loanIDs = person.activeLoans.filter { $0.currency == currency }.map(\.id)
+        guard store.settleLoansWithPerson(loanIDs: loanIDs, accountSplits: parsedSplits) else {
+            errorMessage = store.lastActionStatus ?? "The person settlement could not be saved."
+            return
+        }
+        dismiss()
     }
 }
 
@@ -692,6 +903,8 @@ private struct LegacyLoanConversionView: View {
                                 }
                             }
                             CurrencyInputField("Amount", text: $draft.amountText, currency: account.currency)
+                            TextField("Description (optional)", text: $draft.descriptionText, axis: .vertical)
+                                .lineLimit(2...4)
                             Toggle("Add due date", isOn: $draft.hasDueDate)
                             if draft.hasDueDate {
                                 DatePicker("Due date", selection: $draft.dueDate, displayedComponents: .date)
@@ -787,9 +1000,11 @@ private struct LegacyLoanConversionView: View {
             guard let amount = Money.parse(draft.amountText, currency: account.currency) else { return nil }
             let counterparty = (draft.selectedCounterparty ?? draft.counterparty)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            let description = draft.descriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
             return Loan(
                 counterparty: counterparty,
                 counterpartyContactID: loanContactID(for: counterparty, in: store.data),
+                description: description.isEmpty ? nil : description,
                 direction: draft.direction,
                 currency: account.currency,
                 startingAmount: amount,
@@ -810,6 +1025,7 @@ private struct LegacyLoanDraft: Identifiable {
     let id = UUID()
     var counterparty: String
     var amountText: String
+    var descriptionText: String = ""
     var selectedCounterparty: String? = nil
     var direction: LoanDirection = .borrowed
     var hasDueDate: Bool = false
@@ -828,6 +1044,7 @@ struct LoanEditor: View {
     @State private var direction: LoanDirection
     @State private var amountText: String
     @State private var fundingMethod: LoanFundingMethod
+    @State private var descriptionText: String
     @State private var loanCurrency: LedgerCurrency
     @State private var startedAt: Date
     @State private var hasDueDate: Bool
@@ -855,6 +1072,7 @@ struct LoanEditor: View {
         _direction = State(initialValue: loan?.direction ?? .borrowed)
         _amountText = State(initialValue: "")
         _fundingMethod = State(initialValue: .cashMovement)
+        _descriptionText = State(initialValue: loan?.description ?? "")
         _startedAt = State(initialValue: loan?.startedAt ?? .now)
         _hasDueDate = State(initialValue: loan?.dueDate != nil)
         _dueDate = State(initialValue: loan?.dueDate ?? .now)
@@ -930,6 +1148,8 @@ struct LoanEditor: View {
                         CurrencyInputField(amountLabel, text: $amountText, currency: $loanCurrency)
                         DatePicker("Started", selection: $startedAt, in: Date.distantPast...Date.now, displayedComponents: .date)
                     }
+                    TextField("Description (optional)", text: $descriptionText, axis: .vertical)
+                        .lineLimit(2...4)
                     Toggle("Add due date", isOn: $hasDueDate)
                     if hasDueDate {
                         DatePicker("Due date", selection: $dueDate, displayedComponents: .date)
@@ -1006,6 +1226,11 @@ struct LoanEditor: View {
         direction == .lent || fundingMethod == .cashMovement
     }
 
+    private var cleanedDescription: String? {
+        let value = descriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
     private var counterpartyNames: [String] {
         loanCounterpartyNames(in: store.data)
     }
@@ -1059,6 +1284,7 @@ struct LoanEditor: View {
         if var existing = loan {
             existing.counterparty = party
             existing.counterpartyContactID = contactID
+            existing.description = cleanedDescription
             existing.dueDate = hasDueDate ? dueDate : nil
             guard store.updateLoan(existing) else {
                 errorMessage = store.lastActionStatus ?? "The loan could not be updated."
@@ -1100,6 +1326,7 @@ struct LoanEditor: View {
             id: loanID,
             counterparty: party,
             counterpartyContactID: contactID,
+            description: cleanedDescription,
             direction: direction,
             currency: amount.currency,
             startingAmount: amount,
@@ -1149,6 +1376,7 @@ struct LoanDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var destination: LoanDetailDestination?
     @State private var deletingPayment: LoanPayment?
+    @State private var settlementToUndoID: UUID?
     @State private var errorMessage: String?
     @State private var isConfirmingResolution = false
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
@@ -1208,6 +1436,16 @@ struct LoanDetailView: View {
             }
             Button("Cancel", role: .cancel) { deletingPayment = nil }
         }
+        .confirmationDialog(
+            "Undo this person settlement?",
+            isPresented: settlementUndoPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Undo settlement", role: .destructive, action: undoPersonSettlement)
+            Button("Cancel", role: .cancel) { settlementToUndoID = nil }
+        } message: {
+            Text("This removes the settlement from all linked loans and reverses its account movements.")
+        }
     }
 
     private func detail(_ loan: Loan) -> some View {
@@ -1226,13 +1464,37 @@ struct LoanDetailView: View {
                         }
                         Text(loan.counterparty)
                             .font(.title3.weight(.semibold))
+                        if let description = loan.description,
+                           !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(description)
+                                .font(.subheadline)
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        }
                         ProtectedAmountText(value: loan.outstandingAmount.formatted, isRevealed: areBalancesRevealed)
                             .font(.largeTitle.weight(.bold).monospacedDigit())
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
-                        Text(loan.resolvedAt == nil ? (loan.isSettled ? "Settled" : "Outstanding") : "Resolved without payment")
+                        Text(loan.resolvedAt == nil
+                            ? (loan.isSettled ? "Settled" : loan.payments.isEmpty ? "Outstanding" : "Partially settled")
+                            : "Resolved without payment")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(loan.isSettled ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.income)
+                        if loan.resolvedAt == nil, !loan.payments.isEmpty {
+                            let settledMinorUnits = loan.payments.reduce(Int64.zero) { $0 + $1.amount.minorUnits }
+                            ProtectedAmountText(
+                                value: "Settled \(Money(currency: loan.currency, minorUnits: settledMinorUnits).formatted) of \(loan.startingAmount.formatted)",
+                                isRevealed: areBalancesRevealed
+                            )
+                                .font(.caption)
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                            if areBalancesRevealed {
+                                ProgressView(
+                                    value: Double(settledMinorUnits),
+                                    total: Double(loan.startingAmount.minorUnits)
+                                )
+                                    .tint(PocketLedgerTheme.accent)
+                            }
+                        }
                         if let resolvedAt = loan.resolvedAt {
                             Text("Resolved \(resolvedAt.formatted(date: .abbreviated, time: .omitted))")
                                 .font(.caption2)
@@ -1315,7 +1577,7 @@ struct LoanDetailView: View {
                                 .padding(.vertical, 10)
                         } else {
                             ForEach(loan.payments.sorted { $0.date > $1.date }) { payment in
-                                paymentRow(payment, loan: loan)
+                                paymentRow(payment)
                             }
                         }
                     }
@@ -1336,16 +1598,27 @@ struct LoanDetailView: View {
         .pocketScreen()
     }
 
-    private func paymentRow(_ payment: LoanPayment, loan: Loan) -> some View {
-        let transaction = store.data.transactions.first { $0.id == payment.transactionID }
+    private func paymentRow(_ payment: LoanPayment) -> some View {
+        let transaction = payment.transactionID.flatMap { id in
+            store.data.transactions.first { $0.id == id }
+        }
         let movement = transaction.flatMap { ($0.outflows + $0.inflows).first }
         let account = movement.flatMap { store.account(with: $0.accountID) }
         return HStack(spacing: 10) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(PocketLedgerTheme.income)
+            Image(systemName: payment.isSettlementOffset ? "arrow.left.arrow.right.circle.fill" : "checkmark.circle.fill")
+                .foregroundStyle(payment.isSettlementOffset ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.income)
             VStack(alignment: .leading, spacing: 3) {
                 Text(payment.date.formatted(date: .abbreviated, time: .omitted))
                     .font(.subheadline.weight(.medium))
+                if payment.isSettlementOffset {
+                    Text("Offset against reciprocal loans")
+                        .font(.caption)
+                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+                } else if payment.settlementID != nil {
+                    Text("Person settlement")
+                        .font(.caption)
+                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+                }
                 if let account {
                     Text("Via \(account.name)")
                         .font(.caption)
@@ -1355,17 +1628,32 @@ struct LoanDetailView: View {
             Spacer(minLength: 8)
             ProtectedAmountText(value: payment.amount.formatted, isRevealed: areBalancesRevealed)
                 .font(.subheadline.weight(.semibold).monospacedDigit())
-            Menu {
-                Button("Edit payment", systemImage: "pencil") { destination = .editPayment(payment.id) }
-                Button("Remove payment", systemImage: "trash", role: .destructive) { deletingPayment = payment }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.headline.weight(.semibold))
-                    .frame(width: 36, height: 36)
-                    .contentShape(Rectangle())
+            if let settlementID = payment.settlementID {
+                Menu {
+                    Button("Undo person settlement", systemImage: "arrow.uturn.backward", role: .destructive) {
+                        settlementToUndoID = settlementID
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.headline.weight(.semibold))
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Settlement actions")
+            } else {
+                Menu {
+                    Button("Edit payment", systemImage: "pencil") { destination = .editPayment(payment.id) }
+                    Button("Remove payment", systemImage: "trash", role: .destructive) { deletingPayment = payment }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.headline.weight(.semibold))
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Payment actions")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Payment actions")
         }
         .padding(.vertical, 8)
         .overlay(alignment: .bottom) {
@@ -1387,11 +1675,23 @@ struct LoanDetailView: View {
         Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
     }
 
+    private var settlementUndoPresented: Binding<Bool> {
+        Binding(get: { settlementToUndoID != nil }, set: { if !$0 { settlementToUndoID = nil } })
+    }
+
     private func resolveWithoutPayment() {
         guard store.resolveLoans(ids: [loanID]) else {
             errorMessage = store.lastActionStatus ?? "The loan could not be resolved."
             return
         }
+    }
+
+    private func undoPersonSettlement() {
+        guard let settlementToUndoID else { return }
+        if !store.deleteLoanSettlement(id: settlementToUndoID) {
+            errorMessage = store.lastActionStatus ?? "The person settlement could not be undone."
+        }
+        self.settlementToUndoID = nil
     }
 
     private var destinationPresented: Binding<Bool> {
@@ -1408,7 +1708,8 @@ struct LoanDetailView: View {
                 LoanPaymentEditor(store: store, loan: loan)
             case .editPayment(let paymentID):
                 if let payment = loan.payments.first(where: { $0.id == paymentID }),
-                   let transaction = store.data.transactions.first(where: { $0.id == payment.transactionID }) {
+                   let transactionID = payment.transactionID,
+                   let transaction = store.data.transactions.first(where: { $0.id == transactionID }) {
                     LoanPaymentEditor(store: store, loan: loan, payment: payment, transaction: transaction)
                 } else {
                     ContentUnavailableView("Payment unavailable", systemImage: "exclamationmark.circle")

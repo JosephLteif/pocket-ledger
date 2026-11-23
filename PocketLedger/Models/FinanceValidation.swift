@@ -400,8 +400,11 @@ enum FinanceDataValidator {
                 return .invalidLoan(loan.counterparty)
             }
             guard loan.payments.allSatisfy({ payment in
-                data.transactions.contains(where: {
-                    $0.id == payment.transactionID
+                guard let transactionID = payment.transactionID else {
+                    return payment.settlementID != nil
+                }
+                return data.transactions.contains(where: {
+                    $0.id == transactionID
                         && $0.loanID == loan.id
                         && $0.loanPaymentID == payment.id
                         && $0.loanActivity == .payment
@@ -418,6 +421,31 @@ enum FinanceDataValidator {
                        && $0.loanActivity == .funding
                }) {
                 return .invalidLoan(loan.counterparty)
+            }
+        }
+
+        let settlementPayments = data.loans.flatMap { loan in
+            loan.payments.compactMap { payment in
+                payment.settlementID.map { (id: $0, loan: loan, payment: payment) }
+            }
+        }
+        for payments in Dictionary(grouping: settlementPayments, by: \.id).values {
+            guard let firstPayment = payments.first else { continue }
+            let cashPayments = payments.filter { $0.payment.transactionID != nil }
+            let offsets = payments.filter { $0.payment.isSettlementOffset }
+            let personKeys = Set(payments.map { loanCounterpartyKey(for: $0.loan, in: data) })
+            let currencies = Set(payments.map { $0.payment.amount.currency })
+            let cashDirections = Set(cashPayments.map { $0.loan.direction })
+            let lentOffset = offsets.filter { $0.loan.direction == .lent }
+                .reduce(Int64.zero) { $0 + $1.payment.amount.minorUnits }
+            let borrowedOffset = offsets.filter { $0.loan.direction == .borrowed }
+                .reduce(Int64.zero) { $0 + $1.payment.amount.minorUnits }
+            guard !cashPayments.isEmpty,
+                  personKeys.count == 1,
+                  currencies.count == 1,
+                  cashDirections.count == 1,
+                  lentOffset == borrowedOffset else {
+                return .invalidLoan(firstPayment.loan.counterparty)
             }
         }
 

@@ -989,6 +989,7 @@ final class LedgerStore: ObservableObject {
                 )
                 updated.loans[loanIndex].payments.append(
                     LoanPayment(
+                        id: paymentID,
                         date: settlementDate,
                         amount: amount,
                         transactionID: transactionID,

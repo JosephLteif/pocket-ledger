@@ -65,10 +65,11 @@ final class LoanContactStoreTests: XCTestCase {
     ) {
         let contact = LoanContact(name: "Old Name")
         let principal = Money(currency: .usd, minorUnits: 10_000)
+        let paymentTransactionID = UUID()
         let payment = LoanPayment(
             date: Date(timeIntervalSince1970: 1_700_000_100),
             amount: Money(currency: .usd, minorUnits: 2_000),
-            transactionID: UUID()
+            transactionID: paymentTransactionID
         )
         let linkedLoan = Loan(
             counterparty: contact.name,
@@ -90,7 +91,7 @@ final class LoanContactStoreTests: XCTestCase {
             loanPrincipalAmount: principal
         )
         let paymentTransaction = LedgerTransaction(
-            id: payment.transactionID,
+            id: paymentTransactionID,
             note: "Loan payment",
             kind: .transfer,
             categoryID: nil,

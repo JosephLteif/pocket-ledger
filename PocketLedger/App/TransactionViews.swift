@@ -1419,7 +1419,9 @@ struct TransactionRow: View {
     private var rowSubtitle: String {
         let detail: String
         if transaction.loanID != nil {
-            detail = "Loan activity"
+            detail = transaction.loanFundingMethod == .expensePaidForBorrower
+                ? "Expense paid for you"
+                : "Loan activity"
         } else {
             detail = transaction.kind == .expense
                 ? store.categoryPath(for: transaction.categoryID)
@@ -1438,7 +1440,9 @@ struct TransactionRow: View {
     }
 
     private var iconName: String {
-        if transaction.loanID != nil { return "banknote" }
+        if transaction.loanID != nil {
+            return transaction.loanFundingMethod == .expensePaidForBorrower ? "receipt" : "banknote"
+        }
         if transaction.categoryID != nil {
             return store.ledgerIndex.categorySystemImage(for: transaction.categoryID)
         }
@@ -1454,6 +1458,9 @@ struct TransactionRow: View {
     }
 
     private var accentColor: Color {
+        if transaction.loanFundingMethod == .expensePaidForBorrower {
+            return PocketLedgerTheme.textSecondary
+        }
         switch transaction.kind {
         case .expense:
             return PocketLedgerTheme.warning

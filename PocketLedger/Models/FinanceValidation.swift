@@ -42,7 +42,7 @@ enum FinanceTransactionValidationError: LocalizedError, Equatable {
         case .missingExchangeRate:
             return "Add an exchange rate for this cross-currency transaction."
         case .invalidLoanActivity:
-            return "Loan activity must be linked to a valid loan and use one matching cash movement."
+            return "Loan activity must match its loan and funding or payment entry."
         }
     }
 }
@@ -54,14 +54,16 @@ enum FinanceTransactionValidator {
         allowArchivedReferences: Bool = false
     ) -> FinanceTransactionValidationError? {
         let movements = transaction.outflows + transaction.inflows
-        guard !movements.isEmpty else { return .noMovements }
-
         let isLoanActivity = transaction.loanID != nil
             || transaction.loanPaymentID != nil
             || transaction.loanActivity != nil
+            || transaction.loanFundingMethod != nil
             || transaction.loanPrincipalAmount != nil
         if isLoanActivity, !isValidLoanActivity(transaction, in: data) {
             return .invalidLoanActivity
+        }
+        guard !movements.isEmpty || transaction.loanFundingMethod == .expensePaidForBorrower else {
+            return .noMovements
         }
 
         for movement in movements {
@@ -156,17 +158,8 @@ enum FinanceTransactionValidator {
               transaction.categoryID == nil,
               transaction.amountDue == nil,
               transaction.changeAdjustment == nil,
-              transaction.outflows.count + transaction.inflows.count == 1,
               let loan = data.loans.first(where: { $0.id == loanID }),
-              principalAmount.currency == loan.currency,
-              let movement = (transaction.outflows + transaction.inflows).first,
-              let movementAccount = data.accounts.first(where: { $0.id == movement.accountID }),
-              movementAccount.type == .cash || movementAccount.type == .bankAccount,
-              financeConvertedMinorUnits(
-                  movement.money,
-                  to: loan.currency,
-                  using: transaction.exchangeRate
-              ) == principalAmount.minorUnits else {
+              principalAmount.currency == loan.currency else {
             return false
         }
 
@@ -174,7 +167,27 @@ enum FinanceTransactionValidator {
         case .funding:
             guard transaction.loanPaymentID == nil,
                   loan.fundingTransactionID == transaction.id,
-                  transaction.date == loan.startedAt,
+                  transaction.date == loan.startedAt else {
+                return false
+            }
+            if transaction.loanFundingMethod == .expensePaidForBorrower {
+                return loan.direction == .borrowed
+                    && principalAmount == loan.startingAmount
+                    && loan.settlementAccountID == nil
+                    && transaction.exchangeRate == nil
+                    && transaction.outflows.isEmpty
+                    && transaction.inflows.isEmpty
+            }
+
+            guard transaction.outflows.count + transaction.inflows.count == 1,
+                  let movement = (transaction.outflows + transaction.inflows).first,
+                  let movementAccount = data.accounts.first(where: { $0.id == movement.accountID }),
+                  movementAccount.type == .cash || movementAccount.type == .bankAccount,
+                  financeConvertedMinorUnits(
+                      movement.money,
+                      to: loan.currency,
+                      using: transaction.exchangeRate
+                  ) == principalAmount.minorUnits,
                   loan.settlementAccountID == movement.accountID else {
                 return false
             }
@@ -182,7 +195,17 @@ enum FinanceTransactionValidator {
                 ? !transaction.outflows.isEmpty
                 : !transaction.inflows.isEmpty
         case .payment:
-            guard let paymentID = transaction.loanPaymentID,
+            guard transaction.loanFundingMethod == nil,
+                  transaction.outflows.count + transaction.inflows.count == 1,
+                  let movement = (transaction.outflows + transaction.inflows).first,
+                  let movementAccount = data.accounts.first(where: { $0.id == movement.accountID }),
+                  movementAccount.type == .cash || movementAccount.type == .bankAccount,
+                  financeConvertedMinorUnits(
+                      movement.money,
+                      to: loan.currency,
+                      using: transaction.exchangeRate
+                  ) == principalAmount.minorUnits,
+                  let paymentID = transaction.loanPaymentID,
                   let payment = loan.payments.first(where: { $0.id == paymentID }),
                   payment.transactionID == transaction.id,
                   payment.date == transaction.date,

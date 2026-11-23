@@ -2038,6 +2038,10 @@ final class LedgerStore: ObservableObject {
         _ transaction: LedgerTransaction,
         reportingCurrency: LedgerCurrency? = nil
     ) -> String {
+        if transaction.loanFundingMethod == .expensePaidForBorrower,
+           let amount = transaction.loanPrincipalAmount {
+            return amount.formatted
+        }
         if transaction.kind == .expense {
             let movements = transaction.outflows + transaction.inflows
             let targetCurrency = reportingCurrency

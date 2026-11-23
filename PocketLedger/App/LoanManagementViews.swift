@@ -827,7 +827,7 @@ struct LoanEditor: View {
     @State private var selectedCounterparty: String?
     @State private var direction: LoanDirection
     @State private var amountText: String
-    @State private var fundedAmountText: String
+    @State private var fundingMethod: LoanFundingMethod
     @State private var loanCurrency: LedgerCurrency
     @State private var startedAt: Date
     @State private var hasDueDate: Bool
@@ -854,7 +854,7 @@ struct LoanEditor: View {
         _selectedCounterparty = State(initialValue: savedCounterparty)
         _direction = State(initialValue: loan?.direction ?? .borrowed)
         _amountText = State(initialValue: "")
-        _fundedAmountText = State(initialValue: "")
+        _fundingMethod = State(initialValue: .cashMovement)
         _startedAt = State(initialValue: loan?.startedAt ?? .now)
         _hasDueDate = State(initialValue: loan?.dueDate != nil)
         _dueDate = State(initialValue: loan?.dueDate ?? .now)
@@ -921,15 +921,13 @@ struct LoanEditor: View {
                         }
                     }
                     if loan == nil {
-                        CurrencyInputField("Total amount owed", text: $amountText, currency: $loanCurrency)
-                        CurrencyInputField(
-                            direction == .lent ? "Amount given" : "Amount received",
-                            text: $fundedAmountText,
-                            currency: $loanCurrency
-                        )
-                        Text("Leave the funded amount blank to use the total owed. The total can include manually entered interest.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        if direction == .borrowed {
+                            Picker("How did you get it?", selection: $fundingMethod) {
+                                Text("Money received").tag(LoanFundingMethod.cashMovement)
+                                Text("Expense paid for me").tag(LoanFundingMethod.expensePaidForBorrower)
+                            }
+                        }
+                        CurrencyInputField(amountLabel, text: $amountText, currency: $loanCurrency)
                         DatePicker("Started", selection: $startedAt, in: Date.distantPast...Date.now, displayedComponents: .date)
                     }
                     Toggle("Add due date", isOn: $hasDueDate)
@@ -939,38 +937,45 @@ struct LoanEditor: View {
                 }
 
                 if loan == nil {
-                    Section(direction == .lent ? "Money given from" : "Money received into") {
-                        if eligibleAccounts.isEmpty {
-                            Text("Add a cash or bank account before creating a loan.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Picker("Account", selection: selectedAccountBinding) {
-                                ForEach(eligibleAccounts) { account in
-                                    Text("\(account.name) · \(account.currency.rawValue)")
-                                        .tag(Optional(account.id))
+                    if usesCashMovement {
+                        Section(direction == .lent ? "Money given from" : "Money received into") {
+                            if eligibleAccounts.isEmpty {
+                                Text("Add a cash or bank account before creating a loan.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Picker("Account", selection: selectedAccountBinding) {
+                                    ForEach(eligibleAccounts) { account in
+                                        Text("\(account.name) · \(account.currency.rawValue)")
+                                            .tag(Optional(account.id))
+                                    }
                                 }
                             }
-                        }
-                        if let cashMovementAmount {
-                            LabeledContent("Cash movement") {
-                                Text(cashMovementAmount.formatted)
-                                    .font(.subheadline.weight(.semibold).monospacedDigit())
-                            }
-                            if let fundingRate {
-                                Text(fundingRate.summary)
-                                    .font(.caption)
+                            if let cashMovementAmount {
+                                LabeledContent("Cash movement") {
+                                    Text(cashMovementAmount.formatted)
+                                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                                }
+                                if let fundingRate {
+                                    Text(fundingRate.summary)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } else if needsFundingRate {
+                                Text("Add an exchange rate in More → Exchange Rates to record the funding movement.")
+                                    .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
-                        } else if needsFundingRate {
-                            Text("Add an exchange rate in More → Exchange Rates to record the funding movement.")
+                        }
+                        Section {
+                            Text("The loan uses its own currency. Funding is converted to the selected cash account with a saved exchange rate, and principal stays out of income and expense totals.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
-                    }
-                    Section {
-                        Text("The loan uses its own currency. Funding is converted to the selected cash account with a saved exchange rate, and principal stays out of income and expense totals.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    } else {
+                        Section("Expense paid for you") {
+                            Text("This records what they paid on your behalf as a debt. No cash account balance or expense total changes.")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -992,6 +997,15 @@ struct LoanEditor: View {
         loan?.direction.counterpartyLabel ?? direction.counterpartyLabel
     }
 
+    private var amountLabel: String {
+        if direction == .lent { return "Total amount given" }
+        return fundingMethod == .expensePaidForBorrower ? "Total paid for you" : "Total amount received"
+    }
+
+    private var usesCashMovement: Bool {
+        direction == .lent || fundingMethod == .cashMovement
+    }
+
     private var counterpartyNames: [String] {
         loanCounterpartyNames(in: store.data)
     }
@@ -1005,31 +1019,26 @@ struct LoanEditor: View {
     }
 
     private var fundingRate: ExchangeRate? {
-        guard let selectedAccount, selectedAccount.currency != loanCurrency else { return nil }
+        guard usesCashMovement,
+              let selectedAccount,
+              selectedAccount.currency != loanCurrency else { return nil }
         return store.exchangeRate(base: loanCurrency, quote: selectedAccount.currency)
     }
 
     private var needsFundingRate: Bool {
-        selectedAccount.map { $0.currency != loanCurrency } ?? false
+        usesCashMovement && (selectedAccount.map { $0.currency != loanCurrency } ?? false)
     }
 
     private var cashMovementAmount: Money? {
-        guard let selectedAccount,
-              let principalAmount = fundingAmount,
+        guard usesCashMovement,
+              let selectedAccount,
+              let principalAmount = Money.parse(amountText, currency: loanCurrency),
               let minorUnits = financeConvertedMinorUnits(
                   principalAmount,
                   to: selectedAccount.currency,
                   using: fundingRate
               ) else { return nil }
         return Money(currency: selectedAccount.currency, minorUnits: minorUnits)
-    }
-
-    private var fundingAmount: Money? {
-        guard let totalOwed = Money.parse(amountText, currency: loanCurrency) else { return nil }
-        let fundedValue = fundedAmountText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return fundedValue.isEmpty
-            ? totalOwed
-            : Money.parse(fundedValue, currency: loanCurrency)
     }
 
     private var selectedAccountBinding: Binding<UUID?> {
@@ -1060,17 +1069,28 @@ struct LoanEditor: View {
             return
         }
 
-        guard let account = selectedAccount,
-              let amount = Money.parse(amountText, currency: loanCurrency),
-              amount.minorUnits > 0,
-              let fundingAmount,
-              fundingAmount.minorUnits > 0,
-              let cashMovementAmount,
-              cashMovementAmount.minorUnits > 0 else {
-            errorMessage = needsFundingRate && fundingRate == nil
-                ? "Add an exchange rate in More → Exchange Rates to fund this loan in a different currency."
-                : "Enter a positive amount and choose a cash or bank account."
+        guard let amount = Money.parse(amountText, currency: loanCurrency), amount.minorUnits > 0 else {
+            errorMessage = "Enter a positive loan amount."
             return
+        }
+        let account: Account?
+        let movement: MoneyMovement?
+        if usesCashMovement {
+            guard let selectedAccount else {
+                errorMessage = "Choose a cash or bank account."
+                return
+            }
+            guard let cashMovementAmount, cashMovementAmount.minorUnits > 0 else {
+                errorMessage = needsFundingRate && fundingRate == nil
+                    ? "Add an exchange rate in More → Exchange Rates to fund this loan in a different currency."
+                    : "Enter a positive amount and choose a cash or bank account."
+                return
+            }
+            account = selectedAccount
+            movement = MoneyMovement(accountID: selectedAccount.id, money: cashMovementAmount)
+        } else {
+            account = nil
+            movement = nil
         }
         let dueDate = hasDueDate ? self.dueDate : nil
 
@@ -1085,22 +1105,26 @@ struct LoanEditor: View {
             startingAmount: amount,
             startedAt: startedAt,
             dueDate: dueDate,
-            settlementAccountID: account.id,
+            settlementAccountID: account?.id,
             fundingTransactionID: transactionID
         )
-        let movement = MoneyMovement(accountID: account.id, money: cashMovementAmount)
         let transaction = LedgerTransaction(
             id: transactionID,
             date: startedAt,
-            note: direction == .lent ? "Loan to \(party)" : "Loan from \(party)",
+            note: direction == .lent
+                ? "Loan to \(party)"
+                : fundingMethod == .expensePaidForBorrower
+                    ? "Expense paid for by \(party)"
+                    : "Loan from \(party)",
             kind: .transfer,
             categoryID: nil,
-            outflows: direction == .lent ? [movement] : [],
-            inflows: direction == .borrowed ? [movement] : [],
-            exchangeRate: fundingRate,
+            outflows: direction == .lent ? movement.map { [$0] } ?? [] : [],
+            inflows: direction == .borrowed ? movement.map { [$0] } ?? [] : [],
+            exchangeRate: usesCashMovement ? fundingRate : nil,
             loanID: loanID,
             loanActivity: .funding,
-            loanPrincipalAmount: fundingAmount
+            loanFundingMethod: usesCashMovement ? .cashMovement : .expensePaidForBorrower,
+            loanPrincipalAmount: amount
         )
         guard store.addLoan(loan, fundingTransaction: transaction) else {
             errorMessage = store.lastActionStatus ?? "The loan could not be saved."
@@ -1224,7 +1248,17 @@ struct LoanDetailView: View {
                                 .font(.caption)
                                 .foregroundStyle(PocketLedgerTheme.textTertiary)
                         }
-                        if let funding = originalFunding(for: loan) {
+                        if let transactionID = loan.fundingTransactionID,
+                           let fundingTransaction = store.data.transactions.first(where: { $0.id == transactionID }),
+                           fundingTransaction.loanFundingMethod == .expensePaidForBorrower {
+                            LabeledContent("Paid on your behalf") {
+                                ProtectedAmountText(
+                                    value: loan.startingAmount.formatted,
+                                    isRevealed: areBalancesRevealed
+                                )
+                                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                            }
+                        } else if let funding = originalFunding(for: loan) {
                             LabeledContent(loan.direction == .lent ? "Amount given" : "Amount received") {
                                 ProtectedAmountText(
                                     value: funding.amount.formatted,

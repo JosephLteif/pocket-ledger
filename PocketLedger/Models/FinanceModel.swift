@@ -824,6 +824,7 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
     var loanID: UUID?
     var loanPaymentID: UUID?
     var loanActivity: LoanLedgerActivity?
+    var loanFundingMethod: LoanFundingMethod?
     var loanPrincipalAmount: Money?
 
     func categoryID(for movement: MoneyMovement) -> UUID? {
@@ -845,6 +846,7 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         loanID: UUID? = nil,
         loanPaymentID: UUID? = nil,
         loanActivity: LoanLedgerActivity? = nil,
+        loanFundingMethod: LoanFundingMethod? = nil,
         loanPrincipalAmount: Money? = nil
     ) {
         self.id = id
@@ -861,6 +863,7 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         self.loanID = loanID
         self.loanPaymentID = loanPaymentID
         self.loanActivity = loanActivity
+        self.loanFundingMethod = loanFundingMethod
         self.loanPrincipalAmount = loanPrincipalAmount
     }
 
@@ -879,6 +882,7 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         case loanID
         case loanPaymentID
         case loanActivity
+        case loanFundingMethod
         case loanPrincipalAmount
     }
 
@@ -898,6 +902,7 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         loanID = try container.decodeIfPresent(UUID.self, forKey: .loanID)
         loanPaymentID = try container.decodeIfPresent(UUID.self, forKey: .loanPaymentID)
         loanActivity = try container.decodeIfPresent(LoanLedgerActivity.self, forKey: .loanActivity)
+        loanFundingMethod = try container.decodeIfPresent(LoanFundingMethod.self, forKey: .loanFundingMethod)
         loanPrincipalAmount = try container.decodeIfPresent(Money.self, forKey: .loanPrincipalAmount)
     }
 
@@ -917,6 +922,7 @@ struct LedgerTransaction: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(loanID, forKey: .loanID)
         try container.encodeIfPresent(loanPaymentID, forKey: .loanPaymentID)
         try container.encodeIfPresent(loanActivity, forKey: .loanActivity)
+        try container.encodeIfPresent(loanFundingMethod, forKey: .loanFundingMethod)
         try container.encodeIfPresent(loanPrincipalAmount, forKey: .loanPrincipalAmount)
     }
 }
@@ -945,6 +951,11 @@ enum LoanDirection: String, Codable, CaseIterable, Identifiable, Hashable, Senda
 enum LoanLedgerActivity: String, Codable, Hashable, Sendable {
     case funding
     case payment
+}
+
+enum LoanFundingMethod: String, Codable, Hashable, Sendable {
+    case cashMovement
+    case expensePaidForBorrower
 }
 
 struct LoanPayment: Identifiable, Codable, Equatable, Sendable {

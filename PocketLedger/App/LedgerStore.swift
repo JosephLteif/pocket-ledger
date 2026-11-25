@@ -1479,7 +1479,8 @@ final class LedgerStore: ObservableObject {
             return false
         }
 
-        let existing = data.budgets.first(where: { $0.id == budget.id })
+        let existingIndex = data.budgets.firstIndex(where: { $0.id == budget.id })
+        let existing = existingIndex.map { data.budgets[$0] }
         if existing == nil,
            !PocketLedgerTierPolicy.canCreateBudget(count: data.budgets.count, hasPro: hasProAccess()) {
             return denyForPro("Free includes up to five budgets.", feature: .budgets)
@@ -1493,8 +1494,27 @@ final class LedgerStore: ObservableObject {
         }
 
         var updated = data
-        if let index = updated.budgets.firstIndex(where: { $0.id == budget.id }) {
-            updated.budgets[index] = budget
+        if let existingIndex, let existing {
+            let now = Date.now
+            if existing.categoryID != budget.categoryID || existing.currency != budget.currency || existing.rollover != budget.rollover {
+                updated.archiveBudgetMonths(for: existing, before: now, using: ledgerIndex)
+            }
+            if existing.currency == budget.currency {
+                var revised = existing
+                revised.categoryID = budget.categoryID
+                revised.rollover = budget.rollover
+                revised.setLimit(budget.monthlyLimit, for: now)
+                updated.budgets[existingIndex] = revised
+            } else {
+                updated.budgets[existingIndex] = LedgerBudget(
+                    id: budget.id,
+                    categoryID: budget.categoryID,
+                    currency: budget.currency,
+                    monthlyLimit: budget.monthlyLimit,
+                    rollover: budget.rollover,
+                    startedAt: now
+                )
+            }
         } else {
             updated.budgets.append(budget)
         }
@@ -1502,14 +1522,35 @@ final class LedgerStore: ObservableObject {
     }
 
     @discardableResult
-    func deleteBudget(id: UUID) -> Bool {
+    func updateBudgetLimit(id: UUID, limit: Money, for date: Date) -> Bool {
+        let calendar = Calendar.current
+        let month = calendar.dateComponents([.era, .year, .month], from: date)
+        guard let index = data.budgets.firstIndex(where: { $0.id == id }),
+              limit.minorUnits > 0,
+              limit.currency == data.budgets[index].currency,
+              date <= .now,
+              let interval = calendar.dateInterval(of: .month, for: date),
+              let start = data.budgets[index].startedAt ?? ledgerIndex.sortedTransactions.last?.date,
+              start < interval.end,
+              !data.budgetHistory.contains(where: { $0.budgetID == id && $0.month == month }) else {
+            lastActionStatus = "This month's budget limit could not be saved"
+            return false
+        }
+
         var updated = data
-        let originalCount = updated.budgets.count
-        updated.budgets.removeAll { $0.id == id }
-        guard updated.budgets.count != originalCount else {
+        updated.budgets[index].setLimit(limit, for: date, calendar: calendar)
+        return persist(updated, successMessage: "Budget limit saved")
+    }
+
+    @discardableResult
+    func deleteBudget(id: UUID) -> Bool {
+        guard let index = data.budgets.firstIndex(where: { $0.id == id }) else {
             lastActionStatus = "Budget not found"
             return false
         }
+        var updated = data
+        updated.archiveBudgetMonths(for: data.budgets[index], before: .now, using: ledgerIndex)
+        updated.budgets.remove(at: index)
         return persist(updated, successMessage: "Budget deleted")
     }
 
@@ -1769,6 +1810,8 @@ final class LedgerStore: ObservableObject {
             contentsOf: imported.scheduledTransactions.filter { !scheduledTransactionIDs.contains($0.id) }
         )
         updated.budgets.append(contentsOf: imported.budgets.filter { !budgetIDs.contains($0.id) })
+        var budgetMonthIDs = Set(updated.budgetHistory.map(\.id))
+        updated.budgetHistory.append(contentsOf: imported.budgetHistory.filter { budgetMonthIDs.insert($0.id).inserted })
         updated.savingsGoals.append(contentsOf: imported.savingsGoals.filter { !savingsGoalIDs.contains($0.id) })
         updated.templates.append(contentsOf: imported.templates.filter { !templateIDs.contains($0.id) })
         updated.attachments.append(contentsOf: imported.attachments.filter { !attachmentIDs.contains($0.id) })

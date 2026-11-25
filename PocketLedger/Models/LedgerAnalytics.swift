@@ -483,6 +483,63 @@ struct LedgerIndex {
     }
 }
 
+extension FinanceData {
+    func firstBudgetMonth(using index: LedgerIndex, calendar: Calendar, now: Date) -> Date {
+        let earliest = (budgets.map { $0.startedAt ?? index.sortedTransactions.last?.date ?? now }
+            + budgetHistory.compactMap { calendar.date(from: $0.month) }).min() ?? now
+        return calendar.dateInterval(of: .month, for: earliest)?.start ?? earliest
+    }
+
+    func budgetMonths(for interval: DateInterval, using index: LedgerIndex, calendar: Calendar) -> [LedgerBudgetMonth] {
+        let month = calendar.dateComponents([.era, .year, .month], from: interval.start)
+        let saved = budgetHistory.filter { $0.month == month }
+        let savedIDs = Set(saved.map(\.budgetID))
+        let live = budgets.compactMap { budget -> LedgerBudgetMonth? in
+            let start = budget.startedAt ?? index.sortedTransactions.last?.date ?? interval.end
+            guard start < interval.end, !savedIDs.contains(budget.id) else { return nil }
+            return budgetMonth(budget, in: interval, using: index, calendar: calendar)
+        }
+        return (saved + live).sorted { $0.categoryPath.localizedStandardCompare($1.categoryPath) == .orderedAscending }
+    }
+
+    mutating func archiveBudgetMonths(
+        for budget: LedgerBudget,
+        before date: Date,
+        using index: LedgerIndex,
+        calendar: Calendar = .current
+    ) {
+        let start = budget.startedAt ?? index.sortedTransactions.last?.date ?? date
+        guard var interval = calendar.dateInterval(of: .month, for: start),
+              let currentMonth = calendar.dateInterval(of: .month, for: date) else { return }
+        let savedIDs = Set(budgetHistory.lazy.filter { $0.budgetID == budget.id }.map(\.id))
+        while interval.end <= currentMonth.start {
+            let month = calendar.dateComponents([.era, .year, .month], from: interval.start)
+            if !savedIDs.contains(LedgerBudgetMonth.ID(budgetID: budget.id, month: month)) {
+                budgetHistory.append(budgetMonth(budget, in: interval, using: index, calendar: calendar))
+            }
+            guard let next = calendar.dateInterval(of: .month, for: interval.end),
+                  next.start > interval.start else { break }
+            interval = next
+        }
+    }
+
+    private func budgetMonth(
+        _ budget: LedgerBudget,
+        in interval: DateInterval,
+        using index: LedgerIndex,
+        calendar: Calendar
+    ) -> LedgerBudgetMonth {
+        LedgerBudgetMonth(
+            budgetID: budget.id,
+            month: calendar.dateComponents([.era, .year, .month], from: interval.start),
+            categoryPath: index.categoryPath(for: budget.categoryID),
+            spent: index.budgetSpent(budget, interval: interval, calendar: calendar),
+            allowance: financeBudgetAllowance(budget, in: self, interval: interval, using: index, calendar: calendar),
+            monthlyLimit: budget.limit(for: interval.start, calendar: calendar)
+        )
+    }
+}
+
 func financeBudgetSpent(
     _ budget: LedgerBudget,
     in _: FinanceData,
@@ -504,35 +561,10 @@ func financeBudgetAllowance(
     calendar: Calendar = .current
 ) -> Money {
     let currentMonth = interval ?? (
-        Calendar.current.dateInterval(of: .month, for: .now)
+        calendar.dateInterval(of: .month, for: .now)
             ?? DateInterval(start: .distantPast, duration: .zero)
     )
-    guard budget.rollover else { return budget.monthlyLimit }
-
-    let startingMonth = calendar.dateInterval(
-        of: .month,
-        for: budget.startedAt ?? currentMonth.start
-    )?.start ?? currentMonth.start
-    var month = startingMonth
-    var carry = Int64.zero
-
-    while month < currentMonth.start {
-        guard let monthInterval = calendar.dateInterval(of: .month, for: month) else { break }
-        let spent = index.budgetSpent(
-            budget,
-            interval: monthInterval,
-            calendar: calendar
-        ).minorUnits
-        carry = max(carry + budget.monthlyLimit.minorUnits - spent, 0)
-        guard let nextMonth = calendar.date(byAdding: .month, value: 1, to: month),
-              nextMonth > month else {
-            break
-        }
-        month = nextMonth
+    return budget.allowance(for: currentMonth, calendar: calendar) { period in
+        index.budgetSpent(budget, interval: period, calendar: calendar)
     }
-
-    return Money(
-        currency: budget.currency,
-        minorUnits: budget.monthlyLimit.minorUnits + carry
-    )
 }

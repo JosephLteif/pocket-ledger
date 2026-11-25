@@ -502,7 +502,8 @@ enum FinanceDataValidator {
         for (index, budget) in data.budgets.enumerated() {
             guard data.categories.contains(where: { $0.id == budget.categoryID }),
                   budget.monthlyLimit.currency == budget.currency,
-                  budget.monthlyLimit.minorUnits > 0 else {
+                  budget.monthlyLimit.minorUnits > 0,
+                  (budget.limitChanges ?? []).allSatisfy({ $0.minorUnits > 0 }) else {
                 return .invalidBudget(index: index)
             }
         }

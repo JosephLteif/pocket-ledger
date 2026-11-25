@@ -11,14 +11,16 @@ struct BudgetsView: View {
     @State private var budgetToDelete: LedgerBudget?
     @State private var budgetSummaries: [DashboardBudgetSnapshot] = []
     @State private var isShowingProUpgrade = false
+    @State private var selectedMonth: Date?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
-                    Text("Keep monthly spending intentional")
-                        .font(.subheadline)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                monthPicker
 
+                if let selectedMonth {
+                    historicalBudgets(for: selectedMonth)
+                } else {
                     Text(proAccess.hasProAccess
                          ? "\(store.data.budgets.count) budgets"
                          : "\(store.data.budgets.count) of \(PocketLedgerTierPolicy.freeBudgetLimit) budgets")
@@ -57,6 +59,7 @@ struct BudgetsView: View {
                             budgetCard(summary)
                         }
                     }
+                }
             }
             .padding(16)
         }
@@ -67,7 +70,9 @@ struct BudgetsView: View {
         .toolbar {
             PocketLedgerToolbar(security: security) {
                 ToolbarItem(placement: .primaryAction) {
-                    if !proAccess.hasProAccess,
+                    if selectedMonth != nil {
+                        EmptyView()
+                    } else if !proAccess.hasProAccess,
                        store.data.budgets.count >= PocketLedgerTierPolicy.freeBudgetLimit {
                         ProUpgradeButton(feature: .budgets) {
                             Image(systemName: "plus")
@@ -85,7 +90,7 @@ struct BudgetsView: View {
             }
         }
         .sheet(isPresented: $isPresentingEditor, onDismiss: { editingBudget = nil }) {
-            BudgetEditor(store: store, budget: editingBudget)
+            BudgetEditor(store: store, budget: editingBudget, month: selectedMonth)
         }
         .background {
             Color.clear.sheet(isPresented: $isShowingProUpgrade) {
@@ -110,36 +115,90 @@ struct BudgetsView: View {
         }
     }
 
+    private var monthPicker: some View {
+        let calendar = Calendar.current
+        let now = Date.now
+        let current = calendar.dateInterval(of: .month, for: now)?.start ?? now
+        let earliest = store.data.firstBudgetMonth(using: store.ledgerIndex, calendar: calendar, now: now)
+        let month = selectedMonth ?? current
+
+        return HStack {
+            Button {
+                selectedMonth = calendar.date(byAdding: .month, value: -1, to: month)
+            } label: {
+                Image(systemName: "chevron.backward")
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Previous month")
+            .disabled(month <= earliest)
+
+            Spacer()
+            Text(month.formatted(.dateTime.month(.wide).year()))
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
+            Spacer()
+
+            Button {
+                let next = calendar.date(byAdding: .month, value: 1, to: month)
+                selectedMonth = next.flatMap { $0 < current ? $0 : nil }
+            } label: {
+                Image(systemName: "chevron.forward")
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Next month")
+            .disabled(selectedMonth == nil)
+        }
+        .buttonStyle(.borderless)
+        .tint(PocketLedgerTheme.accent)
+        .pocketGroupedSurface(cornerRadius: 20)
+    }
+
+    @ViewBuilder
+    private func historicalBudgets(for month: Date) -> some View {
+        let calendar = Calendar.current
+        let interval = calendar.dateInterval(of: .month, for: month) ?? DateInterval(start: month, duration: 0)
+        let budgets = store.data.budgetMonths(for: interval, using: store.ledgerIndex, calendar: calendar)
+        if budgets.isEmpty {
+            ContentUnavailableView("No budgets for this month", systemImage: "chart.bar.doc.horizontal")
+        } else {
+            ForEach(budgets) { budget in
+                VStack(alignment: .leading, spacing: 12) {
+                    budgetProgress(
+                        categoryPath: budget.categoryPath,
+                        spent: budget.spent,
+                        allowance: budget.allowance,
+                        monthlyLimit: budget.monthlyLimit
+                    )
+                    if !store.data.budgetHistory.contains(where: { $0.id == budget.id }),
+                       let activeBudget = store.data.budgets.first(where: { $0.id == budget.budgetID }) {
+                        Button("Edit limit") {
+                            editingBudget = activeBudget
+                            isPresentingEditor = true
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Edit limit for \(budget.categoryPath)")
+                    }
+                }
+                .padding(16)
+                .pocketGroupedSurface(cornerRadius: 20)
+                .overlay { RoundedRectangle(cornerRadius: 20).stroke(PocketLedgerTheme.divider, lineWidth: 1) }
+            }
+        }
+    }
+
     private func budgetCard(_ summary: DashboardBudgetSnapshot) -> some View {
         let budget = summary.budget
-        let spent = summary.spent
-        let allowance = summary.allowance
-        let ratio = summary.ratio
-        let over = summary.isOver
-        let remaining = summary.remaining
         let projectedOver = summary.isProjectedOver
 
         return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(summary.categoryPath).font(.headline)
-                    Text("This month · \(budget.currency.rawValue)")
-                        .font(.caption)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-                }
-                Spacer()
-                Text("\(spent.formatted) / \(allowance.formatted)")
-                    .font(.subheadline.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.textPrimary)
-            }
-            ProgressView(value: ratio)
-                .tint(projectedOver ? PocketLedgerTheme.warning : PocketLedgerTheme.accent)
-                .animation(PocketLedgerMotion.expressive(reduceMotion: reduceMotion), value: ratio)
-            Text(over
-                 ? "Over by \(Money(currency: budget.currency, minorUnits: -remaining).formatted)"
-                 : "Remaining \(Money(currency: budget.currency, minorUnits: remaining).formatted)")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.positive)
+            budgetProgress(
+                categoryPath: summary.categoryPath,
+                spent: summary.spent,
+                allowance: summary.allowance,
+                monthlyLimit: budget.limit(for: .now),
+                projectedOver: projectedOver
+            )
             HStack {
                 Text("Projected \(summary.projected.formatted)")
                     .font(.caption)
@@ -181,6 +240,44 @@ struct BudgetsView: View {
         .overlay { RoundedRectangle(cornerRadius: 20).stroke(PocketLedgerTheme.divider, lineWidth: 1) }
     }
 
+    @ViewBuilder
+    private func budgetProgress(
+        categoryPath: String,
+        spent: Money,
+        allowance: Money,
+        monthlyLimit: Money?,
+        projectedOver: Bool = false
+    ) -> some View {
+        let remaining = allowance.minorUnits - spent.minorUnits
+        let over = remaining < 0
+        let ratio = min(max(Double(spent.minorUnits) / Double(max(allowance.minorUnits, 1)), 0), 1)
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(categoryPath).font(.headline)
+                Text(allowance.currency.rawValue)
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+            }
+            Spacer()
+            Text("\(spent.formatted) / \(allowance.formatted)")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.textPrimary)
+        }
+        ProgressView(value: ratio)
+            .tint(over || projectedOver ? PocketLedgerTheme.warning : PocketLedgerTheme.accent)
+            .animation(PocketLedgerMotion.expressive(reduceMotion: reduceMotion), value: ratio)
+        if let monthlyLimit, monthlyLimit != allowance {
+            Text("Monthly limit \(monthlyLimit.formatted)")
+                .font(.caption)
+                .foregroundStyle(PocketLedgerTheme.textSecondary)
+        }
+        Text(over
+             ? "Over by \(Money(currency: allowance.currency, minorUnits: -remaining).formatted)"
+             : "Remaining \(Money(currency: allowance.currency, minorUnits: remaining).formatted)")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.positive)
+    }
+
     private func presentNewBudget() {
         guard PocketLedgerTierPolicy.canCreateBudget(
             count: store.data.budgets.count,
@@ -208,6 +305,8 @@ private struct BudgetEditor: View {
     @ObservedObject private var proAccess = ProEntitlementStore.shared
     @Environment(\.dismiss) private var dismiss
     let budget: LedgerBudget?
+    let month: Date?
+    private let initialLimit: Money?
     @State private var categoryID: UUID?
     @State private var currency: LedgerCurrency
     @State private var amount: String
@@ -217,57 +316,75 @@ private struct BudgetEditor: View {
     @State private var isConfirmingDiscard = false
     @State private var isShowingProUpgrade = false
 
-    init(store: LedgerStore, budget: LedgerBudget?) {
+    init(store: LedgerStore, budget: LedgerBudget?, month: Date?) {
         _store = ObservedObject(wrappedValue: store)
         self.budget = budget
+        self.month = month
+        let initialLimit = budget?.limit(for: month ?? .now)
+        self.initialLimit = initialLimit
         _categoryID = State(initialValue: budget?.categoryID ?? store.activeCategories.first?.id)
         _currency = State(initialValue: budget?.currency ?? .usd)
-        _amount = State(initialValue: budget.map { NSDecimalNumber(decimal: Decimal($0.monthlyLimit.minorUnits) / Decimal($0.currency.minorUnitScale)).stringValue } ?? "")
+        _amount = State(initialValue: initialLimit.map { NSDecimalNumber(decimal: Decimal($0.minorUnits) / Decimal($0.currency.minorUnitScale)).stringValue } ?? "")
         _rollover = State(initialValue: budget?.rollover ?? false)
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Budget") {
-                    Button {
-                        isSelectingCategory = true
-                    } label: {
-                        LabeledContent("Category") {
-                            HStack(spacing: 6) {
-                                Text(selectedCategoryPath)
-                                    .lineLimit(1)
-                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(PocketLedgerTheme.textTertiary)
+                if let month {
+                    Section {
+                        LabeledContent("Category", value: selectedCategoryPath)
+                        CurrencyInputField("Monthly limit", text: $amount, currency: currency)
+                    } header: {
+                        Text(month.formatted(.dateTime.month(.wide).year()))
+                    } footer: {
+                        Text("Following months use this limit until the next saved change.")
+                    }
+                } else {
+                    Section {
+                        Button {
+                            isSelectingCategory = true
+                        } label: {
+                            LabeledContent("Category") {
+                                HStack(spacing: 6) {
+                                    Text(selectedCategoryPath)
+                                        .lineLimit(1)
+                                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(PocketLedgerTheme.textTertiary)
+                                }
                             }
                         }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Search categories or browse the category hierarchy")
-                    CurrencyInputField("Monthly limit", text: $amount, currency: $currency)
-                    if !canSave {
-                        Label(
-                            categoryID == nil ? "Choose a category to save this budget." : "Enter a positive monthly limit to save.",
-                            systemImage: "info.circle"
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-                    }
-                    Toggle("Rollover unused amount", isOn: $rollover)
-                        .disabled(!proAccess.hasProAccess && !rollover)
-                    if !proAccess.hasProAccess && !rollover {
-                        ProUpgradePrompt(
-                            title: "Budget rollover",
-                            detail: "Carry unused amounts forward with Pro.",
-                            feature: .budgetRollover
-                        )
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Search categories or browse the category hierarchy")
+                        CurrencyInputField("Monthly limit", text: $amount, currency: $currency)
+                        if !canSave {
+                            Label(
+                                categoryID == nil ? "Choose a category to save this budget." : "Enter a positive monthly limit to save.",
+                                systemImage: "info.circle"
+                            )
+                            .font(.footnote)
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        }
+                        Toggle("Rollover unused amount", isOn: $rollover)
+                            .disabled(!proAccess.hasProAccess && !rollover)
+                        if !proAccess.hasProAccess && !rollover {
+                            ProUpgradePrompt(
+                                title: "Budget rollover",
+                                detail: "Carry unused amounts forward with Pro.",
+                                feature: .budgetRollover
+                            )
+                        }
+                    } header: {
+                        Text("Budget")
+                    } footer: {
+                        Text("Following months use this limit until the next saved change.")
                     }
                 }
             }
             .pocketListSurface()
-            .navigationTitle(budget == nil ? "New budget" : "Edit budget")
+            .navigationTitle(month != nil ? "Edit monthly limit" : budget == nil ? "New budget" : "Edit budget")
             .interactiveDismissDisabled(hasUnsavedChanges)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: cancel) }
@@ -304,7 +421,7 @@ private struct BudgetEditor: View {
         if let budget {
             return categoryID != budget.categoryID
                 || currency != budget.currency
-                || Money.parse(amount, currency: currency) != budget.monthlyLimit.recast(to: currency)
+                || Money.parse(amount, currency: currency) != initialLimit?.recast(to: currency)
                 || rollover != budget.rollover
         }
         return categoryID != store.activeCategories.first?.id
@@ -330,16 +447,21 @@ private struct BudgetEditor: View {
             errorMessage = "Enter a positive monthly limit."
             return
         }
-        let saved = store.upsertBudget(
-            LedgerBudget(
-                id: budget?.id ?? UUID(),
-                categoryID: categoryID,
-                currency: currency,
-                monthlyLimit: limit,
-                rollover: rollover,
-                startedAt: budget?.startedAt ?? .now
+        let saved: Bool
+        if let month, let budget {
+            saved = store.updateBudgetLimit(id: budget.id, limit: limit, for: month)
+        } else {
+            saved = store.upsertBudget(
+                LedgerBudget(
+                    id: budget?.id ?? UUID(),
+                    categoryID: categoryID,
+                    currency: currency,
+                    monthlyLimit: limit,
+                    rollover: rollover,
+                    startedAt: budget == nil ? .now : budget?.startedAt
+                )
             )
-        )
+        }
         if saved {
             dismiss()
         } else if let feature = store.proAccessRequired {

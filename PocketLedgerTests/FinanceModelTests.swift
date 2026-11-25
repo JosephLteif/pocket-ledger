@@ -2418,6 +2418,82 @@ final class FinanceModelTests: XCTestCase {
         )
     }
 
+    func testBudgetHistoryPreservesClosedMonthsAcrossEditsAndDeletion() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let january = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 1, day: 5)))
+        let januaryMonth = try XCTUnwrap(calendar.dateInterval(of: .month, for: january))
+        let februaryMonth = try XCTUnwrap(calendar.dateInterval(of: .month, for: januaryMonth.end))
+        let marchMonth = try XCTUnwrap(calendar.dateInterval(of: .month, for: februaryMonth.end))
+        let category = LedgerCategory(name: "Food")
+        let cash = Account(name: "Cash", type: .cash, currency: .usd, openingBalance: Money(currency: .usd, minorUnits: 0))
+        let budget = LedgerBudget(
+            categoryID: category.id,
+            currency: .usd,
+            monthlyLimit: Money(currency: .usd, minorUnits: 5_000),
+            rollover: true,
+            startedAt: january
+        )
+        var data = FinanceData(
+            accounts: [cash],
+            categories: [category],
+            transactions: [LedgerTransaction(
+                date: january,
+                note: "Groceries",
+                kind: .expense,
+                categoryID: category.id,
+                outflows: [MoneyMovement(accountID: cash.id, money: Money(currency: .usd, minorUnits: 1_200))],
+                inflows: []
+            )],
+            budgets: [budget]
+        )
+        let index = LedgerIndex(data: data, calendar: calendar)
+
+        let encoded = try JSONEncoder().encode(data)
+        var legacyFields = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        legacyFields.removeValue(forKey: "budgetHistory")
+        let legacy = try JSONDecoder().decode(FinanceData.self, from: JSONSerialization.data(withJSONObject: legacyFields))
+        let januaryHistory = legacy.budgetMonths(for: januaryMonth, using: index, calendar: calendar)
+        XCTAssertEqual(januaryHistory.first?.spent.minorUnits, 1_200)
+        XCTAssertEqual(januaryHistory.first?.allowance.minorUnits, 5_000)
+        XCTAssertEqual(legacy.budgetMonths(for: februaryMonth, using: index, calendar: calendar).first?.allowance.minorUnits, 8_800)
+
+        data.archiveBudgetMonths(for: budget, before: februaryMonth.start, using: index, calendar: calendar)
+        data.budgets[0].setLimit(Money(currency: .usd, minorUnits: 7_000), for: februaryMonth.start, calendar: calendar)
+        XCTAssertEqual(data.budgetHistory, januaryHistory)
+        XCTAssertEqual(data.budgetMonths(for: januaryMonth, using: index, calendar: calendar), januaryHistory)
+
+        let februaryHistory = data.budgetMonths(for: februaryMonth, using: index, calendar: calendar)
+        XCTAssertEqual(februaryHistory.first?.monthlyLimit?.minorUnits, 7_000)
+        XCTAssertEqual(februaryHistory.first?.allowance.minorUnits, 10_800)
+        let editedBudget = data.budgets[0]
+        data.archiveBudgetMonths(for: editedBudget, before: marchMonth.start, using: index, calendar: calendar)
+        data.budgets.removeAll()
+        let restored = try JSONDecoder().decode(FinanceData.self, from: JSONEncoder().encode(data))
+        XCTAssertEqual(restored.budgetHistory, januaryHistory + februaryHistory)
+        XCTAssertEqual(restored.budgetMonths(for: februaryMonth, using: index, calendar: calendar), februaryHistory)
+        XCTAssertTrue(restored.budgetMonths(for: marchMonth, using: index, calendar: calendar).isEmpty)
+    }
+
+    func testBudgetLimitChangesCarryForwardUntilTheNextEditedMonth() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let december = try XCTUnwrap(calendar.date(from: DateComponents(year: 2025, month: 12, day: 1)))
+        let january = try XCTUnwrap(calendar.date(byAdding: .month, value: 1, to: december))
+        let february = try XCTUnwrap(calendar.date(byAdding: .month, value: 1, to: january))
+        let march = try XCTUnwrap(calendar.date(byAdding: .month, value: 1, to: february))
+        let april = try XCTUnwrap(calendar.date(byAdding: .month, value: 1, to: march))
+        var budget = LedgerBudget(categoryID: UUID(), currency: .usd, monthlyLimit: Money(currency: .usd, minorUnits: 5_000))
+
+        budget.setLimit(Money(currency: .usd, minorUnits: 8_000), for: march, calendar: calendar)
+        budget.setLimit(Money(currency: .usd, minorUnits: 7_000), for: january, calendar: calendar)
+        budget.setLimit(Money(currency: .usd, minorUnits: 6_500), for: january, calendar: calendar)
+
+        let restored = try JSONDecoder().decode(LedgerBudget.self, from: JSONEncoder().encode(budget))
+        let limits = [december, january, february, march, april].map { restored.limit(for: $0, calendar: calendar).minorUnits }
+        XCTAssertEqual(limits, [5_000, 6_500, 6_500, 8_000, 8_000])
+    }
+
     func testNonRolloverBudgetKeepsMonthlyLimit() {
         let category = LedgerCategory(name: "Food")
         let budget = LedgerBudget(

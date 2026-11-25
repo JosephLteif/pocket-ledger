@@ -1248,12 +1248,18 @@ struct FinanceBalanceSnapshot: Equatable, Sendable {
 }
 
 struct LedgerBudget: Identifiable, Codable, Equatable {
+    struct LimitChange: Codable, Equatable {
+        let month: DateComponents
+        let minorUnits: Int64
+    }
+
     let id: UUID
     var categoryID: UUID
     var currency: LedgerCurrency
     var monthlyLimit: Money
     var rollover: Bool
     var startedAt: Date?
+    private(set) var limitChanges: [LimitChange]?
 
     init(
         id: UUID = UUID(),
@@ -1270,6 +1276,54 @@ struct LedgerBudget: Identifiable, Codable, Equatable {
         self.rollover = rollover
         self.startedAt = startedAt
     }
+
+    func limit(for date: Date, calendar: Calendar = .current) -> Money {
+        let changes = (limitChanges ?? []).compactMap { change -> (date: Date, amount: Int64)? in
+            guard let month = calendar.date(from: change.month), month <= date else { return nil }
+            return (month, change.minorUnits)
+        }
+        let amount = changes.max { $0.date < $1.date }?.amount ?? monthlyLimit.minorUnits
+        return Money(currency: currency, minorUnits: amount)
+    }
+
+    mutating func setLimit(_ limit: Money, for date: Date, calendar: Calendar = .current) {
+        guard limit != self.limit(for: date, calendar: calendar) else { return }
+        let month = calendar.dateComponents([.era, .year, .month], from: date)
+        var changes = limitChanges ?? []
+        changes.removeAll { $0.month == month }
+        changes.append(LimitChange(month: month, minorUnits: limit.minorUnits))
+        limitChanges = changes
+    }
+
+    func allowance(for interval: DateInterval, calendar: Calendar, spent: (DateInterval) -> Money) -> Money {
+        let monthlyLimit = limit(for: interval.start, calendar: calendar)
+        guard rollover else { return monthlyLimit }
+
+        var month = calendar.dateInterval(of: .month, for: startedAt ?? interval.start)
+        var carry = Int64.zero
+        while let period = month, period.start < interval.start {
+            let limit = limit(for: period.start, calendar: calendar).minorUnits
+            carry = max(carry + limit - spent(period).minorUnits, 0)
+            month = calendar.dateInterval(of: .month, for: period.end)
+        }
+        return Money(currency: currency, minorUnits: monthlyLimit.minorUnits + carry)
+    }
+}
+
+struct LedgerBudgetMonth: Identifiable, Codable, Equatable {
+    struct ID: Hashable {
+        let budgetID: UUID
+        let month: DateComponents
+    }
+
+    let budgetID: UUID
+    let month: DateComponents
+    let categoryPath: String
+    let spent: Money
+    let allowance: Money
+    var monthlyLimit: Money? = nil
+
+    var id: ID { ID(budgetID: budgetID, month: month) }
 }
 
 struct SavingsGoal: Identifiable, Codable, Equatable {
@@ -1450,37 +1504,14 @@ func financeBudgetAllowance(
     in data: FinanceData,
     interval: DateInterval? = nil
 ) -> Money {
+    let calendar = Calendar.current
     let currentMonth = interval ?? (
-        Calendar.current.dateInterval(of: .month, for: .now)
+        calendar.dateInterval(of: .month, for: .now)
             ?? DateInterval(start: .distantPast, duration: .zero)
     )
-    guard budget.rollover else { return budget.monthlyLimit }
-
-    let calendar = Calendar.current
-    let startingMonth = calendar.dateInterval(
-        of: .month,
-        for: budget.startedAt ?? currentMonth.start
-    )?.start ?? currentMonth.start
-    var month = startingMonth
-    var carry = Int64.zero
-
-    while month < currentMonth.start {
-        guard let monthInterval = calendar.dateInterval(of: .month, for: month) else {
-            break
-        }
-        let spent = financeBudgetSpent(budget, in: data, interval: monthInterval).minorUnits
-        carry = max(carry + budget.monthlyLimit.minorUnits - spent, 0)
-        guard let nextMonth = calendar.date(byAdding: .month, value: 1, to: month),
-              nextMonth > month else {
-            break
-        }
-        month = nextMonth
+    return budget.allowance(for: currentMonth, calendar: calendar) { period in
+        financeBudgetSpent(budget, in: data, interval: period)
     }
-
-    return Money(
-        currency: budget.currency,
-        minorUnits: budget.monthlyLimit.minorUnits + carry
-    )
 }
 
 struct LedgerTemplate: Identifiable, Codable, Equatable {
@@ -1612,6 +1643,7 @@ struct FinanceData: Codable, Equatable {
     var scheduledTransactions: [ScheduledTransaction]
     var exchangeRates: [ExchangeRate]
     var budgets: [LedgerBudget]
+    var budgetHistory: [LedgerBudgetMonth]
     var savingsGoals: [SavingsGoal]
     var templates: [LedgerTemplate]
     var attachments: [LedgerAttachment]
@@ -1628,6 +1660,7 @@ struct FinanceData: Codable, Equatable {
         scheduledTransactions: [ScheduledTransaction] = [],
         exchangeRates: [ExchangeRate] = [],
         budgets: [LedgerBudget] = [],
+        budgetHistory: [LedgerBudgetMonth] = [],
         savingsGoals: [SavingsGoal] = [],
         templates: [LedgerTemplate] = [],
         attachments: [LedgerAttachment] = [],
@@ -1644,6 +1677,7 @@ struct FinanceData: Codable, Equatable {
         self.scheduledTransactions = scheduledTransactions
         self.exchangeRates = exchangeRates
         self.budgets = budgets
+        self.budgetHistory = budgetHistory
         self.savingsGoals = savingsGoals
         self.templates = templates
         self.attachments = attachments
@@ -1663,6 +1697,7 @@ struct FinanceData: Codable, Equatable {
         case scheduledTransactions
         case exchangeRates
         case budgets
+        case budgetHistory
         case savingsGoals
         case templates
         case attachments
@@ -1691,6 +1726,7 @@ struct FinanceData: Codable, Equatable {
             forKey: .exchangeRates
         ) ?? []
         budgets = try container.decodeIfPresent([LedgerBudget].self, forKey: .budgets) ?? []
+        budgetHistory = try container.decodeIfPresent([LedgerBudgetMonth].self, forKey: .budgetHistory) ?? []
         savingsGoals = try container.decodeIfPresent([SavingsGoal].self, forKey: .savingsGoals) ?? []
         templates = try container.decodeIfPresent([LedgerTemplate].self, forKey: .templates) ?? []
         attachments = try container.decodeIfPresent([LedgerAttachment].self, forKey: .attachments) ?? []
@@ -1716,6 +1752,7 @@ struct FinanceData: Codable, Equatable {
         try container.encode(scheduledTransactions, forKey: .scheduledTransactions)
         try container.encode(exchangeRates, forKey: .exchangeRates)
         try container.encode(budgets, forKey: .budgets)
+        try container.encode(budgetHistory, forKey: .budgetHistory)
         try container.encode(savingsGoals, forKey: .savingsGoals)
         try container.encode(templates, forKey: .templates)
         try container.encode(attachments, forKey: .attachments)

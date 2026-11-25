@@ -166,7 +166,7 @@ struct CategorySelectionSheet: View {
             breadcrumb: breadcrumb
         )
 
-        HStack(spacing: 0) {
+        return HStack(spacing: 0) {
             if canSelectCategory {
                 Button {
                     selectedCategoryID = category.id

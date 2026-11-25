@@ -504,28 +504,25 @@ struct DashboardView: View {
     }
 
     private func balanceRow(for currency: LedgerCurrency) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(currency.rawValue)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(currency == .usd ? PocketLedgerTheme.income : PocketLedgerTheme.textSecondary)
-                Text(currency.displayName)
-                    .font(.caption2)
-                    .foregroundStyle(PocketLedgerTheme.textTertiary)
-            }
+        let currencyLabel = VStack(alignment: .leading, spacing: 3) {
+            Text(currency.rawValue)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(currency == .usd ? PocketLedgerTheme.income : PocketLedgerTheme.textSecondary)
+            Text(currency.displayName)
+                .font(.caption2)
+                .foregroundStyle(PocketLedgerTheme.textTertiary)
+        }
 
-            Spacer(minLength: 12)
+        let balance = snapshot.availableBalances[currency] ?? Money(currency: currency, minorUnits: 0)
+        let assetAccounts = snapshot.activeAccounts.filter {
+            $0.includeInTotals && $0.currency == currency && ($0.type == .physicalAsset || $0.type == .investment)
+        }
+        let gains = assetAccounts.compactMap(store.gainLoss(for:))
 
-            let balance = snapshot.availableBalances[currency] ?? Money(currency: currency, minorUnits: 0)
-            let assetAccounts = snapshot.activeAccounts.filter {
-                $0.includeInTotals && $0.currency == currency && ($0.type == .physicalAsset || $0.type == .investment)
-            }
-            VStack(alignment: .trailing, spacing: 4) {
+        let amounts = { (alignment: HorizontalAlignment) in
+            VStack(alignment: alignment, spacing: 4) {
                 protectedBalanceText(balance.formatted)
                     .font(.title3.weight(.bold).monospacedDigit())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.65)
-                    .multilineTextAlignment(.trailing)
                     .contentTransition(.numericText(value: Double(balance.minorUnits)))
                     .animation(
                         PocketLedgerMotion.expressive(reduceMotion: reduceMotion),
@@ -533,7 +530,6 @@ struct DashboardView: View {
                     )
 
                 if !assetAccounts.isEmpty {
-                    let gains = assetAccounts.compactMap(store.gainLoss(for:))
                     HStack(spacing: 4) {
                         Text("Gain/loss")
                             .foregroundStyle(PocketLedgerTheme.textSecondary)
@@ -547,10 +543,24 @@ struct DashboardView: View {
                         }
                     }
                     .font(.caption2.weight(.semibold).monospacedDigit())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
                 }
             }
+        }
+
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                currencyLabel
+                    .fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
+                amounts(.trailing)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                currencyLabel
+                amounts(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 9)
     }

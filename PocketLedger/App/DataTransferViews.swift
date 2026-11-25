@@ -598,6 +598,9 @@ private struct BackupRestoreView: View {
                     LabeledContent("Accounts", value: "\(candidate.backup.data.accounts.count)")
                     LabeledContent("Categories", value: "\(candidate.backup.data.categories.count)")
                     LabeledContent("Transactions", value: "\(candidate.backup.data.transactions.count)")
+                    LabeledContent("Scheduled transactions", value: "\(candidate.backup.data.scheduledTransactions.count)")
+                    LabeledContent("Savings goals", value: "\(candidate.backup.data.savingsGoals.count)")
+                    LabeledContent("Exchange rates", value: "\(candidate.backup.data.exchangeRates.count)")
                     LabeledContent("Metal purchases", value: "\(candidate.backup.data.accounts.reduce(0) { $0 + ($1.tracking?.metalPurchases.count ?? 0) })")
                     LabeledContent("Metal sales", value: "\(candidate.backup.data.accounts.reduce(0) { $0 + ($1.tracking?.metalPurchases.reduce(0) { $0 + $1.sales.count } ?? 0) })")
                     if !candidate.backup.data.attachments.isEmpty {

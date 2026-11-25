@@ -345,6 +345,33 @@ struct TransactionsView: View {
                     .listRowSeparator(.hidden)
             }
 
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                TextField("Search transactions", text: $searchText)
+                    .submitLabel(.search)
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.leading, 12)
+            .padding(.trailing, searchText.isEmpty ? 12 : 0)
+            .frame(minHeight: 44)
+            .pocketGroupedSurface()
+            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
             filtersButton
                 .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 .listRowBackground(Color.clear)

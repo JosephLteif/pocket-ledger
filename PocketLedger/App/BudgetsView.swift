@@ -216,7 +216,6 @@ struct BudgetsView: View {
                         initialFilter: .expense,
                         initialPeriod: .thisMonth,
                         initialCategoryID: budget.categoryID,
-                        initialCategoryIncludesDescendants: false,
                         initialReportingCurrency: budget.currency
                     )
                 } label: {

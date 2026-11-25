@@ -141,6 +141,7 @@ private struct SavingsGoalEditor: View {
     @State private var includesTargetDate: Bool
     @State private var targetDate: Date
     @State private var errorMessage: String?
+    @State private var pendingCurrency: LedgerCurrency?
 
     init(store: LedgerStore, goal: SavingsGoal?) {
         _store = ObservedObject(wrappedValue: store)
@@ -158,7 +159,17 @@ private struct SavingsGoalEditor: View {
             Form {
                 Section("Goal") {
                     TextField("Name", text: $name)
-                    Picker("Currency", selection: $currency) {
+                    Picker("Currency", selection: Binding(
+                        get: { currency },
+                        set: { newCurrency in
+                            guard newCurrency != currency else { return }
+                            if targetText.isEmpty, parsedCurrent?.minorUnits == 0 {
+                                currency = newCurrency
+                            } else {
+                                pendingCurrency = newCurrency
+                            }
+                        }
+                    )) {
                         ForEach(LedgerCurrency.allCases) { currency in
                             Text(currency.rawValue).tag(currency)
                         }
@@ -192,9 +203,18 @@ private struct SavingsGoalEditor: View {
             } message: {
                 Text(errorMessage ?? "")
             }
-            .onChange(of: currency) { _, _ in
-                targetText = ""
-                currentText = "0"
+            .confirmationDialog("Change goal currency?", isPresented: Binding(
+                get: { pendingCurrency != nil },
+                set: { if !$0 { pendingCurrency = nil } }
+            ), titleVisibility: .visible, presenting: pendingCurrency) { newCurrency in
+                Button("Change to \(newCurrency.rawValue) and clear amounts", role: .destructive) {
+                    currency = newCurrency
+                    targetText = ""
+                    currentText = "0"
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("Enter a new target and saved amount after changing the currency.")
             }
         }
     }

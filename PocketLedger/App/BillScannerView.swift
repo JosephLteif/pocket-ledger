@@ -36,11 +36,11 @@ struct BillLineItem: Identifiable, Equatable, Sendable {
         self.initialUnitPriceText = unitPriceText
     }
 
-    func total(in currency: LedgerCurrency) -> Money? {
+    func total(in currency: LedgerCurrency, locale: Locale = .current) -> Money? {
         let multiplier = Int64(max(quantity, 1))
 
         if let lineTotalOverrideText {
-            guard let lineTotal = Money.parse(lineTotalOverrideText, currency: currency),
+            guard let lineTotal = Money.parse(lineTotalOverrideText, currency: currency, locale: locale),
                   lineTotal.minorUnits > 0 else {
                 return nil
             }
@@ -49,19 +49,19 @@ struct BillLineItem: Identifiable, Equatable, Sendable {
 
         if quantity == initialQuantity,
            unitPriceText == initialUnitPriceText,
-           let lineTotal = Money.parse(lineTotalText, currency: currency),
+           let lineTotal = Money.parse(lineTotalText, currency: currency, locale: locale),
            lineTotal.minorUnits > 0 {
             return lineTotal
         }
 
-        if let unitPrice = Money.parse(unitPriceText, currency: currency),
+        if let unitPrice = Money.parse(unitPriceText, currency: currency, locale: locale),
            unitPrice.minorUnits > 0 {
             let (minorUnits, overflow) = unitPrice.minorUnits.multipliedReportingOverflow(by: multiplier)
             guard !overflow else { return nil }
             return Money(currency: currency, minorUnits: minorUnits)
         }
 
-        guard let lineTotal = Money.parse(lineTotalText, currency: currency),
+        guard let lineTotal = Money.parse(lineTotalText, currency: currency, locale: locale),
               lineTotal.minorUnits > 0 else {
             return nil
         }
@@ -69,17 +69,9 @@ struct BillLineItem: Identifiable, Equatable, Sendable {
     }
 }
 
-private struct BillOCRResult: Sendable {
-    let text: String
-    let items: [BillLineItem]
-    let currency: LedgerCurrency
-}
-
 private struct BillScanResult: Sendable {
-    let text: String
-    let items: [BillLineItem]
-    let currency: LedgerCurrency
-    let statusMessage: String
+    let payment: BillScannerParser.Payment
+    var items: [LedgerCurrency: [BillLineItem]]
 }
 
 private struct BillTransactionEditorRequest: Identifiable {
@@ -99,8 +91,8 @@ private enum BillScannerError: LocalizedError, Sendable {
 }
 
 private enum BillOCRService {
-    static func recognize(from data: Data) async throws -> BillOCRResult {
-        let visionResult = try await Task.detached(priority: .userInitiated) {
+    static func recognize(from data: Data) async throws -> String {
+        try await Task.detached(priority: .userInitiated) {
             guard let image = UIImage(data: data),
                   let cgImage = image.cgImage else {
                 throw BillScannerError.invalidImage
@@ -129,318 +121,29 @@ private enum BillOCRService {
             )
             try handler.perform([request])
 
-            let lines = (request.results ?? [])
-                .sorted { lhs, rhs in
-                    let verticalDifference = abs(lhs.boundingBox.minY - rhs.boundingBox.minY)
-                    if verticalDifference > 0.02 {
-                        return lhs.boundingBox.minY > rhs.boundingBox.minY
-                    }
-                    return lhs.boundingBox.minX < rhs.boundingBox.minX
-                }
-                .compactMap { $0.topCandidates(1).first?.string }
-            let recognizedText = lines.joined(separator: "\n")
-            return BillScannerParser.parse(recognizedText)
+            let fragments = (request.results ?? []).compactMap { observation -> (text: String, bounds: CGRect)? in
+                guard let text = observation.topCandidates(1).first?.string else { return nil }
+                return (text, observation.boundingBox)
+            }
+            return BillScannerParser.orderedText(fragments)
         }.value
-
-        return BillOCRResult(
-            text: visionResult.text,
-            items: visionResult.items,
-            currency: visionResult.currency
-        )
     }
 
-    static func analyze(_ visionResult: BillOCRResult) async -> BillScanResult {
-        let analysis = await FoundationModelService.analyzeReceipt(text: visionResult.text)
-        let aiItems: [BillLineItem] = analysis.items.compactMap { item -> BillLineItem? in
-            let unitPriceText = item.unitPriceText.flatMap {
-                BillScannerParser.validAmountText($0, currency: visionResult.currency)
-            }
-            let lineTotalText = item.lineTotalText.flatMap {
-                BillScannerParser.validAmountText($0, currency: visionResult.currency)
-            }
-            guard unitPriceText != nil || lineTotalText != nil else { return nil }
-
-            return BillLineItem(
-                name: item.name,
-                quantity: item.quantity,
-                unitPriceText: unitPriceText ?? "",
-                lineTotalText: lineTotalText ?? ""
-            )
-        }
-
-        switch analysis.status {
-        case .applied(let provider) where !aiItems.isEmpty:
-            return BillScanResult(
-                text: visionResult.text,
-                items: aiItems,
-                currency: visionResult.currency,
-                statusMessage: receiptAnalysisMessage(for: provider)
-            )
-        case .applied:
-            return BillScanResult(
-                text: visionResult.text,
-                items: visionResult.items,
-                currency: visionResult.currency,
-                statusMessage: "AI cleanup returned no usable prices, so Vision OCR was used instead. Review the items before saving."
-            )
-        case .unavailable(let message), .failed(let message):
-            return BillScanResult(
-                text: visionResult.text,
-                items: visionResult.items,
-                currency: visionResult.currency,
-                statusMessage: message
-            )
-        }
-    }
-
-    private static func receiptAnalysisMessage(
-        for provider: FoundationModelService.ReceiptAnalysis.Provider
-    ) -> String {
-        switch provider {
-        case .onDevice:
-            return "On-device AI cleaned up the receipt items. Review the selection before saving."
-        }
-    }
-}
-
-private enum BillScannerParser {
-    private struct NumberToken {
-        let range: NSRange
-        let value: Decimal
-    }
-
-    static func parse(_ text: String) -> BillScanResult {
-        let currency = detectCurrency(in: text)
-        let items = text
-            .components(separatedBy: .newlines)
-            .compactMap(parseLine)
-
-        return BillScanResult(
-            text: text,
-            items: items,
-            currency: currency,
-            statusMessage: "Vision OCR read the receipt. Review the detected items before saving."
-        )
-    }
-
-    private static func parseLine(_ line: String) -> BillLineItem? {
-        let trimmedLine = normalizeNumerals(in: line)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmedLine.count >= 2 else { return nil }
-        guard !isMetadataLine(trimmedLine) else { return nil }
-        guard trimmedLine.rangeOfCharacter(from: .letters) != nil else { return nil }
-
-        let tokens = numberTokens(in: trimmedLine)
-        guard let totalToken = tokens.last, totalToken.value > 0 else { return nil }
-        guard hasPriceSuffix(after: totalToken, in: trimmedLine) else { return nil }
-
-        var quantity = 1
-        var unitPrice = totalToken.value
-        if let possibleQuantity = integerQuantity(tokens[0].value) {
-            let prefix = (trimmedLine as NSString)
-                .substring(to: tokens[0].range.location)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let quantityIsPlausible = prefix.isEmpty
-                || prefix.rangeOfCharacter(from: .letters) != nil
-                || tokens.count >= 3
-
-            if quantityIsPlausible {
-                quantity = possibleQuantity
-                if tokens.count >= 3 {
-                    unitPrice = tokens[tokens.count - 2].value
-                } else {
-                    unitPrice = totalToken.value / Decimal(quantity)
-                }
+    static func analyze(_ text: String) async -> BillScanResult {
+        let payment = BillScannerParser.payment(in: text)
+        var suggestions: [BillScannerParser.ItemSuggestion] = []
+        if BillScannerParser.canRecoverWrappedItems(in: text) {
+            let analysis = await FoundationModelService.analyzeReceipt(text: text)
+            suggestions = analysis.items.compactMap { item in
+                guard let lineTotal = item.lineTotalText else { return nil }
+                return BillScannerParser.ItemSuggestion(name: item.name, lineTotal: lineTotal)
             }
         }
 
-        let itemName = cleanedName(from: trimmedLine, removing: tokens)
-        let uppercasedName = itemName.uppercased()
-        guard itemName.count >= 2,
-              !["USD", "LBP", "EUR", "LL"].contains(uppercasedName) else {
-            return nil
+        let items = LedgerCurrency.allCases.map {
+            ($0, BillScannerParser.items(in: text, currency: $0, suggestions: suggestions))
         }
-
-        return BillLineItem(
-            name: itemName,
-            quantity: quantity,
-            unitPriceText: decimalText(unitPrice),
-            lineTotalText: decimalText(totalToken.value)
-        )
-    }
-
-    fileprivate static func normalizeNumerals(in text: String) -> String {
-        String(text.map { character -> Character in
-            switch character {
-            case "٠": return "0"
-            case "١": return "1"
-            case "٢": return "2"
-            case "٣": return "3"
-            case "٤": return "4"
-            case "٥": return "5"
-            case "٦": return "6"
-            case "٧": return "7"
-            case "٨": return "8"
-            case "٩": return "9"
-            case "۰": return "0"
-            case "۱": return "1"
-            case "۲": return "2"
-            case "۳": return "3"
-            case "۴": return "4"
-            case "۵": return "5"
-            case "۶": return "6"
-            case "۷": return "7"
-            case "۸": return "8"
-            case "۹": return "9"
-            case "٫": return "."
-            case "٬": return ","
-            default: return character
-            }
-        })
-    }
-
-    private static func numberTokens(in line: String) -> [NumberToken] {
-        let regex = try! NSRegularExpression(pattern: #"\d+(?:[.,]\d{1,3})*"#)
-        let nsLine = line as NSString
-        let searchRange = NSRange(location: 0, length: nsLine.length)
-
-        return regex.matches(in: line, range: searchRange).compactMap { match in
-            let rawValue = nsLine.substring(with: match.range)
-            guard let value = decimal(from: rawValue) else { return nil }
-            return NumberToken(range: match.range, value: value)
-        }
-    }
-
-    private static func decimal(from rawValue: String) -> Decimal? {
-        let normalizedValue: String
-        if let comma = rawValue.lastIndex(of: ","),
-           let dot = rawValue.lastIndex(of: ".") {
-            if comma > dot {
-                normalizedValue = rawValue
-                    .replacingOccurrences(of: ".", with: "")
-                    .replacingOccurrences(of: ",", with: ".")
-            } else {
-                normalizedValue = rawValue.replacingOccurrences(of: ",", with: "")
-            }
-        } else if rawValue.filter({ $0 == "," }).count == 1,
-                  let comma = rawValue.firstIndex(of: ",") {
-            let suffix = rawValue[rawValue.index(after: comma)...]
-            normalizedValue = suffix.count == 3
-                ? rawValue.replacingOccurrences(of: ",", with: "")
-                : rawValue.replacingOccurrences(of: ",", with: ".")
-        } else {
-            normalizedValue = rawValue.replacingOccurrences(of: ",", with: "")
-        }
-
-        return Decimal(
-            string: normalizedValue,
-            locale: Locale(identifier: "en_US_POSIX")
-        )
-    }
-
-    private static func integerQuantity(_ value: Decimal) -> Int? {
-        guard value >= 1, value <= 99 else { return nil }
-        let integer = NSDecimalNumber(decimal: value).intValue
-        return Decimal(integer) == value ? integer : nil
-    }
-
-    private static func cleanedName(from line: String, removing tokens: [NumberToken]) -> String {
-        var name = line
-        for token in tokens.reversed() {
-            name = (name as NSString).replacingCharacters(in: token.range, with: " ")
-        }
-
-        return name
-            .components(separatedBy: .whitespacesAndNewlines)
-            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
-            .filter { !$0.isEmpty && $0.lowercased() != "x" }
-            .joined(separator: " ")
-    }
-
-    private static func decimalText(_ value: Decimal) -> String {
-        NSDecimalNumber(decimal: value).stringValue
-    }
-
-    fileprivate static func validAmountText(_ text: String, currency: LedgerCurrency) -> String? {
-        let normalized = normalizeNumerals(in: text)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty,
-              (Money.parse(normalized, currency: currency)?.minorUnits ?? 0) > 0 else {
-            return nil
-        }
-        return normalized
-    }
-
-    private static func hasPriceSuffix(after token: NumberToken, in line: String) -> Bool {
-        let suffix = (line as NSString)
-            .substring(from: NSMaxRange(token.range))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !suffix.isEmpty else { return true }
-
-        var removableSuffixCharacters = CharacterSet.punctuationCharacters
-        removableSuffixCharacters.formUnion(.symbols)
-        let normalizedSuffix = suffix
-            .trimmingCharacters(in: removableSuffixCharacters)
-            .uppercased()
-        if normalizedSuffix.isEmpty { return true }
-        return ["USD", "LBP", "EUR", "LL", "دولار", "ل.ل"].contains(normalizedSuffix)
-    }
-
-    private static func isMetadataLine(_ line: String) -> Bool {
-        let lowercasedLine = line.lowercased()
-        let ignoredPatterns = [
-            #"\b(?:subtotal|total|tax|vat|discount|change|cash|credit|debit|invoice|receipt|thank|date|time|tel|phone|mobile|fax|address|customer|cashier|terminal|reference|auth|approval|order|transaction|loyalty|card|payment)\b"#,
-            #"\bamount\s+due\b"#,
-            #"\bbalance\b"#
-        ]
-        guard !ignoredPatterns.contains(where: {
-            lowercasedLine.range(of: $0, options: .regularExpression) != nil
-        }) else { return true }
-
-        let metadataPatterns = [
-            #"\b(?:street|st\.|road|rd\.|avenue|ave\.|boulevard|blvd\.|highway|hwy|lane|ln\.|drive|dr\.|floor|fl\.|suite|ste\.|apt\.|unit|zip|postal)\b"#,
-            #"\b\d{1,4}[/.-]\d{1,4}[/.-]\d{1,4}\b"#,
-            #"\b\d{1,2}:\d{2}(?::\d{2})?\b"#,
-            #"(?:https?://|www\.|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,})"#
-        ]
-        if metadataPatterns.contains(where: {
-            lowercasedLine.range(of: $0, options: .regularExpression) != nil
-        }) {
-            return true
-        }
-
-        let tokens = numberTokens(in: line)
-        let digitCount = line.unicodeScalars.filter { CharacterSet.decimalDigits.contains($0) }.count
-        let hasCurrencyMarker = lowercasedLine.range(
-            of: #"(?:\$|€|£|\b(?:usd|lbp|eur|ll)\b|ل\.ل)"#,
-            options: .regularExpression
-        ) != nil
-        if digitCount >= 7 && tokens.count >= 2 && !hasCurrencyMarker {
-            return true
-        }
-
-        return false
-    }
-
-    fileprivate static func detectCurrency(in text: String) -> LedgerCurrency {
-        let uppercasedText = text.uppercased()
-        let hasStandaloneLL = uppercasedText.range(
-            of: #"\bLL\b"#,
-            options: .regularExpression
-        ) != nil
-
-        if uppercasedText.contains("LBP")
-            || uppercasedText.contains("L.L")
-            || uppercasedText.contains("ل.ل")
-            || hasStandaloneLL {
-            return .lbp
-        }
-        if uppercasedText.contains("EUR")
-            || uppercasedText.contains("EURO")
-            || uppercasedText.contains("€") {
-            return .eur
-        }
-        return .usd
+        return BillScanResult(payment: payment, items: Dictionary(uniqueKeysWithValues: items))
     }
 }
 
@@ -459,7 +162,8 @@ struct BillScannerView: View {
     @State private var previewImage: UIImage?
     @State private var recognizedText = ""
     @State private var lineItems: [BillLineItem] = []
-    @State private var scanStatusMessage: String?
+    @State private var scanResult: BillScanResult?
+    @State private var requiresCurrencySelection = false
     @State private var currency: LedgerCurrency = .usd
     @State private var isScanning = false
     @State private var scanProgressMessage = "Reading receipt text…"
@@ -536,33 +240,21 @@ struct BillScannerView: View {
                         .pocketGlassSurface(cornerRadius: 16)
                     }
 
-                    if let scanStatusMessage, !scanStatusMessage.isEmpty, !isScanning {
-                        Label(scanStatusMessage, systemImage: "sparkles")
-                            .font(.footnote)
-                            .foregroundStyle(PocketLedgerTheme.textSecondary)
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .pocketGlassSurface(cornerRadius: 14)
-                    }
-
-                    if !lineItems.isEmpty {
-                        reviewItems
-                    } else if !isScanning, previewImage != nil {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("No priced items detected", systemImage: "exclamationmark.magnifyingglass")
-                                .font(.headline)
-                            Text("Add an item manually or try a clearer, closer photo.")
-                                .font(.subheadline)
-                                .foregroundStyle(PocketLedgerTheme.textSecondary)
-
+                    if !isScanning, previewImage != nil {
+                        totalCard
+                        if !requiresCurrencySelection {
+                            if lineItems.isEmpty {
+                                Label("No priced items detected", systemImage: "exclamationmark.magnifyingglass")
+                                    .font(.subheadline)
+                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                            } else {
+                                reviewItems
+                            }
                             Button(action: addManualItem) {
                                 Label("Add item manually", systemImage: "plus.circle")
                             }
                             .foregroundStyle(PocketLedgerTheme.accent)
                         }
-                        .padding(16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .pocketGlassSurface(cornerRadius: 18)
                     }
 
                     if !recognizedText.isEmpty {
@@ -597,6 +289,7 @@ struct BillScannerView: View {
                         Image(systemName: "plus")
                     }
                     .accessibilityLabel("Add bill photo or PDF")
+                    .disabled(isScanning)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
@@ -633,11 +326,6 @@ struct BillScannerView: View {
             .onChange(of: selectedPhoto) { _, item in
                 guard let item else { return }
                 loadPhoto(item)
-            }
-            .onChange(of: currency) { _, newCurrency in
-                if let billTotalOverrideText {
-                    self.billTotalOverrideText = newCurrency.formattedInput(billTotalOverrideText)
-                }
             }
             .fileImporter(
                 isPresented: $isShowingDocumentImporter,
@@ -716,13 +404,6 @@ struct BillScannerView: View {
             ForEach(lineItems) { item in
                 lineItemEditor(lineItemBinding(for: item))
             }
-
-            Button(action: addManualItem) {
-                Label("Add item manually", systemImage: "plus.circle")
-            }
-            .foregroundStyle(PocketLedgerTheme.accent)
-
-            totalCard
         }
     }
 
@@ -730,10 +411,7 @@ struct BillScannerView: View {
         let itemID = item.wrappedValue.id
         let isSelected = Binding<Bool>(
             get: { item.wrappedValue.isSelected },
-            set: {
-                item.wrappedValue.isSelected = $0
-                billTotalOverrideText = nil
-            }
+            set: { item.wrappedValue.isSelected = $0 }
         )
         let unitPriceText = Binding<String>(
             get: { item.wrappedValue.unitPriceText },
@@ -743,7 +421,6 @@ struct BillScannerView: View {
                 item.wrappedValue.unitPriceText = newValue
                 guard oldPrice != newPrice else { return }
                 item.wrappedValue.lineTotalOverrideText = nil
-                billTotalOverrideText = nil
             }
         )
         let lineTotalOverrideText = Binding<String>(
@@ -757,7 +434,6 @@ struct BillScannerView: View {
             },
             set: {
                 item.wrappedValue.lineTotalOverrideText = $0
-                billTotalOverrideText = nil
                 guard let total = Money.parse($0, currency: currency), total.minorUnits > 0 else { return }
                 var unitPriceMinorUnits = Decimal(total.minorUnits)
                     / Decimal(max(item.wrappedValue.quantity, 1))
@@ -808,14 +484,13 @@ struct BillScannerView: View {
                 set: { quantity in
                     item.wrappedValue.quantity = quantity
                     item.wrappedValue.lineTotalOverrideText = nil
-                    billTotalOverrideText = nil
                 }
             ), in: 1...99) {
                 Text("Quantity \(item.wrappedValue.quantity)")
                     .font(.subheadline)
             }
 
-            CurrencyInputField("Unit price", text: unitPriceText, currency: $currency)
+            CurrencyInputField("Unit price", text: unitPriceText, currency: currency)
 
             HStack {
                 Text("Item total")
@@ -828,12 +503,6 @@ struct BillScannerView: View {
                     .font(.subheadline.weight(.semibold).monospacedDigit())
                     .frame(minWidth: 80, maxWidth: 150)
                     .accessibilityLabel("Item total")
-                    .onChange(of: currency) { _, newCurrency in
-                        guard let totalOverride = item.wrappedValue.lineTotalOverrideText,
-                              !totalOverride.isEmpty else { return }
-                        item.wrappedValue.lineTotalOverrideText = newCurrency.formattedInput(totalOverride)
-                    }
-                CurrencySelectionMenu(currency: $currency)
             }
         }
         .padding(14)
@@ -855,65 +524,88 @@ struct BillScannerView: View {
         )
     }
 
-    @ViewBuilder
     private var totalCard: some View {
-        if !lineItems.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Bill total")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(PocketLedgerTheme.textSecondary)
-                        if isBillTotalFocused {
-                            TextField("Enter total", text: billTotalInput)
-                                .keyboardType(.decimalPad)
-                                .focused($isBillTotalFocused)
-                                .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
-                                .frame(minWidth: 120, maxWidth: 200)
-                        } else {
-                            Button(action: beginBillTotalEditing) {
-                                HStack(spacing: 8) {
-                                    Text(currentBillTotal?.formatted ?? "Enter a price")
-                                    Image(systemName: "pencil")
-                                        .font(.caption)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Bill total")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    if requiresCurrencySelection {
+                        Menu("Choose payment currency") {
+                            ForEach(scanResult?.payment.currencies ?? []) { option in
+                                Button {
+                                    selectCurrency(option)
+                                } label: {
+                                    Text(scannedTotal(in: option)?.formatted ?? option.rawValue)
                                 }
-                                .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
-                                .foregroundStyle(currentBillTotal == nil ? PocketLedgerTheme.textTertiary : PocketLedgerTheme.textPrimary)
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Edit bill total")
                         }
+                    } else if isBillTotalFocused {
+                        TextField("Enter total", text: billTotalInput)
+                            .keyboardType(.decimalPad)
+                            .focused($isBillTotalFocused)
+                            .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
+                            .frame(minWidth: 120, maxWidth: 200)
+                    } else {
+                        Button(action: beginBillTotalEditing) {
+                            HStack(spacing: 8) {
+                                Text(currentBillTotal?.formatted ?? "Enter a price")
+                                Image(systemName: "pencil")
+                                    .font(.caption)
+                            }
+                            .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(currentBillTotal == nil ? PocketLedgerTheme.textTertiary : PocketLedgerTheme.textPrimary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Edit bill total")
                     }
-                    Spacer()
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(PocketLedgerTheme.positive)
                 }
-
-                Button(action: useTotalInTransaction) {
-                    Label("Use total in transaction", systemImage: "arrow.down.to.line")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glassProminent)
-                .tint(PocketLedgerTheme.accent)
-                .disabled(currentBillTotal == nil)
-
-                if !hasMatchingAccount {
-                    Text("Add a \(currency.rawValue) account first to use this total.")
-                        .font(.footnote)
-                        .foregroundStyle(PocketLedgerTheme.warning)
-
-                    Button {
-                        isShowingAccountEditor = true
-                    } label: {
-                        Label("Add \(currency.rawValue) account", systemImage: "plus.circle")
-                    }
-                    .buttonStyle(.glass)
+                Spacer()
+                if !requiresCurrencySelection {
+                    CurrencySelectionMenu(currency: Binding(get: { currency }, set: selectCurrency))
                 }
             }
-            .padding(16)
-            .pocketGlassSurface(cornerRadius: 20, tint: PocketLedgerTheme.accent.opacity(0.08))
+
+            if !requiresCurrencySelection {
+                if let selectedTotal, let currentBillTotal, selectedTotal != currentBillTotal {
+                    Text("Selected items add up to \(selectedTotal.formatted).")
+                        .font(.footnote)
+                        .foregroundStyle(PocketLedgerTheme.warning)
+                    Button("Use selected item total") {
+                        billTotalOverrideText = editableAmountText(for: selectedTotal)
+                    }
+                    .font(.footnote)
+                } else if currentBillTotal == nil, scanResult?.payment.hasPrintedTotal == true {
+                    Text("Check the receipt and enter the amount paid in \(currency.rawValue).")
+                        .font(.footnote)
+                        .foregroundStyle(PocketLedgerTheme.warning)
+                }
+            }
+
+            Button(action: useTotalInTransaction) {
+                Label("Use total in transaction", systemImage: "arrow.down.to.line")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent)
+            .tint(PocketLedgerTheme.accent)
+            .disabled(currentBillTotal == nil)
+
+            if !requiresCurrencySelection, !hasMatchingAccount {
+                Text("Add a \(currency.rawValue) account first to use this total.")
+                    .font(.footnote)
+                    .foregroundStyle(PocketLedgerTheme.warning)
+
+                Button {
+                    isShowingAccountEditor = true
+                } label: {
+                    Label("Add \(currency.rawValue) account", systemImage: "plus.circle")
+                }
+                .buttonStyle(.glass)
+            }
         }
+        .padding(16)
+        .pocketGlassSurface(cornerRadius: 20, tint: PocketLedgerTheme.accent.opacity(0.08))
     }
 
     private var selectedItemCount: Int {
@@ -937,7 +629,11 @@ struct BillScannerView: View {
     }
 
     private var currentBillTotal: Money? {
-        guard let billTotalOverrideText else { return selectedTotal }
+        guard !requiresCurrencySelection else { return nil }
+        guard let billTotalOverrideText else {
+            if scanResult?.payment.hasPrintedTotal == true { return scannedTotal(in: currency) }
+            return selectedTotal
+        }
         guard let total = Money.parse(billTotalOverrideText, currency: currency), total.minorUnits > 0 else {
             return nil
         }
@@ -947,17 +643,31 @@ struct BillScannerView: View {
     private var billTotalInput: Binding<String> {
         Binding(
             get: {
-                self.billTotalOverrideText
-                    ?? self.selectedTotal.map { self.editableAmountText(for: $0) }
-                    ?? ""
+                self.billTotalOverrideText ?? self.currentBillTotal.map { self.editableAmountText(for: $0) } ?? ""
             },
             set: { self.billTotalOverrideText = $0 }
         )
     }
 
     private func editableAmountText(for money: Money) -> String {
-        let units = Decimal(money.minorUnits) / Decimal(money.currency.minorUnitScale)
-        return currency.formattedInput(NSDecimalNumber(decimal: units).stringValue)
+        money.currency.formattedInput(minorUnits: money.minorUnits)
+    }
+
+    private func scannedTotal(in currency: LedgerCurrency) -> Money? {
+        let totals = scanResult?.payment.totals.filter { $0.currency == currency } ?? []
+        return totals.count == 1 ? totals.first : nil
+    }
+
+    private func selectCurrency(_ newCurrency: LedgerCurrency) {
+        requiresCurrencySelection = false
+        guard newCurrency != currency else { return }
+        dismissKeyboard()
+        if scanResult != nil {
+            scanResult?.items[currency] = lineItems
+            lineItems = scanResult?.items[newCurrency] ?? []
+        }
+        currency = newCurrency
+        billTotalOverrideText = nil
     }
 
     private var hasMatchingAccount: Bool {
@@ -996,6 +706,8 @@ struct BillScannerView: View {
     }
 
     private func loadPhoto(_ item: PhotosPickerItem) {
+        isScanning = true
+        scanProgressMessage = "Reading receipt photo…"
         Task { @MainActor in
             do {
                 guard let data = try await item.loadTransferable(type: Data.self),
@@ -1007,6 +719,7 @@ struct BillScannerView: View {
             } catch {
                 selectedPhoto = nil
                 errorMessage = error.localizedDescription
+                isScanning = false
             }
         }
     }
@@ -1015,8 +728,11 @@ struct BillScannerView: View {
         guard let resizedImage = resizedBillImage(image),
               let data = resizedImage.jpegData(compressionQuality: 0.88) else {
             errorMessage = BillScannerError.invalidImage.localizedDescription
+            isScanning = false
             return
         }
+        isScanning = true
+        scanProgressMessage = "Reading receipt text…"
         previewImage = resizedImage
         attachmentData = data
         attachmentFileName = "receipt-\(UUID().uuidString.lowercased()).jpg"
@@ -1074,7 +790,8 @@ struct BillScannerView: View {
             recognizedText = ""
             lineItems = []
             billTotalOverrideText = nil
-            scanStatusMessage = "PDF ready. Add the transaction details, then review the attachment before saving."
+            scanResult = nil
+            requiresCurrencySelection = false
             transactionEditorRequest = BillTransactionEditorRequest(total: nil)
         } catch {
             errorMessage = error.localizedDescription
@@ -1082,31 +799,28 @@ struct BillScannerView: View {
     }
 
     private func scan(data: Data) async {
-        isScanning = true
-        scanProgressMessage = "Reading receipt text…"
+        defer { isScanning = false }
         errorMessage = nil
         recognizedText = ""
         lineItems = []
         billTotalOverrideText = nil
-        scanStatusMessage = nil
+        scanResult = nil
+        requiresCurrencySelection = false
+        currency = .usd
 
         do {
-            let visionResult = try await BillOCRService.recognize(from: data)
-            recognizedText = visionResult.text
-            lineItems = visionResult.items
-            currency = visionResult.currency
+            let text = try await BillOCRService.recognize(from: data)
+            recognizedText = text
             scanProgressMessage = "Organizing receipt items…"
 
-            let result = await BillOCRService.analyze(visionResult)
-            recognizedText = result.text
-            lineItems = result.items
-            currency = result.currency
-            scanStatusMessage = result.statusMessage
+            let result = await BillOCRService.analyze(text)
+            scanResult = result
+            currency = result.payment.currency
+            lineItems = result.items[currency] ?? []
+            requiresCurrencySelection = result.payment.currencies.count > 1
         } catch {
             errorMessage = error.localizedDescription
         }
-
-        isScanning = false
     }
 
     private func useTotalInTransaction() {
@@ -1122,7 +836,6 @@ struct BillScannerView: View {
     private func addManualItem() {
         let item = BillLineItem(name: "")
         lineItems.append(item)
-        billTotalOverrideText = nil
         editingLineItemNameID = item.id
         focusedLineItemNameID = item.id
     }
@@ -1133,9 +846,6 @@ struct BillScannerView: View {
     }
 
     private func beginBillTotalEditing() {
-        if billTotalOverrideText == nil, let selectedTotal {
-            billTotalOverrideText = editableAmountText(for: selectedTotal)
-        }
         isBillTotalFocused = true
     }
 

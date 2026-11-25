@@ -682,6 +682,7 @@ struct TransactionEditor: View {
             } else {
                 DatePicker("Date", selection: $date, displayedComponents: .date)
                     .datePickerStyle(.compact)
+                    .id(date)
             }
         }
     }

@@ -1349,7 +1349,11 @@ func financeNetExpenseAmount(
                 let movementCategoryID = isRefund
                     ? movement.categoryID ?? refundCategoryID
                     : transaction.categoryID(for: movement)
-                return (categoryID == nil || movementCategoryID == categoryID)
+                return financeCategoryMatches(
+                    movementCategoryID,
+                    selectedCategoryID: categoryID,
+                    in: data.categories
+                )
                     && financeCategoryIncludedInTotals(movementCategoryID, in: data.categories)
             }
             .filter { movement in
@@ -1370,6 +1374,23 @@ func financeNetExpenseAmount(
             - includedAmount(transaction.inflows, isRefund: true),
         0
     )
+}
+
+func financeCategoryMatches(
+    _ categoryID: UUID?,
+    selectedCategoryID: UUID?,
+    in categories: [LedgerCategory]
+) -> Bool {
+    guard let selectedCategoryID else { return true }
+    var currentID = categoryID
+    var visited: Set<UUID> = []
+
+    while let id = currentID, visited.insert(id).inserted {
+        if id == selectedCategoryID { return true }
+        currentID = categories.first(where: { $0.id == id })?.parentID
+    }
+
+    return false
 }
 
 func financeCategoryIncludedInTotals(_ categoryID: UUID?, in categories: [LedgerCategory]) -> Bool {
@@ -1406,7 +1427,11 @@ func financeBudgetSpent(
             transaction.kind == .expense
                 && period.contains(transaction.date)
                 && transaction.outflows.contains {
-                    transaction.categoryID(for: $0) == budget.categoryID
+                    financeCategoryMatches(
+                        transaction.categoryID(for: $0),
+                        selectedCategoryID: budget.categoryID,
+                        in: data.categories
+                    )
                 }
         }
         .reduce(Int64.zero) { total, transaction in

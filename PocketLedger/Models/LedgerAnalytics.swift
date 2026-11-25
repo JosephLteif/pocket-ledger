@@ -320,6 +320,10 @@ struct LedgerIndex {
         interval: DateInterval,
         calendar: Calendar = .current
     ) -> Money {
+        let budgetCategoryIDs = Set(categoriesByID.keys.filter {
+            categoryMatches($0, selectedCategoryID: budget.categoryID)
+        })
+
         guard let month = calendar.dateInterval(of: .month, for: interval.start),
               month.start == interval.start,
               month.end == interval.end else {
@@ -328,20 +332,31 @@ struct LedgerIndex {
                     $0.kind == .expense
                         && interval.contains($0.date)
                 }
-                .reduce(Int64.zero) {
-                    $0 + (expenseAmountsByCategory($1, currency: budget.currency)[budget.categoryID] ?? 0)
+                .reduce(Int64.zero) { total, transaction in
+                    let amounts = expenseAmountsByCategory(transaction, currency: budget.currency)
+                    let categoryTotal = amounts.reduce(Int64.zero) { subtotal, amount in
+                        guard let categoryID = amount.key,
+                              budgetCategoryIDs.contains(categoryID) else {
+                            return subtotal
+                        }
+                        return subtotal + amount.value
+                    }
+                    return total + categoryTotal
                 }
             return Money(currency: budget.currency, minorUnits: total)
         }
 
-        return Money(
-            currency: budget.currency,
-            minorUnits: dataForMonth(
+        let total = budgetCategoryIDs.reduce(Int64.zero) { total, categoryID in
+            total + dataForMonth(
                 month.start,
-                categoryID: budget.categoryID,
+                categoryID: categoryID,
                 currency: budget.currency,
                 calendar: calendar
             )
+        }
+        return Money(
+            currency: budget.currency,
+            minorUnits: total
         )
     }
 

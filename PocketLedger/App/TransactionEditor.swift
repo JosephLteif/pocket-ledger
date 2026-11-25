@@ -574,7 +574,8 @@ struct TransactionEditor: View {
                 CategorySelectionSheet(
                     categories: selectableCategories,
                     selectedCategoryID: categorySelectionBinding,
-                    includeUncategorized: allowsUncategorizedSelection
+                    includeUncategorized: allowsUncategorizedSelection,
+                    allowsParentSelection: false
                 )
             }
             .fileImporter(
@@ -650,6 +651,7 @@ struct TransactionEditor: View {
 
             if timing == .scheduled {
                 DatePicker("First run", selection: $date, displayedComponents: [.date, .hourAndMinute])
+                    .datePickerStyle(.compact)
 
                 Picker("Repeats", selection: $scheduleFrequency) {
                     ForEach(ScheduleFrequency.allCases) { frequency in
@@ -679,6 +681,7 @@ struct TransactionEditor: View {
                 }
             } else {
                 DatePicker("Date", selection: $date, displayedComponents: .date)
+                    .datePickerStyle(.compact)
             }
         }
     }

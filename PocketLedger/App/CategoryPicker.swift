@@ -4,6 +4,7 @@ struct CategorySelectionSheet: View {
     let categories: [LedgerCategory]
     @Binding var selectedCategoryID: UUID?
     let includeUncategorized: Bool
+    let allowsParentSelection: Bool
 
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
@@ -83,7 +84,7 @@ struct CategorySelectionSheet: View {
                                 categoryRow(
                                     result.category,
                                     breadcrumb: result.breadcrumb,
-                                    canBrowse: false
+                                    canBrowse: expandableCategoryIDs.contains(result.category.id)
                                 )
                             }
                         }
@@ -97,6 +98,7 @@ struct CategorySelectionSheet: View {
                             selectionRow(title: "Uncategorized", systemImage: "tag", id: nil)
                         }
                         .buttonStyle(.plain)
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                         .accessibilityIdentifier("category-option-uncategorized")
                     }
 
@@ -155,36 +157,55 @@ struct CategorySelectionSheet: View {
         breadcrumb: String? = nil,
         canBrowse: Bool
     ) -> some View {
+        let canSelectCategory = allowsParentSelection || !canBrowse
+        let row = selectionRow(
+            title: category.displayName,
+            iconEmoji: category.iconEmoji,
+            systemImage: category.systemImage,
+            id: category.id,
+            breadcrumb: breadcrumb
+        )
+
         HStack(spacing: 0) {
-            Button {
-                selectedCategoryID = category.id
-                remember(category.id)
-                dismiss()
-            } label: {
-                selectionRow(
-                    title: category.displayName,
-                    iconEmoji: category.iconEmoji,
-                    systemImage: category.systemImage,
-                    id: category.id,
-                    breadcrumb: breadcrumb
-                )
+            if canSelectCategory {
+                Button {
+                    selectedCategoryID = category.id
+                    remember(category.id)
+                    dismiss()
+                } label: {
+                    row
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("category-option-\(category.id.uuidString)")
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("category-option-\(category.id.uuidString)")
 
             if canBrowse {
-                NavigationLink(value: category.id) {
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
-                        .frame(width: 44, height: 44)
+                Button {
+                    navigationPath.append(category.id)
+                } label: {
+                    if canSelectCategory {
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    } else {
+                        HStack(spacing: 0) {
+                            row
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(PocketLedgerTheme.textSecondary)
+                                .frame(width: 44, height: 44)
+                        }
                         .contentShape(Rectangle())
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Browse \(category.displayName)")
                 .accessibilityIdentifier("category-browse-\(category.id.uuidString)")
             }
         }
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
     }
 
     private func selectionRow(
@@ -234,13 +255,21 @@ struct CategorySelectionSheet: View {
 struct CategoryPickerContent: View {
     let categories: [LedgerCategory]
     let includeUncategorized: Bool
+    let allowsParentSelection: Bool
 
-    init(categories: [LedgerCategory], includeUncategorized: Bool = true) {
+    init(
+        categories: [LedgerCategory],
+        includeUncategorized: Bool = true,
+        allowsParentSelection: Bool = true
+    ) {
         self.categories = categories
         self.includeUncategorized = includeUncategorized
+        self.allowsParentSelection = allowsParentSelection
     }
 
     var body: some View {
+        let categoriesWithChildren = Set(categories.compactMap(\.parentID))
+
         if includeUncategorized {
             Text("Uncategorized").tag(nil as UUID?)
         }
@@ -250,6 +279,9 @@ struct CategoryPickerContent: View {
                 ForEach(section.entries) { entry in
                     Text(entry.label)
                         .tag(Optional(entry.category.id))
+                        .disabled(
+                            !allowsParentSelection && categoriesWithChildren.contains(entry.category.id)
+                        )
                 }
             } header: {
                 Text(section.title)

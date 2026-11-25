@@ -280,7 +280,8 @@ private struct BudgetEditor: View {
                 CategorySelectionSheet(
                     categories: store.activeCategories,
                     selectedCategoryID: $categoryID,
-                    includeUncategorized: false
+                    includeUncategorized: false,
+                    allowsParentSelection: true
                 )
             }
             .confirmationDialog("Discard budget changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {

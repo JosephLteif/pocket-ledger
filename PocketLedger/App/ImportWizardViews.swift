@@ -1467,7 +1467,8 @@ private struct ImportWizardBulkCategoriesSheet: View {
                     Text("Choose a target").tag(nil as UUID?)
                     CategoryPickerContent(
                         categories: existingCategories.filter { !$0.isArchived },
-                        includeUncategorized: false
+                        includeUncategorized: false,
+                        allowsParentSelection: false
                     )
                 }
             case .parent:
@@ -1876,7 +1877,7 @@ private struct ImportWizardTransactionRow: View {
                 }
             }
             Picker("Category", selection: $transaction.categoryID) {
-                CategoryPickerContent(categories: categories)
+                CategoryPickerContent(categories: categories, allowsParentSelection: false)
             }
             if isDuplicate {
                 Toggle("Skip possible duplicate", isOn: Binding(

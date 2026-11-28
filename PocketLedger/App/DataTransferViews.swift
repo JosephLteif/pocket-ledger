@@ -144,10 +144,11 @@ struct DataTransferView: View {
             isPresented: $isShowingRecoveryConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Restore last-good snapshot", action: restoreLastGoodSnapshot)
+            Button("Export current ledger first") { startBackupExport() }
+            Button("Replace current ledger", role: .destructive, action: restoreLastGoodSnapshot)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This replaces the current ledger with the snapshot captured before the last reset or replacement.")
+            Text("Restoring replaces your current ledger with the older snapshot. Export a backup first to keep changes made since then, then return here to restore.")
         }
         .confirmationDialog(
             "Delete the recovery snapshot?",

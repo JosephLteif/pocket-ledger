@@ -403,9 +403,7 @@ struct DashboardSnapshot {
         for transaction in index.sortedTransactions where month.map({
             transaction.date >= $0.start && transaction.date < $0.end
         }) == true {
-            if index.transactionHasIncludedAccount(transaction) {
-                monthTransactionCount += 1
-            }
+            monthTransactionCount += 1
             guard transaction.kind == .expense,
                   index.transactionCategoryIncludedInTotals(transaction) else {
                 continue

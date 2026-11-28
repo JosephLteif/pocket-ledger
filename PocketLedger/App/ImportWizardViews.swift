@@ -433,7 +433,7 @@ struct ImportWizardView: View {
                     built = FinanceImportResult(
                         data: importedData,
                         importedRows: built.importedRows,
-                        skippedRows: built.skippedRows,
+                        skippedRowDetails: built.skippedRowDetails,
                         warnings: built.warnings
                     )
                     return ImportBuildOutput(result: .success(built))
@@ -460,7 +460,7 @@ struct ImportWizardView: View {
                 let result = FinanceImportResult(
                     data: importedData,
                     importedRows: built.importedRows,
-                    skippedRows: built.skippedRows,
+                    skippedRowDetails: built.skippedRowDetails,
                     warnings: warnings
                 )
                 draft.result = result
@@ -1622,7 +1622,7 @@ private struct ImportWizardReviewList: View {
         }
         .listStyle(.insetGrouped)
         .pocketListSurface()
-        .searchable(text: $searchText, prompt: "Search imported transactions")
+        .searchable(text: $searchText, prompt: filter == .skipped ? "Search skipped rows" : "Search imported transactions")
         .accessibilityIdentifier("importWizard.review")
     }
 
@@ -1688,7 +1688,7 @@ private struct ImportWizardReviewList: View {
                     .foregroundStyle(.secondary)
             }
             if (draft.result?.skippedRows ?? 0) > 0 {
-                Label("\(draft.result?.skippedRows ?? 0) rows were skipped while parsing and are not importable.", systemImage: "arrow.uturn.right")
+                Label("\(draft.result?.skippedRows ?? 0) source rows were skipped. Select Skipped for details.", systemImage: "arrow.uturn.right")
                     .foregroundStyle(.secondary)
             }
             if draft.duplicateTransactionIDs.isEmpty,
@@ -1702,11 +1702,32 @@ private struct ImportWizardReviewList: View {
 
     @ViewBuilder
     private func transactionSection(data: FinanceData, context: ImportWizardReviewContext) -> some View {
-        Section("Transactions") {
+        Section(filter == .skipped ? "Skipped source rows" : "Transactions") {
             let indices = filteredTransactionIndices(data: data, context: context)
             if filter == .skipped {
-                Text("Correct skipped rows in your source file, cancel this review, and import the corrected file. Skipped rows won’t be imported.")
-                    .foregroundStyle(.secondary)
+                let rows = draft.result?.skippedRowDetails ?? []
+                let matchingRows = rows.filter {
+                    searchText.isEmpty || $0.title.localizedCaseInsensitiveContains(searchText)
+                        || $0.reason.localizedCaseInsensitiveContains(searchText)
+                }
+                if rows.isEmpty {
+                    Text("No source rows were skipped.")
+                        .foregroundStyle(.secondary)
+                } else if matchingRows.isEmpty {
+                    Text("No skipped rows match your search.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Correct these rows in your source file, then import the corrected file.")
+                        .foregroundStyle(.secondary)
+                    ForEach(matchingRows) { row in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(row.title)
+                                .font(.subheadline.weight(.semibold))
+                            Text(row.reason)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             } else if indices.isEmpty {
                 Text("No transaction rows match this filter.")
                     .foregroundStyle(.secondary)

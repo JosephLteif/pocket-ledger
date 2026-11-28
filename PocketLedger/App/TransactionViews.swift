@@ -40,7 +40,8 @@ enum TransactionPeriod: String, CaseIterable, Identifiable, Hashable {
         case .all:
             return true
         case .thisMonth:
-            return calendar.dateInterval(of: .month, for: .now)?.contains(date) ?? true
+            guard let month = calendar.dateInterval(of: .month, for: .now) else { return true }
+            return date >= month.start && date < month.end
         case .lastMonth:
             guard let lastMonth = calendar.date(byAdding: .month, value: -1, to: .now) else {
                 return true

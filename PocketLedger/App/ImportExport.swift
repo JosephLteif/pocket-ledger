@@ -257,6 +257,15 @@ struct ImportedTable: Identifiable {
     let name: String
     let columns: [String]
     let rows: [[String]]
+    let sourceRowNumbers: [Int]?
+
+    init(id: String, name: String, columns: [String], rows: [[String]], sourceRowNumbers: [Int]? = nil) {
+        self.id = id
+        self.name = name
+        self.columns = columns
+        self.rows = rows
+        self.sourceRowNumbers = sourceRowNumbers
+    }
 }
 
 struct ImportedDocument: Identifiable {
@@ -398,11 +407,24 @@ struct ImportAccountSuggestion: Equatable, Sendable {
     let currency: LedgerCurrency?
 }
 
+struct FinanceImportSkippedRow: Identifiable, Sendable {
+    let id: Int
+    let sourceRow: Int?
+    let reason: String
+
+    var title: String {
+        if let sourceRow { return "Row \(sourceRow)" }
+        return "Record \(id)"
+    }
+}
+
 struct FinanceImportResult {
     let data: FinanceData
     let importedRows: Int
-    let skippedRows: Int
+    let skippedRowDetails: [FinanceImportSkippedRow]
     let warnings: [String]
+
+    var skippedRows: Int { skippedRowDetails.count }
 }
 
 enum FinanceImportReview {
@@ -635,23 +657,25 @@ enum FinanceImportParser {
     }
 
     private static func parseDelimited(data: Data, fileName: String) throws -> ImportedDocument {
-        guard let text = decodeText(data)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !text.isEmpty else {
+        guard let text = decodeText(data),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw FinanceImportError.invalidFile("The selected file is empty or is not readable text.")
         }
 
         let delimiter = detectDelimiter(in: text)
         let rawRows = parseDelimitedRows(text, delimiter: delimiter)
-        guard let headerRow = rawRows.first, !headerRow.isEmpty else {
+        guard let headerRow = rawRows.first?.cells, !headerRow.isEmpty else {
             throw FinanceImportError.invalidFile("No column headers were found in this file.")
         }
 
         let columns = uniqueHeaders(headerRow)
-        let rows = rawRows.dropFirst().filter { row in
-            row.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        }.map { row in
-            row + Array(repeating: "", count: max(0, columns.count - row.count))
-        }.map { Array($0.prefix(columns.count)) }
+        let dataRows = rawRows.dropFirst().filter { row in
+            row.cells.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        }
+        let rows = dataRows.map { row in
+            let padded = row.cells + Array(repeating: "", count: max(0, columns.count - row.cells.count))
+            return Array(padded.prefix(columns.count))
+        }
 
         guard !rows.isEmpty else {
             throw FinanceImportError.invalidFile("The file has headers but no data rows.")
@@ -660,7 +684,10 @@ enum FinanceImportParser {
         return ImportedDocument(
             fileName: fileName,
             format: .delimited,
-            tables: [ImportedTable(id: "sheet-1", name: "Imported rows", columns: columns, rows: rows)]
+            tables: [ImportedTable(
+                id: "sheet-1", name: "Imported rows", columns: columns, rows: rows,
+                sourceRowNumbers: dataRows.map(\.number)
+            )]
         )
     }
 
@@ -723,21 +750,24 @@ enum FinanceImportParser {
             let worksheetPath = worksheetArchivePath(for: target)
             guard let worksheetData = try? archiveData(at: worksheetPath, in: archive) else { continue }
             let parsedSheet = try parseWorksheet(worksheetData, sharedStrings: sharedStrings)
-            guard let headerRow = parsedSheet.first, !headerRow.isEmpty else { continue }
+            guard let headerRow = parsedSheet.first?.cells, !headerRow.isEmpty else { continue }
 
             let columns = uniqueHeaders(headerRow)
-            let rows = parsedSheet.dropFirst().filter { row in
-                row.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            }.map { row in
-                row + Array(repeating: "", count: max(0, columns.count - row.count))
-            }.map { Array($0.prefix(columns.count)) }
+            let dataRows = parsedSheet.dropFirst().filter { row in
+                row.cells.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            }
+            let rows = dataRows.map { row in
+                let padded = row.cells + Array(repeating: "", count: max(0, columns.count - row.cells.count))
+                return Array(padded.prefix(columns.count))
+            }
 
             guard !rows.isEmpty else { continue }
             let table = ImportedTable(
                 id: "xlsx-\(index + 1)",
                 name: sheet.name,
                 columns: columns,
-                rows: rows
+                rows: rows,
+                sourceRowNumbers: dataRows.map(\.number)
             )
             rawTables.append(table)
             if let normalized = makeMoneyManagerSpreadsheetNormalizedTable(from: table) {
@@ -787,12 +817,12 @@ enum FinanceImportParser {
         return delegate.values
     }
 
-    private static func parseWorksheet(_ data: Data, sharedStrings: [String]) throws -> [[String]] {
+    private static func parseWorksheet(_ data: Data, sharedStrings: [String]) throws -> [(number: Int, cells: [String])] {
         let delegate = XLSXWorksheetDelegate(sharedStrings: sharedStrings)
         try parseXML(data, delegate: delegate)
         let columnCount = delegate.rows.flatMap(\.keys).max().map { $0 + 1 } ?? 0
-        return delegate.rows.map { row in
-            (0..<columnCount).map { row[$0] ?? "" }
+        return zip(delegate.rowNumbers, delegate.rows).map { number, row in
+            (number, (0..<columnCount).map { row[$0] ?? "" })
         }
     }
 
@@ -864,6 +894,7 @@ enum FinanceImportParser {
         }
         var consumedTransferRows: Set<Int> = []
         var rows: [[String]] = []
+        var sourceRowNumbers: [Int]? = table.sourceRowNumbers.map { _ in [] }
 
         for (rowIndex, row) in table.rows.enumerated() {
             guard let kind = spreadsheetKind(cell(row, typeIndex)) else { continue }
@@ -947,6 +978,7 @@ enum FinanceImportParser {
                     "",
                     note
                 ])
+                if let numbers = table.sourceRowNumbers { sourceRowNumbers?.append(numbers[canonicalIndex]) }
                 consumedTransferRows.insert(rowIndex)
                 if let counterpart {
                     consumedTransferRows.insert(counterpart.offset)
@@ -988,6 +1020,7 @@ enum FinanceImportParser {
                 categoryPath,
                 spreadsheetNote(row: row, noteIndex: noteIndex, descriptionIndex: descriptionIndex)
             ])
+            if let numbers = table.sourceRowNumbers { sourceRowNumbers?.append(numbers[rowIndex]) }
         }
 
         guard !rows.isEmpty else { return nil }
@@ -995,7 +1028,8 @@ enum FinanceImportParser {
             id: "\(table.id)-normalized",
             name: "\(table.name) (normalized)",
             columns: normalizedColumns,
-            rows: rows
+            rows: rows,
+            sourceRowNumbers: sourceRowNumbers
         )
     }
 
@@ -1248,11 +1282,13 @@ enum FinanceImportParser {
         "\"\(identifier.replacingOccurrences(of: "\"", with: "\"\""))\""
     }
 
-    private static func parseDelimitedRows(_ text: String, delimiter: Character) -> [[String]] {
-        var rows: [[String]] = []
+    private static func parseDelimitedRows(_ text: String, delimiter: Character) -> [(number: Int, cells: [String])] {
+        var rows: [(number: Int, cells: [String])] = []
         var row: [String] = []
         var field = ""
         var inQuotes = false
+        var lineNumber = 1
+        var recordStart = 1
         var characters = Array(text)
         characters.append("\n")
         var index = 0
@@ -1277,17 +1313,19 @@ enum FinanceImportParser {
                 case delimiter:
                     row.append(field)
                     field = ""
-                case "\n":
+                case _ where character.isNewline:
                     row.append(field.trimmingCharacters(in: .init(charactersIn: "\r")))
                     field = ""
-                    if row.contains(where: { !$0.isEmpty }) {
-                        rows.append(row)
+                    if row.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                        rows.append((recordStart, row))
                     }
                     row = []
+                    recordStart = lineNumber + 1
                 default:
                     field.append(character)
                 }
             }
+            if character.isNewline { lineNumber += 1 }
             index += 1
         }
         return rows
@@ -1481,8 +1519,10 @@ private final class XLSXWorksheetDelegate: NSObject, XMLParserDelegate {
 
     let sharedStrings: [String]
     var rows: [[Int: String]] = []
+    var rowNumbers: [Int] = []
 
     private var currentRow: [Int: String] = [:]
+    private var currentRowNumber = 0
     private var currentCellColumn: Int?
     private var currentCellType = ""
     private var currentValue = ""
@@ -1503,6 +1543,7 @@ private final class XLSXWorksheetDelegate: NSObject, XMLParserDelegate {
         switch elementName {
         case "row":
             currentRow = [:]
+            currentRowNumber = attributeDict["r"].flatMap(Int.init) ?? (currentRowNumber + 1)
         case "c":
             currentCellColumn = Self.columnIndex(from: attributeDict["r"] ?? "")
             currentCellType = attributeDict["t"] ?? ""
@@ -1549,6 +1590,7 @@ private final class XLSXWorksheetDelegate: NSObject, XMLParserDelegate {
             currentInlineText = ""
         case "row":
             rows.append(currentRow)
+            rowNumbers.append(currentRowNumber)
             currentRow = [:]
         default:
             break
@@ -1730,8 +1772,7 @@ enum FinanceImportBuilder {
         var categoryLookup = CategoryLookup(existing.categories)
         var availableExchangeRates = existing.exchangeRates
         var importedTransactions: [LedgerTransaction] = []
-        var warnings: [String] = []
-        var skippedRows = 0
+        var skippedRows: [FinanceImportSkippedRow] = []
         let isoDateFormatter = ISO8601DateFormatter()
         let dateFormatters = [
             "yyyy-MM-dd",
@@ -2033,8 +2074,11 @@ enum FinanceImportBuilder {
                     )
                 )
             } catch {
-                skippedRows += 1
-                warnings.append("Row \(rowOffset + 2): \(error.localizedDescription)")
+                skippedRows.append(FinanceImportSkippedRow(
+                    id: rowOffset + 1,
+                    sourceRow: table.sourceRowNumbers?[rowOffset],
+                    reason: error.localizedDescription
+                ))
             }
         }
 
@@ -2050,8 +2094,8 @@ enum FinanceImportBuilder {
                 exchangeRates: importedExchangeRates
             ),
             importedRows: importedTransactions.count,
-            skippedRows: skippedRows,
-            warnings: warnings
+            skippedRowDetails: skippedRows,
+            warnings: []
         )
     }
 

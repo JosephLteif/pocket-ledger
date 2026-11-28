@@ -1258,6 +1258,31 @@ final class FinanceModelTests: XCTestCase {
         )
     }
 
+    func testSkippedCSVRowKeepsItsSourceLineAfterBlankAndMultilineRows() throws {
+        let csv = "Date,Amount,Account,Note\r\n2026-09-06,10,Cash,\"First\r\nSecond\"\r\n\r\n2026-09-07,invalid,Cash,Skipped"
+        let document = try FinanceImportParser.parse(url: URL(fileURLWithPath: "import.csv"), data: Data(csv.utf8))
+        let table = try XCTUnwrap(document.preferredTable)
+        let result = try FinanceImportBuilder.build(
+            table: table,
+            mapping: FinanceImportParser.suggestedMapping(columns: table.columns),
+            options: ImportOptions(
+                defaultKind: .expense,
+                defaultCurrency: .usd,
+                defaultAccountID: nil,
+                defaultDestinationAccountID: nil,
+                createMissingAccounts: true,
+                createMissingCategories: true
+            ),
+            existing: .empty
+        )
+
+        XCTAssertEqual(result.importedRows, 1)
+        XCTAssertEqual(result.skippedRows, 1)
+        let skipped = try XCTUnwrap(result.skippedRowDetails.first)
+        XCTAssertEqual(skipped.sourceRow, 5)
+        XCTAssertFalse(skipped.reason.isEmpty)
+    }
+
     func testImportInfersCurrencyAndAccountTypeFromAccountName() throws {
         let table = ImportedTable(
             id: "accounts",
@@ -2972,7 +2997,7 @@ final class FinanceModelTests: XCTestCase {
         XCTAssertFalse(inputs.matches(draft, ledgerRevision: 5))
 
         draft.step = .organize
-        draft.result = FinanceImportResult(data: .empty, importedRows: 1, skippedRows: 0, warnings: [])
+        draft.result = FinanceImportResult(data: .empty, importedRows: 1, skippedRowDetails: [], warnings: [])
         draft.importedData = .empty
         draft.duplicateTransactionIDs = [UUID()]
 

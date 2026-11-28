@@ -25,6 +25,7 @@ struct MetricsSnapshot {
     let activityCounts: [TransactionKind: Int]
     let categories: [MetricsCategorySnapshot]
     let accounts: [MetricsAccountSnapshot]
+    let spendingByCurrency: [LedgerCurrency: Int64]
 
     static var empty: MetricsSnapshot {
         MetricsSnapshot(
@@ -33,7 +34,8 @@ struct MetricsSnapshot {
             expenses: 0,
             activityCounts: [:],
             categories: [],
-            accounts: []
+            accounts: [],
+            spendingByCurrency: [:]
         )
     }
 
@@ -49,6 +51,7 @@ struct MetricsSnapshot {
         var activityCounts: [TransactionKind: Int] = [:]
         var categoryTotals: [UUID?: (title: String, amount: Int64, count: Int)] = [:]
         var accountTotals: [UUID: (amount: Int64, transactionCount: Int)] = [:]
+        var spendingByCurrency: [LedgerCurrency: Int64] = [:]
 
         for transaction in index.sortedTransactions {
             let matchesCategory = transaction.kind == .expense
@@ -121,6 +124,7 @@ struct MetricsSnapshot {
                         continue
                     }
                     accountNetAmounts[movement.accountID, default: 0] += converted
+                    spendingByCurrency[movement.money.currency, default: 0] += converted
                 }
                 let refundCategoryID = transaction.categoryID
                     ?? transaction.outflows.first.flatMap { transaction.categoryID(for: $0) }
@@ -139,6 +143,7 @@ struct MetricsSnapshot {
                         continue
                     }
                     accountNetAmounts[movement.accountID, default: 0] -= converted
+                    spendingByCurrency[movement.money.currency, default: 0] -= converted
                 }
 
                 for (accountID, amount) in accountNetAmounts where amount > 0 {
@@ -212,7 +217,8 @@ struct MetricsSnapshot {
             expenses: expenses,
             activityCounts: activityCounts,
             categories: categories,
-            accounts: accounts
+            accounts: accounts,
+            spendingByCurrency: spendingByCurrency
         )
     }
 

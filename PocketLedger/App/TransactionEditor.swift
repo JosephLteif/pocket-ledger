@@ -10,6 +10,21 @@ private struct MovementDraft: Identifiable, Equatable {
     var currency: LedgerCurrency
     var amount: String
     var categoryID: UUID? = nil
+
+    var positiveAmount: Money? {
+        guard let money = Money.parse(amount, currency: currency), money.minorUnits > 0 else { return nil }
+        return money
+    }
+}
+
+private enum TransactionValidationField: Hashable {
+    case amount(UUID)
+    case exchangeRate
+}
+
+private struct TransactionFieldCorrection: Equatable {
+    let id = UUID()
+    let field: TransactionValidationField
 }
 
 enum FinanceTransactionDefaults {
@@ -90,6 +105,7 @@ private struct MovementLineEditor: View {
     let amountPlaceholder: String
     let allowsArchivedAccount: Bool
     var focusAmountOnAppear = false
+    var focusRequest: UUID?
 
     var body: some View {
         let availableCurrencies = LedgerCurrency.allCases.filter { currency in
@@ -111,9 +127,14 @@ private struct MovementLineEditor: View {
                     }
                 ),
                 selectableCurrencies: availableCurrencies,
-                focusOnAppear: focusAmountOnAppear
+                focusOnAppear: focusAmountOnAppear,
+                focusRequest: focusRequest
             )
-            if !line.amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            if focusRequest != nil, line.amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Label("Enter an amount.", systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.warning)
+            } else if !line.amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                let amount = Money.parse(line.amount, currency: line.currency), amount.minorUnits <= 0 {
                 Label("Enter an amount greater than zero.", systemImage: "exclamationmark.circle")
                     .font(.caption)
@@ -226,6 +247,8 @@ struct TransactionEditor: View {
     @State private var isShowingDiscardConfirmation = false
     @State private var isShowingProUpgrade = false
     @State private var errorMessage: String?
+    @State private var fieldCorrection: TransactionFieldCorrection?
+    @FocusState private var isRateFocused: Bool
     @State private var isShowingMoreDetails = false
     @State private var saveFeedbackTrigger = 0
     private let editingScheduleID: UUID?
@@ -417,51 +440,12 @@ struct TransactionEditor: View {
 
     var body: some View {
         NavigationStack(path: $specialEditorPath) {
-            Form {
-                Section {
-                    Picker("Type", selection: transactionEditorTypeBinding) {
-                        ForEach(availableTransactionEditorTypes) { editorType in
-                            Text(editorType.displayName).tag(editorType)
-                        }
+            ScrollViewReader { scroll in
+                editorForm
+                    .onChange(of: fieldCorrection) { _, correction in
+                        guard let correction else { return }
+                        scroll.scrollTo(correction.field, anchor: .center)
                     }
-                    .pickerStyle(.menu)
-                } header: {
-                    Text("Transaction type")
-                }
-
-                if assetCreatedNotice {
-                    Section {
-                        Label("Asset purchase saved. Your transaction draft is still open.", systemImage: "checkmark.circle.fill")
-                            .font(.footnote)
-                            .foregroundStyle(PocketLedgerTheme.positive)
-                    }
-                }
-                if loanCreatedNotice {
-                    Section {
-                        Label("Loan created. Your transaction draft is still open.", systemImage: "checkmark.circle.fill")
-                            .font(.footnote)
-                            .foregroundStyle(PocketLedgerTheme.positive)
-                    }
-                }
-
-                if isTemplateEditor {
-                    Section("Template") {
-                        TextField("Template name", text: $templateName)
-                    }
-                }
-
-                timingSection
-                detailsSection
-                if kind == .expense {
-                    expensePaymentsSection
-                    moreDetailsSection
-                } else {
-                    outgoingMovementSection
-                    receivingMovementSection
-                    exchangeRateSection
-                }
-                attachmentSection
-
             }
             .scrollDismissesKeyboard(.interactively)
             .navigationDestination(for: TransactionEditorType.self) { editorType in
@@ -621,6 +605,54 @@ struct TransactionEditor: View {
         }
         .sheet(isPresented: $isShowingProUpgrade) {
             ProUpgradeView(access: proAccess)
+        }
+    }
+
+    private var editorForm: some View {
+        Form {
+            Section {
+                Picker("Type", selection: transactionEditorTypeBinding) {
+                    ForEach(availableTransactionEditorTypes) { editorType in
+                        Text(editorType.displayName).tag(editorType)
+                    }
+                }
+                .pickerStyle(.menu)
+            } header: {
+                Text("Transaction type")
+            }
+
+            if assetCreatedNotice {
+                Section {
+                    Label("Asset purchase saved. Your transaction draft is still open.", systemImage: "checkmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(PocketLedgerTheme.positive)
+                }
+            }
+            if loanCreatedNotice {
+                Section {
+                    Label("Loan created. Your transaction draft is still open.", systemImage: "checkmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(PocketLedgerTheme.positive)
+                }
+            }
+
+            if isTemplateEditor {
+                Section("Template") {
+                    TextField("Template name", text: $templateName)
+                }
+            }
+
+            timingSection
+            detailsSection
+            if kind == .expense {
+                expensePaymentsSection
+                moreDetailsSection
+            } else {
+                outgoingMovementSection
+                receivingMovementSection
+                exchangeRateSection
+            }
+            attachmentSection
         }
     }
 
@@ -784,7 +816,8 @@ struct TransactionEditor: View {
                 line: line,
                 amountPlaceholder: amountPlaceholder,
                 allowsArchivedAccount: allowsArchivedMovementAccounts,
-                focusAmountOnAppear: focusAmountOnAppear
+                focusAmountOnAppear: focusAmountOnAppear,
+                focusRequest: amountFocusRequest(line.wrappedValue.id)
             )
 
             if let paymentIndex {
@@ -805,6 +838,7 @@ struct TransactionEditor: View {
             }
         }
         .padding(.vertical, 4)
+        .id(TransactionValidationField.amount(line.wrappedValue.id))
     }
 
     @ViewBuilder
@@ -817,6 +851,7 @@ struct TransactionEditor: View {
                 } label: {
                     Label("More details", systemImage: "slider.horizontal.3")
                 }
+                .id(TransactionValidationField.exchangeRate)
             }
         }
     }
@@ -966,8 +1001,10 @@ struct TransactionEditor: View {
                         store: store,
                         line: $line,
                         amountPlaceholder: kind == .transfer ? "Amount sent" : "Amount leaving account",
-                        allowsArchivedAccount: allowsArchivedMovementAccounts
+                        allowsArchivedAccount: allowsArchivedMovementAccounts,
+                        focusRequest: amountFocusRequest(line.id)
                     )
+                    .id(TransactionValidationField.amount(line.id))
                 }
                 .onDelete { outflows.remove(atOffsets: $0) }
 
@@ -1003,8 +1040,10 @@ struct TransactionEditor: View {
                         store: store,
                         line: $line,
                         amountPlaceholder: kind == .transfer ? "Amount received" : "Amount entering account",
-                        allowsArchivedAccount: allowsArchivedMovementAccounts
+                        allowsArchivedAccount: allowsArchivedMovementAccounts,
+                        focusRequest: amountFocusRequest(line.id)
                     )
+                    .id(TransactionValidationField.amount(line.id))
                 }
                 .onDelete { inflows.remove(atOffsets: $0) }
 
@@ -1063,8 +1102,7 @@ struct TransactionEditor: View {
                 if useCustomRate {
                     rateCurrencyPicker("Base", selection: $rateBase)
                     rateCurrencyPicker("Quote", selection: $rateQuote)
-                    TextField("Quote units per base unit", text: $rateText)
-                        .keyboardType(.decimalPad)
+                    exchangeRateInput
 
                     if let savedRate {
                         Button {
@@ -1079,6 +1117,7 @@ struct TransactionEditor: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .id(TransactionValidationField.exchangeRate)
         }
     }
 
@@ -1107,8 +1146,7 @@ struct TransactionEditor: View {
             if useCustomRate {
                 rateCurrencyPicker("Base", selection: $rateBase)
                 rateCurrencyPicker("Quote", selection: $rateQuote)
-                TextField("Quote units per base unit", text: $rateText)
-                    .keyboardType(.decimalPad)
+                exchangeRateInput
 
                 if let savedRate {
                     Button {
@@ -1123,6 +1161,26 @@ struct TransactionEditor: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var exchangeRateInput: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            TextField("Quote units per base unit", text: $rateText)
+                .keyboardType(.decimalPad)
+                .focused($isRateFocused)
+            if fieldCorrection?.field == .exchangeRate, appliedExchangeRate == nil {
+                Label("Enter a valid exchange rate for these currencies.", systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.warning)
+            }
+        }
+        .onChange(of: fieldCorrection, initial: true) { _, correction in
+            if correction?.field == .exchangeRate { isRateFocused = true }
+        }
+    }
+
+    private func amountFocusRequest(_ id: UUID) -> UUID? {
+        fieldCorrection?.field == .amount(id) ? fieldCorrection?.id : nil
     }
 
     private var completedOneTimeSchedule: Bool {
@@ -1612,24 +1670,28 @@ struct TransactionEditor: View {
         return nil
     }
 
-    private var saveValidationMessage: String? {
-        if let simpleTransferIssue { return simpleTransferIssue }
+    private var saveValidationIssue: (message: String, field: TransactionValidationField?)? {
+        if let simpleTransferIssue { return (simpleTransferIssue, nil) }
         if isTemplateEditor,
            templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Enter a name for this template."
+            return ("Enter a name for this template.", nil)
+        }
+        let movementDrafts = kind == .income ? inflows : outflows + inflows
+        if let invalidAmount = movementDrafts.first(where: { $0.positiveAmount == nil }) {
+            return ("Enter a valid positive amount.", .amount(invalidAmount.id))
         }
         guard let parsedOutflows, let parsedInflows else {
-            return "Enter a valid positive amount for every account line."
+            return ("Choose a valid account for every account line.", nil)
         }
 
         switch kind {
         case .expense:
-            guard !parsedOutflows.isEmpty else { return "Add a payment amount to save this expense." }
+            guard !parsedOutflows.isEmpty else { return ("Add a payment amount to save this expense.", nil) }
         case .income:
-            guard !parsedInflows.isEmpty else { return "Add an amount and receiving account to save this income." }
+            guard !parsedInflows.isEmpty else { return ("Add an amount and receiving account to save this income.", nil) }
         case .transfer:
             guard !parsedOutflows.isEmpty, !parsedInflows.isEmpty else {
-                return "Add valid sending and receiving amounts to save this transfer."
+                return ("Add valid sending and receiving amounts to save this transfer.", nil)
             }
         }
 
@@ -1637,19 +1699,21 @@ struct TransactionEditor: View {
            parsedOutflows.count > 1,
            !selectableCategories.isEmpty,
            outflows.contains(where: { effectiveCategoryID(for: $0) == nil }) {
-            return "Choose a category for each payment to save this split expense."
+            return ("Choose a category for each payment to save this split expense.", nil)
         }
 
         if !amountDue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             guard kind == .expense,
                   let due = Money.parse(amountDue, currency: dueCurrency),
                   due.minorUnits > 0 else {
-                 return "Enter a bill total greater than zero."
+                return ("Enter a bill total greater than zero.", nil)
             }
         }
 
         if selectedCurrencies.count > 1 {
-            guard appliedExchangeRate != nil else { return "Enter a valid exchange rate for these currencies." }
+            guard appliedExchangeRate != nil else {
+                return ("Enter a valid exchange rate for these currencies.", .exchangeRate)
+            }
         }
 
         return nil
@@ -1714,8 +1778,7 @@ struct TransactionEditor: View {
     private func parseMovements(_ drafts: [MovementDraft]) -> [MoneyMovement]? {
         let movements = drafts.compactMap { draft -> MoneyMovement? in
             guard let account = store.account(with: draft.accountID),
-                  let money = Money.parse(draft.amount, currency: draft.currency),
-                  money.minorUnits > 0 else {
+                  let money = draft.positiveAmount else {
                 return nil
             }
             return MoneyMovement(
@@ -1728,10 +1791,20 @@ struct TransactionEditor: View {
     }
 
     private func save() {
-        if let saveValidationMessage {
-            errorMessage = saveValidationMessage
+        if let issue = saveValidationIssue {
+            if let field = issue.field {
+                if field == .exchangeRate {
+                    isShowingMoreDetails = true
+                    useCustomRate = true
+                }
+                fieldCorrection = TransactionFieldCorrection(field: field)
+            } else {
+                fieldCorrection = nil
+                errorMessage = issue.message
+            }
             return
         }
+        fieldCorrection = nil
 
         guard let parsedOutflows, let parsedInflows else {
             errorMessage = "Enter a valid amount for every account line."

@@ -119,7 +119,7 @@ struct TemplatesView: View {
                 }
                 .buttonStyle(.borderless)
                 .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel("Delete template")
+                .accessibilityLabel("Delete template \(template.name)")
             }
         }
         .padding(16)

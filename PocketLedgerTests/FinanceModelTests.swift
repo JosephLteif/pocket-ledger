@@ -283,6 +283,7 @@ final class FinanceModelTests: XCTestCase {
             selectedCategoryID: travel.id
         )
         XCTAssertEqual(travelMetrics.expenses, 400)
+        XCTAssertEqual(travelMetrics.spendingByCurrency, [.usd: 400])
         XCTAssertEqual(travelMetrics.categories.first?.title, "Travel")
 
         let travelBudget = LedgerBudget(

@@ -472,7 +472,13 @@ struct AccountDetailView: View {
                     if reconciliation.difference.minorUnits == 0 {
                         Text("Reconciled \(reconciliation.lastReconciledAt.formatted(.dateTime.month(.abbreviated).day()))")
                     } else {
-                        Text("Adjusted by")
+                        if !areBalancesRevealed {
+                            Text("Adjusted by")
+                        } else if reconciliation.difference.minorUnits > 0 {
+                            Text("Increased by")
+                        } else {
+                            Text("Decreased by")
+                        }
                         ProtectedAmountText(
                             value: Money(
                                 currency: account.currency,

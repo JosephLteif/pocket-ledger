@@ -733,12 +733,8 @@ struct BillScannerView: View {
         }
         isScanning = true
         scanProgressMessage = "Reading receipt text…"
-        previewImage = resizedImage
-        attachmentData = data
-        attachmentFileName = "receipt-\(UUID().uuidString.lowercased()).jpg"
-        attachmentContentType = "image/jpeg"
         Task { @MainActor in
-            await scan(data: data)
+            await scan(image: resizedImage, data: data)
         }
     }
 
@@ -798,29 +794,35 @@ struct BillScannerView: View {
         }
     }
 
-    private func scan(data: Data) async {
+    private func scan(image: UIImage, data: Data) async {
         defer { isScanning = false }
         errorMessage = nil
-        recognizedText = ""
-        lineItems = []
-        billTotalOverrideText = nil
-        scanResult = nil
-        requiresCurrencySelection = false
-        currency = .usd
 
         do {
             let text = try await BillOCRService.recognize(from: data)
-            recognizedText = text
             scanProgressMessage = "Organizing receipt items…"
 
             let result = await BillOCRService.analyze(text)
+            setReceiptImage(image, data: data)
+            recognizedText = text
+            billTotalOverrideText = nil
             scanResult = result
             currency = result.payment.currency
             lineItems = result.items[currency] ?? []
             requiresCurrencySelection = result.payment.currencies.count > 1
         } catch {
+            if attachmentData == nil {
+                setReceiptImage(image, data: data)
+            }
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func setReceiptImage(_ image: UIImage, data: Data) {
+        previewImage = image
+        attachmentData = data
+        attachmentFileName = "receipt-\(UUID().uuidString.lowercased()).jpg"
+        attachmentContentType = "image/jpeg"
     }
 
     private func useTotalInTransaction() {

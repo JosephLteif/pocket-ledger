@@ -711,32 +711,7 @@ struct MetricsView: View {
         guard proAccess.hasProAccess else { return }
         let currentSnapshot = snapshot
 
-        var spendingByCurrency: [LedgerCurrency: Int64] = [:]
-        for transaction in currentSnapshot.filteredTransactions where transaction.kind == .expense {
-            for movement in transaction.outflows {
-                guard store.ledgerIndex.includesInTotals(accountID: movement.accountID),
-                      let amount = financeConvertedMinorUnits(
-                          movement.money,
-                          to: selectedCurrency,
-                          using: transaction.exchangeRate
-                      ) else {
-                    continue
-                }
-                spendingByCurrency[movement.money.currency, default: 0] += amount
-            }
-            for movement in transaction.inflows {
-                guard store.ledgerIndex.includesInTotals(accountID: movement.accountID),
-                      let amount = financeConvertedMinorUnits(
-                          movement.money,
-                          to: selectedCurrency,
-                          using: transaction.exchangeRate
-                      ) else {
-                    continue
-                }
-                spendingByCurrency[movement.money.currency, default: 0] -= amount
-            }
-        }
-        let positiveCurrencyTotals = spendingByCurrency
+        let positiveCurrencyTotals = currentSnapshot.spendingByCurrency
             .filter { $0.value > 0 }
             .sorted {
                 $0.value == $1.value

@@ -288,8 +288,8 @@ struct GlobalSearchView: View {
                                             }
                                         },
                                         onSaveTemplate: { transactionToTemplate = transaction },
-                                        onOpen: { viewingTransactionID = transaction.id },
                                         allowsActions: true,
+                                        onOpen: { viewingTransactionID = transaction.id },
                                         subtitleOverride: transactionSubtitle(transaction),
                                         usesScrollSwipeActions: true
                                     )

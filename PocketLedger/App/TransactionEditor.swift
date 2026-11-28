@@ -880,7 +880,6 @@ struct TransactionEditor: View {
     }
 
     @ViewBuilder
-    @ViewBuilder
     private var detailsSection: some View {
         Section("Details") {
             TextField("What was this for?", text: $note, axis: .vertical)

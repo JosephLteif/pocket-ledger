@@ -436,14 +436,7 @@ struct ScheduledTransactionsView: View {
                         schedule.isEnabled ? "Pause schedule" : "Enable schedule",
                         systemImage: schedule.isEnabled ? "pause.circle" : "play.circle"
                     ) {
-                        let now = Date.now
-                        if !schedule.isEnabled, schedule.nextRunDate <= now {
-                            scheduleToResume = schedule
-                            resumeCutoff = now
-                            isConfirmingResume = true
-                        } else {
-                            setScheduleEnabled(id: schedule.id, isEnabled: !schedule.isEnabled, now: now)
-                        }
+                        toggleSchedule(schedule)
                     }
                     .disabled(isCompletedOneTime(schedule))
 
@@ -522,7 +515,7 @@ struct ScheduledTransactionsView: View {
                     systemImage: "play.circle",
                     tint: PocketLedgerTheme.positive
                 ) {
-                    setScheduleEnabled(id: schedule.id, isEnabled: true)
+                    toggleSchedule(schedule)
                 }
             }
         }
@@ -739,6 +732,17 @@ struct ScheduledTransactionsView: View {
         setScheduleEnabled(
             id: schedule.id, isEnabled: true, skipsMissedOccurrences: skipsMissedOccurrences, now: resumeCutoff
         )
+    }
+
+    private func toggleSchedule(_ schedule: ScheduledTransaction) {
+        let now = Date.now
+        if !schedule.isEnabled, schedule.nextRunDate <= now {
+            scheduleToResume = schedule
+            resumeCutoff = now
+            isConfirmingResume = true
+        } else {
+            setScheduleEnabled(id: schedule.id, isEnabled: !schedule.isEnabled, now: now)
+        }
     }
 
     private func setScheduleEnabled(

@@ -17,6 +17,7 @@ private struct BackupExportInput: @unchecked Sendable {
 
 private struct PreparedTransferData: @unchecked Sendable {
     let result: Result<Data, Error>
+    var missingReceiptCount = 0
 }
 
 @MainActor
@@ -43,6 +44,8 @@ struct DataTransferView: View {
     @State private var isShowingResetWarning = false
     @State private var isShowingFinalResetWarning = false
     @State private var isContinuingToResetAfterBackup = false
+    @State private var isShowingIncompleteBackupWarning = false
+    @State private var missingBackupReceiptCount = 0
     @State private var isShowingResetSuccess = false
     @State private var isShowingRecoveryConfirmation = false
     @State private var isShowingRecoveryDeletionConfirmation = false
@@ -119,6 +122,17 @@ struct DataTransferView: View {
         .sheet(item: $pendingDocument) { document in
             ImportWizardView(store: store, document: document)
                 .presentationDetents([.large])
+        }
+        .alert("Some receipts are missing", isPresented: $isShowingIncompleteBackupWarning) {
+            Button(isContinuingToResetAfterBackup ? "Export partial backup and continue" : "Export partial backup") {
+                isExportingBackupBundle = true
+            }
+            Button("Cancel", role: .cancel) {
+                isContinuingToResetAfterBackup = false
+                backupBundleDocument = PocketLedgerBackupBundleDocument(data: Data())
+            }
+        } message: {
+            Text("Receipt files unavailable: \(missingBackupReceiptCount). The backup will include your ledger and the receipts that could be read.")
         }
         .alert("Ledger erased", isPresented: $isShowingResetSuccess) {
             Button("OK") {}
@@ -474,9 +488,10 @@ struct DataTransferView: View {
                     for (id, url) in exportInput.attachmentURLs {
                         if let file = try? Data(contentsOf: url) { files[id] = file }
                     }
-                    return PreparedTransferData(result: .success(
-                        try LedgerBackupCodec.encodeBundle(exportInput.data, attachmentData: files)
-                    ))
+                    return PreparedTransferData(
+                        result: .success(try LedgerBackupCodec.encodeBundle(exportInput.data, attachmentData: files)),
+                        missingReceiptCount: max(0, exportInput.data.attachments.count - files.count)
+                    )
                 } catch {
                     return PreparedTransferData(result: .failure(error))
                 }
@@ -485,7 +500,12 @@ struct DataTransferView: View {
             do {
                 backupBundleDocument = PocketLedgerBackupBundleDocument(data: try prepared.result.get())
                 isContinuingToResetAfterBackup = continueToReset
-                isExportingBackupBundle = true
+                missingBackupReceiptCount = prepared.missingReceiptCount
+                if missingBackupReceiptCount > 0 {
+                    isShowingIncompleteBackupWarning = true
+                } else {
+                    isExportingBackupBundle = true
+                }
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -606,7 +626,7 @@ private struct BackupRestoreView: View {
                     if !candidate.backup.data.attachments.isEmpty {
                         LabeledContent("Attachments", value: "\(candidate.backup.data.attachments.count)")
                         if candidate.attachmentFiles.count < candidate.backup.data.attachments.count {
-                            Text("Some attachment bytes are missing from this compatibility backup. The ledger will restore, but those files will show as unavailable.")
+                            Text("Some receipt files are missing from this backup. Those receipts will show as unavailable after restore.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }

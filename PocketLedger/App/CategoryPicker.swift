@@ -5,6 +5,7 @@ struct CategorySelectionSheet: View {
     @Binding var selectedCategoryID: UUID?
     let includeUncategorized: Bool
     let allowsParentSelection: Bool
+    var showsCurrentSelection = true
 
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
@@ -99,6 +100,7 @@ struct CategorySelectionSheet: View {
                         }
                         .buttonStyle(.plain)
                         .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                        .accessibilityAddTraits(showsCurrentSelection && selectedCategoryID == nil ? [.isSelected] : [])
                         .accessibilityIdentifier("category-option-uncategorized")
                     }
 
@@ -176,6 +178,7 @@ struct CategorySelectionSheet: View {
                     row
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(showsCurrentSelection && selectedCategoryID == category.id ? [.isSelected] : [])
                 .accessibilityIdentifier("category-option-\(category.id.uuidString)")
             }
 
@@ -236,7 +239,7 @@ struct CategorySelectionSheet: View {
                 }
             }
             Spacer()
-            if selectedCategoryID == id {
+            if showsCurrentSelection && selectedCategoryID == id {
                 Image(systemName: "checkmark")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(PocketLedgerTheme.accent)

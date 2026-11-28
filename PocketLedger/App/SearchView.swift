@@ -2,12 +2,12 @@ import Foundation
 import SwiftUI
 
 enum FinanceSearch {
-    static func matches(_ account: Account, query: String, balance: Money) -> Bool {
+    static func matches(_ account: Account, query: String, balance: Money?) -> Bool {
         let searchable = [
             account.name,
             account.type.displayName,
             account.currency.rawValue,
-            balance.formatted,
+            balance?.formatted ?? "",
             account.isArchived ? "Archived" : "Active"
         ].joined(separator: " ")
         return searchable.localizedCaseInsensitiveContains(query)
@@ -17,11 +17,21 @@ enum FinanceSearch {
         index.categoryPath(for: category.id).localizedCaseInsensitiveContains(query)
     }
 
-    static func matches(_ transaction: LedgerTransaction, query: String, index: LedgerIndex) -> Bool {
-        searchableText(for: transaction, index: index).localizedCaseInsensitiveContains(query)
+    static func matches(
+        _ transaction: LedgerTransaction,
+        query: String,
+        index: LedgerIndex,
+        includeAmounts: Bool = true
+    ) -> Bool {
+        searchableText(for: transaction, index: index, includeAmounts: includeAmounts)
+            .localizedCaseInsensitiveContains(query)
     }
 
-    static func searchableText(for transaction: LedgerTransaction, index: LedgerIndex) -> String {
+    static func searchableText(
+        for transaction: LedgerTransaction,
+        index: LedgerIndex,
+        includeAmounts: Bool = true
+    ) -> String {
         let movements = transaction.outflows + transaction.inflows
         var searchable = [
             transaction.note,
@@ -31,21 +41,22 @@ enum FinanceSearch {
         ]
 
         searchable.append(contentsOf: movements.flatMap { movement in
-            var details = [movement.money.formatted, movement.money.currency.rawValue,
+            var details = [movement.money.currency.rawValue,
                            index.categoryPath(for: transaction.categoryID(for: movement))]
+            if includeAmounts { details.append(movement.money.formatted) }
             if let account = index.account(with: movement.accountID) {
                 details.append("\(account.name) \(account.type.displayName) \(account.currency.rawValue)")
             }
             return details
         })
 
-        if let amountDue = transaction.amountDue {
+        if includeAmounts, let amountDue = transaction.amountDue {
             searchable.append(amountDue.formatted)
         }
-        if let exchangeRate = transaction.exchangeRate {
+        if includeAmounts, let exchangeRate = transaction.exchangeRate {
             searchable.append(exchangeRate.summary)
         }
-        if let change = transaction.changeAdjustment {
+        if includeAmounts, let change = transaction.changeAdjustment {
             searchable.append(change.requested.formatted)
             searchable.append(change.actual.formatted)
         }
@@ -78,6 +89,7 @@ private struct GlobalSearchSnapshot {
         categories: [LedgerCategory],
         transactionDocuments: [GlobalSearchTransactionDocument],
         index: LedgerIndex,
+        includeAmounts: Bool,
         transactionLimit: Int = 25
     ) -> GlobalSearchSnapshot {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -93,7 +105,7 @@ private struct GlobalSearchSnapshot {
         }
         return GlobalSearchSnapshot(
             accounts: accounts.filter {
-                FinanceSearch.matches($0, query: query, balance: index.balance(for: $0))
+                FinanceSearch.matches($0, query: query, balance: includeAmounts ? index.balance(for: $0) : nil)
             },
             categories: categories.filter { FinanceSearch.matches($0, query: query, index: index) },
             transactions: matchingTransactions,
@@ -108,9 +120,11 @@ struct GlobalSearchView: View {
     @ObservedObject var security: AppSecurityService
     @Binding var searchText: String
     @State private var results = GlobalSearchSnapshot.empty
+    @State private var resolvedSearchTaskID: String?
     @State private var transactionDocuments: [GlobalSearchTransactionDocument] = []
-    @State private var transactionDocumentsRevision: Int?
+    @State private var transactionDocumentsID: String?
     @State private var editingTransaction: LedgerTransaction?
+    @State private var viewingTransactionID: UUID?
     @State private var transactionToTemplate: LedgerTransaction?
     @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
     @State private var transactionDeletionError: String?
@@ -136,7 +150,11 @@ struct GlobalSearchView: View {
     }
 
     private var searchTaskID: String {
-        "\(store.ledgerRevision)|\(query)"
+        "\(searchIndexID)|\(query)"
+    }
+
+    private var searchIndexID: String {
+        "\(store.ledgerRevision)|\(areBalancesRevealed)"
     }
 
     var body: some View {
@@ -156,7 +174,9 @@ struct GlobalSearchView: View {
                         ContentUnavailableView(
                             "Search your ledger",
                             systemImage: "magnifyingglass",
-                            description: Text("Find accounts, transactions, descriptions, categories, amounts, and currencies.")
+                            description: Text(areBalancesRevealed
+                                ? "Find accounts, transactions, descriptions, categories, amounts, and currencies."
+                                : "Find accounts, transactions, descriptions, categories, and currencies.")
                         )
                         .padding(.top, 18)
                         if !savedSearches.isEmpty {
@@ -195,11 +215,17 @@ struct GlobalSearchView: View {
                                 .font(.footnote)
                                 .foregroundStyle(PocketLedgerTheme.textSecondary)
                         }
+                    } else if resolvedSearchTaskID != searchTaskID {
+                        ProgressView("Searching…")
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 18)
                     } else if results.isEmpty {
                         ContentUnavailableView(
                             "No results",
                             systemImage: "magnifyingglass",
-                            description: Text("Try another name, description, category, amount, or currency.")
+                            description: Text(areBalancesRevealed
+                                ? "Try another name, description, category, amount, or currency."
+                                : "Try another name, description, category, or currency.")
                         )
                         .padding(.top, 18)
                     } else {
@@ -262,6 +288,7 @@ struct GlobalSearchView: View {
                                             }
                                         },
                                         onSaveTemplate: { transactionToTemplate = transaction },
+                                        onOpen: { viewingTransactionID = transaction.id },
                                         allowsActions: true,
                                         subtitleOverride: transactionSubtitle(transaction),
                                         usesScrollSwipeActions: true
@@ -317,11 +344,19 @@ struct GlobalSearchView: View {
         .transactionActionAlert(message: $transactionDeletionError)
         .navigationTitle("Search")
         .navigationBarTitleDisplayMode(.large)
+        .navigationDestination(item: $viewingTransactionID) { transactionID in
+            MetricsTransactionDetailView(store: store, security: security, transactionID: transactionID)
+        }
         .task(id: searchTaskID) {
             await refreshResults(for: query)
         }
+        .onChange(of: areBalancesRevealed) { _, _ in
+            transactionDocuments = []
+            transactionDocumentsID = nil
+        }
         .sheet(item: $editingTransaction) { transaction in
             TransactionEditor(store: store, transaction: transaction)
+                .modifier(FinancialAmountEditorCover(security: security))
         }
         .sheet(item: $transactionToTemplate) { transaction in
             TemplateNameEditor(store: store, transaction: transaction)
@@ -354,8 +389,10 @@ struct GlobalSearchView: View {
     }
 
     private func refreshResults(for query: String) async {
+        let taskID = searchTaskID
         guard !query.isEmpty else {
             results = .empty
+            resolvedSearchTaskID = taskID
             return
         }
 
@@ -364,18 +401,21 @@ struct GlobalSearchView: View {
         } catch {
             return
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, taskID == searchTaskID else { return }
 
         let index = store.ledgerIndex
-        let revision = store.ledgerRevision
-        if transactionDocumentsRevision != revision {
+        if transactionDocumentsID != searchIndexID {
             transactionDocuments = index.sortedTransactions.map { transaction in
                 GlobalSearchTransactionDocument(
                     transaction: transaction,
-                    searchableText: FinanceSearch.searchableText(for: transaction, index: index)
+                    searchableText: FinanceSearch.searchableText(
+                        for: transaction,
+                        index: index,
+                        includeAmounts: areBalancesRevealed
+                    )
                 )
             }
-            transactionDocumentsRevision = revision
+            transactionDocumentsID = searchIndexID
         }
 
         results = GlobalSearchSnapshot.make(
@@ -383,8 +423,10 @@ struct GlobalSearchView: View {
             accounts: store.data.accounts,
             categories: store.data.categories,
             transactionDocuments: transactionDocuments,
-            index: index
+            index: index,
+            includeAmounts: areBalancesRevealed
         )
+        resolvedSearchTaskID = taskID
     }
 
     private func transactionSubtitle(_ transaction: LedgerTransaction) -> String {

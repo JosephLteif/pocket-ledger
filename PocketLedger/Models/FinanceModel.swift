@@ -692,18 +692,46 @@ struct ExchangeRate: Codable, Equatable, Identifiable {
         summary
     }
 
+    static func parseInput(_ rawValue: String, locale: Locale = .current) -> Decimal? {
+        let separator = locale.decimalSeparator ?? "."
+        let grouping = locale.groupingSeparator ?? ","
+        let parts = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: separator)
+        guard parts.count <= 2 else { return nil }
+
+        let groups = parts[0].components(separatedBy: grouping)
+        if groups.count > 1 {
+            let formatter = NumberFormatter()
+            formatter.locale = locale
+            formatter.numberStyle = .decimal
+            let primarySize = formatter.groupingSize
+            let secondarySize = formatter.secondaryGroupingSize > 0 ? formatter.secondaryGroupingSize : primarySize
+            guard groups.last?.count == primarySize,
+                  (1...max(1, secondarySize)).contains(groups[0].count),
+                  groups.dropFirst().dropLast().allSatisfy({ $0.count == secondarySize }) else { return nil }
+        }
+
+        let normalized = ([groups.joined()] + parts.dropFirst()).joined(separator: ".")
+        guard normalized.allSatisfy({ $0 == "." || $0.unicodeScalars.allSatisfy(CharacterSet.decimalDigits.contains) }) else { return nil }
+        let ascii = normalized.map { character in
+            character.wholeNumberValue.map { String($0) } ?? String(character)
+        }.joined()
+        guard let value = Decimal(string: ascii, locale: Locale(identifier: "en_US_POSIX")), value > 0 else { return nil }
+        return value
+    }
+
+    static func formattedInput(_ value: Decimal, locale: Locale = .current) -> String {
+        NSDecimalNumber(decimal: value).stringValue.replacingOccurrences(of: ".", with: locale.decimalSeparator ?? ".")
+    }
+
     static func formattedValue(_ value: Decimal) -> String {
         let formatter = NumberFormatter()
         formatter.locale = .current
         formatter.numberStyle = .decimal
         formatter.usesGroupingSeparator = true
         formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 2
-        var roundedValue = Decimal()
-        var valueToRound = value
-        NSDecimalRound(&roundedValue, &valueToRound, 2, .plain)
-        return formatter.string(from: NSDecimalNumber(decimal: roundedValue))
-            ?? NSDecimalNumber(decimal: roundedValue).stringValue
+        formatter.maximumFractionDigits = 8
+        return formatter.string(from: NSDecimalNumber(decimal: value)) ?? formattedInput(value)
     }
 }
 
@@ -1083,6 +1111,26 @@ struct ScheduledTransaction: Identifiable, Codable, Equatable {
     var inflows: [MoneyMovement]
     var exchangeRate: ExchangeRate?
     var changeAdjustment: ChangeAdjustment?
+
+    func nextOccurrence(after date: Date, calendar: Calendar = .current) -> Date? {
+        guard let nextDate = frequency.nextDate(
+            after: date,
+            calendar: calendar,
+            monthlyDay: recurrenceDay,
+            monthlyRule: monthlyRule
+        ), nextDate > date else { return nil }
+        return nextDate
+    }
+
+    func occurrences(through end: Date, calendar: Calendar = .current) -> [Date] {
+        var dates: [Date] = []
+        var occurrence: Date? = nextRunDate
+        while let date = occurrence, date <= end {
+            dates.append(date)
+            occurrence = nextOccurrence(after: date, calendar: calendar)
+        }
+        return dates
+    }
 
     init(
         id: UUID = UUID(),

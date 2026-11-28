@@ -792,6 +792,39 @@ final class FinanceModelTests: XCTestCase {
         )
     }
 
+    func testSimpleTransferRequiresDifferentAccountsWhenSaved() {
+        let source = Account(
+            name: "Cash",
+            type: .cash,
+            currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 0)
+        )
+        let destination = Account(
+            name: "Bank",
+            type: .bankAccount,
+            currency: .usd,
+            openingBalance: Money(currency: .usd, minorUnits: 0)
+        )
+        let amount = Money(currency: .usd, minorUnits: 100)
+        let sameAccount = LedgerTransaction(
+            note: "Transfer",
+            kind: .transfer,
+            categoryID: nil,
+            outflows: [MoneyMovement(accountID: source.id, money: amount)],
+            inflows: [MoneyMovement(accountID: source.id, money: amount)]
+        )
+        let data = FinanceData(accounts: [source, destination], categories: [], transactions: [sameAccount])
+        var differentAccounts = sameAccount
+        differentAccounts.inflows = [MoneyMovement(accountID: destination.id, money: amount)]
+
+        XCTAssertNil(FinanceDataValidator.validate(data))
+        XCTAssertEqual(
+            FinanceTransactionValidator.validate(sameAccount, in: data, requireDistinctTransferAccounts: true),
+            .sameTransferAccount
+        )
+        XCTAssertNil(FinanceTransactionValidator.validate(differentAccounts, in: data, requireDistinctTransferAccounts: true))
+    }
+
     func testMissingAttachmentReferenceIsRejected() {
         let account = Account(
             name: "Cash",
@@ -1162,6 +1195,21 @@ final class FinanceModelTests: XCTestCase {
             Money.parse("125000", currency: .lbp, locale: Locale(identifier: "en_US_POSIX")),
             .some(Money(currency: .lbp, minorUnits: 125_000))
         )
+    }
+
+    func testExchangeRateInputUsesTheActiveLocaleAndRejectsInvalidGrouping() {
+        let french = Locale(identifier: "fr_FR")
+        let english = Locale(identifier: "en_US")
+        let rate = Decimal(5) / Decimal(4)
+        XCTAssertEqual(ExchangeRate.parseInput("1,25", locale: french), rate)
+        XCTAssertEqual(ExchangeRate.parseInput("1.25", locale: english), rate)
+        XCTAssertEqual(ExchangeRate.parseInput("1,250.5", locale: english), Decimal(2501) / Decimal(2))
+        XCTAssertNil(ExchangeRate.parseInput("1,25", locale: english))
+        XCTAssertNil(ExchangeRate.parseInput("1,25 EUR", locale: french))
+        XCTAssertNil(ExchangeRate.parseInput("0", locale: french))
+
+        let reciprocal = Decimal(11) / Decimal(1_000_000)
+        XCTAssertEqual(ExchangeRate.parseInput(ExchangeRate.formattedInput(reciprocal, locale: french), locale: french), reciprocal)
     }
 
     func testMoneyDisplayFormattingIsLocaleAwareAndExportsRemainStable() {
@@ -2610,6 +2658,53 @@ final class FinanceModelTests: XCTestCase {
             monthlyRule: .lastDayOfMonth
         )!
         XCTAssertEqual(calendar.component(.day, from: lastDayFebruary), 28)
+    }
+
+    func testDashboardForecastCountsEveryScheduledOccurrenceInTheNextThirtyDays() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let today = Date(timeIntervalSince1970: 1_700_000_000)
+        let firstRun = try XCTUnwrap(calendar.date(byAdding: .day, value: 3, to: today))
+        let account = Account(
+            name: "Cash", type: .cash, currency: .usd, openingBalance: Money(currency: .usd, minorUnits: 0)
+        )
+        let weekly = ScheduledTransaction(
+            nextRunDate: firstRun,
+            frequency: .weekly,
+            note: "Weekly groceries",
+            kind: .expense,
+            categoryID: nil,
+            outflows: [MoneyMovement(accountID: account.id, money: Money(currency: .usd, minorUnits: 5_000))],
+            inflows: []
+        )
+        let overdue = ScheduledTransaction(
+            nextRunDate: today.addingTimeInterval(-60),
+            frequency: .once,
+            note: "Overdue",
+            kind: .expense,
+            categoryID: nil,
+            outflows: weekly.outflows,
+            inflows: []
+        )
+        let payday = ScheduledTransaction(
+            nextRunDate: try XCTUnwrap(calendar.date(byAdding: .day, value: 2, to: firstRun)),
+            frequency: .once,
+            note: "Payday",
+            kind: .income,
+            categoryID: nil,
+            outflows: [],
+            inflows: [MoneyMovement(accountID: account.id, money: Money(currency: .usd, minorUnits: 25_000))]
+        )
+        let data = FinanceData(
+            accounts: [account], categories: [], transactions: [], scheduledTransactions: [weekly, overdue, payday]
+        )
+        let snapshot = DashboardSnapshot.make(
+            data: data, index: LedgerIndex(data: data), attentionItems: [], date: today, calendar: calendar
+        )
+
+        XCTAssertEqual(snapshot.scheduledEntryCounts, [.usd: 5])
+        XCTAssertEqual(snapshot.scheduledChanges, [.usd: 5_000])
+        XCTAssertEqual(snapshot.firstProjectedShortfalls, [.usd: firstRun])
     }
 
     func testLegacyScheduledTransactionDecodesMonthlyDefaults() throws {

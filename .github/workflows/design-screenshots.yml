@@ -64,12 +64,19 @@ jobs:
             -only-testing:PocketLedgerUITests 2>&1 | tee "$RUNNER_TEMP/design-review-xcodebuild.log"
 
       - name: Export screenshot attachments
+        id: export
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           SCREENSHOT_DIR="$RUNNER_TEMP/design-review-screenshots"
+          RESULT="$RUNNER_TEMP/DesignReview.xcresult"
+          if [[ ! -d "$RESULT" ]]; then
+            echo "No simulator result bundle was produced."
+            exit 0
+          fi
           mkdir -p "$SCREENSHOT_DIR"
           xcrun xcresulttool export attachments \
-            --path "$RUNNER_TEMP/DesignReview.xcresult" \
+            --path "$RESULT" \
             --output-path "$SCREENSHOT_DIR"
           python3 - "$SCREENSHOT_DIR" <<'PY'
           import json
@@ -96,12 +103,14 @@ jobs:
                       attachment["exportedFileName"] = name
           manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
           PY
-          find "$SCREENSHOT_DIR" -type f -iname '*.png' -print -quit | grep -q . || {
+          if [[ -n "$(find "$SCREENSHOT_DIR" -type f -iname '*.png' -print -quit)" ]]; then
+            echo "has_screenshots=true" >> "$GITHUB_OUTPUT"
+          else
             echo "No screenshots were exported from the UI capture run."
-            exit 1
-          }
+          fi
 
       - name: Publish screenshots
+        if: ${{ !cancelled() && steps.export.outputs.has_screenshots == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: PocketLedger-design-review-${{ github.sha }}
@@ -110,6 +119,7 @@ jobs:
           retention-days: 14
 
       - name: Summarize capture
+        if: ${{ !cancelled() && steps.export.outputs.has_screenshots == 'true' }}
         run: |
           {
             echo "## Design review screenshots"

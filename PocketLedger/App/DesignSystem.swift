@@ -279,8 +279,7 @@ struct ProtectedAmountText: View {
     let isRevealed: Bool
 
     var body: some View {
-        Text(value)
-            .blur(radius: isRevealed ? 0 : 8)
+        Text(isRevealed ? value : "••••")
             .privacySensitive()
             .accessibilityLabel(isRevealed ? value : "Hidden amount")
     }
@@ -292,7 +291,7 @@ struct BalanceVisibilityControl: View {
     @Binding var isRevealed: Bool
     @Environment(\.scenePhase) private var scenePhase
     @State private var isAuthenticating = false
-    @State private var isShowingBiometryUnavailable = false
+    @State private var isShowingAuthenticationUnavailable = false
     @State private var requestID: UUID?
 
     var body: some View {
@@ -310,11 +309,11 @@ struct BalanceVisibilityControl: View {
         .accessibilityLabel(isRevealed ? "Hide financial amounts" : "Reveal financial amounts")
         .accessibilityHint(isRevealed
             ? "Hides financial amounts across the app."
-            : "Requires \(security.availableBiometry?.displayName ?? "Face ID") to reveal financial amounts across the app.")
-        .alert("Biometrics unavailable", isPresented: $isShowingBiometryUnavailable) {
+            : "Authenticate with biometrics or your device passcode to reveal financial amounts.")
+        .alert("Device authentication unavailable", isPresented: $isShowingAuthenticationUnavailable) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Set up Face ID or Touch ID on this device to reveal balance amounts.")
+            Text("Set up a device passcode to reveal financial amounts.")
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { conceal() }
@@ -333,8 +332,8 @@ struct BalanceVisibilityControl: View {
             conceal()
             return
         }
-        guard security.availableBiometry != nil else {
-            isShowingBiometryUnavailable = true
+        guard security.canAuthenticateToRevealBalances else {
+            isShowingAuthenticationUnavailable = true
             return
         }
 

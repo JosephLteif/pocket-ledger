@@ -4,7 +4,7 @@ final class DesignReviewScreenshots: XCTestCase {
     @MainActor
     func testCapturePrimaryNavigationAndEditors() {
         let app = XCUIApplication()
-        app.launchArguments.append("-DesignReviewMode")
+        app.launchArguments = ["-DesignReviewMode", "-pocketLedger.areBalancesRevealed", "YES"]
         app.launch()
 
         selectTab("tab-overview", title: "Home", app: app)
@@ -106,7 +106,7 @@ final class DesignReviewScreenshots: XCTestCase {
     @MainActor
     func testCaptureMoreDestinations() {
         let app = XCUIApplication()
-        app.launchArguments.append("-DesignReviewMode")
+        app.launchArguments = ["-DesignReviewMode", "-pocketLedger.areBalancesRevealed", "YES"]
         app.launch()
         selectTab("tab-more", title: "More", app: app)
         XCTAssertTrue(app.navigationBars["More"].waitForExistence(timeout: 10))
@@ -136,6 +136,11 @@ final class DesignReviewScreenshots: XCTestCase {
         seededLoan.tap()
         XCTAssertTrue(app.navigationBars["Alex Morgan"].waitForExistence(timeout: 10))
         capture("27-loan-detail", app: app)
+        let loan = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "loan-person-loan-")).firstMatch
+        XCTAssertTrue(loan.waitForExistence(timeout: 10))
+        if !loan.isHittable { app.swipeUp() }
+        loan.tap()
+        XCTAssertTrue(app.buttons["Record collection"].waitForExistence(timeout: 10))
         app.buttons["Record collection"].tap()
         XCTAssertTrue(app.navigationBars["Record collection"].waitForExistence(timeout: 10))
         capture("28-loan-collection-editor", app: app)

@@ -39,6 +39,15 @@ struct MoreView: View {
                     }
                 }
 
+                Section {
+                    NavigationLink {
+                        SecuritySettingsView(store: store, security: security)
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    .listRowBackground(PocketLedgerTheme.surface)
+                }
+
                 Section("Insights") {
                     NavigationLink {
                         MetricsView(store: store, security: security)
@@ -88,7 +97,7 @@ struct MoreView: View {
                     .listRowBackground(PocketLedgerTheme.surface)
 
                     NavigationLink {
-                        TemplatesView(store: store)
+                        TemplatesView(store: store, security: security)
                     } label: {
                         Label("Templates", systemImage: "rectangle.stack")
                     }
@@ -119,19 +128,33 @@ struct MoreView: View {
                     }
                     .listRowBackground(PocketLedgerTheme.surface)
 
-                    NavigationLink {
-                        SecuritySettingsView(store: store, security: security)
-                    } label: {
-                        Label("Settings", systemImage: "gearshape")
+                    if store.data.accounts.isEmpty && store.data.categories.isEmpty && store.data.transactions.isEmpty {
+                        Button {
+                            isShowingSetup = true
+                        } label: {
+                            Label("Finish setup", systemImage: "wand.and.stars")
+                        }
+                        .listRowBackground(PocketLedgerTheme.surface)
+                    } else {
+                        NavigationLink {
+                            Form {
+                                Section("Accounts") {
+                                    Text("Use Accounts to add the places where you keep money, such as cash, bank accounts, and cards.")
+                                }
+                                Section("Transactions and budgets") {
+                                    Text("Record spending and income in Transactions. Use Categories and Budgets in More to organize expenses and set spending limits.")
+                                }
+                                Section("Existing history") {
+                                    Text("Use Import & Backup in More to bring in a file from another app or restore a Pocket Ledger backup.")
+                                }
+                            }
+                            .pocketListSurface()
+                            .navigationTitle("Setup guide")
+                        } label: {
+                            Label("Setup guide", systemImage: "wand.and.stars")
+                        }
+                        .listRowBackground(PocketLedgerTheme.surface)
                     }
-                    .listRowBackground(PocketLedgerTheme.surface)
-
-                    Button {
-                        isShowingSetup = true
-                    } label: {
-                        Label("Setup guide", systemImage: "wand.and.stars")
-                    }
-                    .listRowBackground(PocketLedgerTheme.surface)
                 } header: {
                     Text("Data & security")
                 } footer: {
@@ -182,7 +205,7 @@ private enum DashboardSheet: Identifiable {
 
 private enum DashboardTransactionsRoute: Hashable {
     case month
-    case topCategory(String?)
+    case topCategory(UUID)
 }
 
 @MainActor
@@ -279,8 +302,8 @@ struct DashboardView: View {
                 switch route {
                 case .month:
                     transactionsDestination(filter: .all)
-                case .topCategory(let category):
-                    transactionsDestination(filter: .expense, search: category ?? "")
+                case .topCategory(let categoryID):
+                    transactionsDestination(filter: .expense, categoryID: categoryID)
                 }
             }
             .sheet(item: $presentedSheet) { sheet in
@@ -289,6 +312,7 @@ struct DashboardView: View {
                     DashboardCustomizationView(preferences: $dashboardPreferences)
                 case .transaction(let transaction):
                     TransactionEditor(store: store, transaction: transaction)
+                        .modifier(FinancialAmountEditorCover(security: security))
                 }
             }
             .sheet(item: $transactionToTemplate) { transaction in
@@ -947,17 +971,16 @@ struct DashboardView: View {
                 }
                 .buttonStyle(.plain)
 
-                Button {
-                    transactionPath.append(.topCategory(snapshot.topCategory))
-                } label: {
-                    snapshotMetric(
-                        title: "Top category",
-                        value: snapshot.topCategory ?? "No activity",
-                        systemImage: "tag.fill",
-                        tint: PocketLedgerTheme.accent
-                    )
+                if let categoryID = snapshot.topCategoryID {
+                    Button {
+                        transactionPath.append(.topCategory(categoryID))
+                    } label: {
+                        mostUsedCategoryMetric(store.categoryPath(for: categoryID))
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    mostUsedCategoryMetric("No activity")
                 }
-                .buttonStyle(.plain)
             }
 
             VStack(spacing: 0) {
@@ -976,7 +999,7 @@ struct DashboardView: View {
 
     private func transactionsDestination(
         filter: TransactionFilter,
-        search: String = ""
+        categoryID: UUID? = nil
     ) -> some View {
         TransactionsView(
             store: store,
@@ -984,7 +1007,17 @@ struct DashboardView: View {
             security: security,
             initialFilter: filter,
             initialPeriod: .thisMonth,
-            initialSearch: search
+            initialCategoryID: categoryID,
+            initialCategoryIncludesDescendants: false
+        )
+    }
+
+    private func mostUsedCategoryMetric(_ value: String) -> some View {
+        snapshotMetric(
+            title: "Most used expense category",
+            value: value,
+            systemImage: "tag.fill",
+            tint: PocketLedgerTheme.accent
         )
     }
 
@@ -1034,7 +1067,7 @@ struct DashboardView: View {
                 Text(schedule.note.isEmpty ? schedule.kind.displayName : schedule.note)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
-                Text(store.transactionSummary(schedule.transactionTemplate))
+                protectedBalanceText(store.transactionSummary(schedule.transactionTemplate))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
                     .lineLimit(1)
@@ -1053,9 +1086,6 @@ struct DashboardView: View {
         }
         .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(schedule.note.isEmpty ? schedule.kind.displayName : schedule.note), \(store.transactionSummary(schedule.transactionTemplate)), \(schedule.nextRunDate.formatted(date: .abbreviated, time: .shortened))"
-        )
     }
 
     private func upcomingDateLabel(_ date: Date) -> String {
@@ -1080,9 +1110,8 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var cashFlowSnapshot: some View {
-        let schedules = snapshot.cashFlowSchedules
-
-        if !schedules.isEmpty {
+        let currencies = LedgerCurrency.allCases.filter { snapshot.scheduledEntryCounts[$0] != nil }
+        if !currencies.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 NavigationLink {
                     ScheduledTransactionsView(store: store, security: security)
@@ -1096,13 +1125,14 @@ struct DashboardView: View {
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
 
                 VStack(spacing: 0) {
-                    ForEach(LedgerCurrency.allCases) { currency in
+                    ForEach(currencies) { currency in
                         let current = snapshot.availableBalances[currency]
                             ?? Money(currency: currency, minorUnits: 0)
                         let change = snapshot.scheduledChanges[currency] ?? 0
                         let projected = Money(currency: currency, minorUnits: current.minorUnits + change)
 
-                        if currency != LedgerCurrency.allCases[0] {
+                        let count = snapshot.scheduledEntryCounts[currency] ?? 0
+                        if currency != currencies.first {
                             Divider().overlay(PocketLedgerTheme.divider)
                         }
 
@@ -1111,7 +1141,7 @@ struct DashboardView: View {
                                 Text(currency.rawValue)
                                     .font(.caption.weight(.bold))
                                     .foregroundStyle(PocketLedgerTheme.textSecondary)
-                                Text("\(schedules.count) scheduled \(schedules.count == 1 ? "entry" : "entries")")
+                                Text("\(count) scheduled \(count == 1 ? "entry" : "entries")")
                                     .font(.caption2)
                                     .foregroundStyle(PocketLedgerTheme.textTertiary)
                             }
@@ -1119,6 +1149,9 @@ struct DashboardView: View {
                             Spacer()
 
                             VStack(alignment: .trailing, spacing: 3) {
+                                Text("Projected ending balance")
+                                    .font(.caption)
+                                    .foregroundStyle(PocketLedgerTheme.textSecondary)
                                 protectedBalanceText(projected.formatted)
                                     .font(.subheadline.weight(.bold).monospacedDigit())
                                     .foregroundStyle(projected.minorUnits < 0 ? PocketLedgerTheme.warning : PocketLedgerTheme.textPrimary)
@@ -1126,6 +1159,14 @@ struct DashboardView: View {
                                      : "\(Money(currency: currency, minorUnits: change).formatted) scheduled")
                                     .font(.caption2.weight(.semibold).monospacedDigit())
                                     .foregroundStyle(change >= 0 ? PocketLedgerTheme.income : PocketLedgerTheme.warning)
+                                if areBalancesRevealed, let shortfall = snapshot.firstProjectedShortfalls[currency] {
+                                    Label(
+                                        "Below zero on \(shortfall.formatted(.dateTime.month(.abbreviated).day()))",
+                                        systemImage: "exclamationmark.circle"
+                                    )
+                                    .font(.caption)
+                                    .foregroundStyle(PocketLedgerTheme.warning)
+                                }
                             }
                         }
                         .padding(.vertical, 10)
@@ -1134,13 +1175,6 @@ struct DashboardView: View {
                 .padding(.horizontal, 14)
                 .pocketGroupedSurface(cornerRadius: 17)
 
-                if LedgerCurrency.allCases.contains(where: {
-                    (snapshot.scheduledChanges[$0] ?? 0) < 0
-                }) {
-                    Label("Review upcoming outflows before they affect your included balances.", systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(PocketLedgerTheme.warning)
-                }
             }
         }
     }
@@ -1176,7 +1210,7 @@ struct DashboardView: View {
 
             Spacer()
 
-            Text(Money(currency: currency, minorUnits: total).formatted)
+            protectedBalanceText(Money(currency: currency, minorUnits: total).formatted)
                 .font(.subheadline.weight(.semibold).monospacedDigit())
                 .foregroundStyle(PocketLedgerTheme.warning)
         }
@@ -1285,19 +1319,21 @@ struct DashboardView: View {
                                     .font(.subheadline.weight(.semibold))
                                     .lineLimit(1)
                                 Spacer()
-                                Text("\(spent.formatted) / \(allowance.formatted)")
+                                protectedBalanceText("\(spent.formatted) / \(allowance.formatted)")
                                     .font(.caption.weight(.semibold).monospacedDigit())
                                     .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.textSecondary)
                             }
-                            ProgressView(value: ratio)
-                                .tint(projectedOver ? PocketLedgerTheme.warning : PocketLedgerTheme.accent)
+                            if areBalancesRevealed {
+                                ProgressView(value: ratio)
+                                    .tint(projectedOver ? PocketLedgerTheme.warning : PocketLedgerTheme.accent)
+                            }
                             HStack(spacing: 10) {
-                                Text(over
+                                protectedBalanceText(over
                                      ? "Over by \(Money(currency: budget.currency, minorUnits: -remaining).formatted)"
                                      : "Remaining \(Money(currency: budget.currency, minorUnits: remaining).formatted)")
                                     .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.positive)
                                 Spacer()
-                                Text("Projected \(summary.projected.formatted)")
+                                protectedBalanceText("Projected \(summary.projected.formatted)")
                                     .foregroundStyle(projectedOver ? PocketLedgerTheme.warning : PocketLedgerTheme.textTertiary)
                             }
                             .font(.caption.weight(.semibold).monospacedDigit())
@@ -1519,7 +1555,7 @@ private struct AttentionInboxView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.caption.weight(.bold))
-                    .frame(width: 32, height: 32)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.glass)
             .accessibilityLabel("Dismiss \(item.title)")

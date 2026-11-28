@@ -136,6 +136,7 @@ final class LedgerStore: ObservableObject {
     @Published private(set) var proAccessRequired: ProFeature?
     @Published private(set) var ledgerRevision = 0
     @Published private(set) var metalPriceFailures: Set<PreciousMetal> = []
+    @Published private(set) var metalPriceRefreshes: Set<PreciousMetal> = []
 
     private let storage = FinanceStorage(context: "main-app")
     private let hasProAccess: () -> Bool
@@ -332,7 +333,7 @@ final class LedgerStore: ObservableObject {
 
     @discardableResult
     func addTransaction(_ transaction: LedgerTransaction) -> Bool {
-        guard validate(transaction) else { return false }
+        guard validate(transaction, requireDistinctTransferAccounts: true) else { return false }
         var updated = data
         updated.transactions.append(transaction)
         return persist(updated, successMessage: "Transaction saved")
@@ -349,7 +350,7 @@ final class LedgerStore: ObservableObject {
             return false
         }
 
-        guard validate(transaction, allowArchivedReferences: true) else { return false }
+        guard validate(transaction, allowArchivedReferences: true, requireDistinctTransferAccounts: true) else { return false }
 
         var updated = data
         updated.transactions[index] = transaction
@@ -404,17 +405,24 @@ final class LedgerStore: ObservableObject {
     @discardableResult
     func updateTransactionCategories(
         ids: Set<UUID>,
-        categoryID: UUID?
-    ) -> Bool {
-        guard categoryID == nil || data.categories.contains(where: { $0.id == categoryID }) else {
-            lastActionStatus = "Category not found"
-            return false
+        categoryID: UUID?,
+        replaceSplitCategories: Bool
+    ) -> Set<UUID>? {
+        if let categoryID {
+            guard activeCategories.contains(where: { $0.id == categoryID }),
+                  !activeCategories.contains(where: { $0.parentID == categoryID }) else {
+                lastActionStatus = "Choose an active category without subcategories."
+                return nil
+            }
         }
 
+        let linkedIDs = data.accounts.reduce(into: Set<UUID>()) { $0.formUnion($1.tracking?.transactionIDs ?? []) }
         var updated = data
-        var changed = false
+        var updatedIDs: Set<UUID> = []
         for index in updated.transactions.indices where ids.contains(updated.transactions[index].id) {
-            guard updated.transactions[index].loanID == nil else { continue }
+            let transaction = updated.transactions[index]
+            guard transaction.loanID == nil, !linkedIDs.contains(transaction.id),
+                  replaceSplitCategories || !hasDistinctPaymentCategories(transaction) else { continue }
             updated.transactions[index].categoryID = categoryID
             for movementIndex in updated.transactions[index].outflows.indices {
                 updated.transactions[index].outflows[movementIndex].categoryID = categoryID
@@ -422,30 +430,32 @@ final class LedgerStore: ObservableObject {
             for movementIndex in updated.transactions[index].inflows.indices {
                 updated.transactions[index].inflows[movementIndex].categoryID = categoryID
             }
-            changed = true
+            updatedIDs.insert(transaction.id)
         }
-        guard changed else {
-            lastActionStatus = "No transactions selected"
-            return false
-        }
-        return persist(updated, successMessage: "Transaction categories updated")
+        guard !updatedIDs.isEmpty else { return [] }
+        return persist(updated, successMessage: "Transaction categories updated") ? updatedIDs : nil
+    }
+
+    func hasDistinctPaymentCategories(_ transaction: LedgerTransaction) -> Bool {
+        transaction.kind == .expense && Set(ledgerIndex.categoryIDs(for: transaction)).count > 1
     }
 
     @discardableResult
     func updateSingleAccountTransactions(
         ids: Set<UUID>,
         accountID: UUID
-    ) -> Bool {
-        guard let targetAccount = account(with: accountID) else {
-            lastActionStatus = "Account not found"
-            return false
+    ) -> Set<UUID>? {
+        guard let targetAccount = activeAccounts.first(where: { $0.id == accountID }) else {
+            lastActionStatus = "Choose an active account."
+            return nil
         }
 
+        let linkedIDs = data.accounts.reduce(into: Set<UUID>()) { $0.formUnion($1.tracking?.transactionIDs ?? []) }
         var updated = data
-        var changed = 0
+        var updatedIDs: Set<UUID> = []
         for index in updated.transactions.indices where ids.contains(updated.transactions[index].id) {
             var transaction = updated.transactions[index]
-            guard transaction.loanID == nil else { continue }
+            guard transaction.loanID == nil, !linkedIDs.contains(transaction.id) else { continue }
             guard transaction.outflows.count + transaction.inflows.count == 1 else { continue }
 
             if let movementIndex = transaction.outflows.indices.first,
@@ -466,14 +476,11 @@ final class LedgerStore: ObservableObject {
                 continue
             }
             updated.transactions[index] = transaction
-            changed += 1
+            updatedIDs.insert(transaction.id)
         }
 
-        guard changed > 0 else {
-            lastActionStatus = "No selected single-account transactions matched that account"
-            return false
-        }
-        return persist(updated, successMessage: "Transaction accounts updated")
+        guard !updatedIDs.isEmpty else { return [] }
+        return persist(updated, successMessage: "Transaction accounts updated") ? updatedIDs : nil
     }
 
     @discardableResult
@@ -526,7 +533,7 @@ final class LedgerStore: ObservableObject {
     @discardableResult
     func addScheduledTransaction(_ scheduledTransaction: ScheduledTransaction) -> Bool {
         proAccessRequired = nil
-        guard validate(scheduledTransaction.transactionTemplate) else { return false }
+        guard validate(scheduledTransaction.transactionTemplate, requireDistinctTransferAccounts: true) else { return false }
         if scheduledTransaction.isEnabled,
            !PocketLedgerTierPolicy.canActivateSchedule(
             isEnabled: scheduledTransaction.isEnabled,
@@ -563,7 +570,7 @@ final class LedgerStore: ObservableObject {
            ) {
             return denyForPro("Free includes up to ten enabled schedules.", feature: .schedules)
         }
-        guard validate(scheduledTransaction.transactionTemplate, allowArchivedReferences: true) else { return false }
+        guard validate(scheduledTransaction.transactionTemplate, allowArchivedReferences: true, requireDistinctTransferAccounts: true) else { return false }
 
         var updated = data
         updated.scheduledTransactions[index] = scheduledTransaction
@@ -577,7 +584,12 @@ final class LedgerStore: ObservableObject {
     }
 
     @discardableResult
-    func setScheduledTransactionEnabled(id: UUID, isEnabled: Bool) -> Bool {
+    func setScheduledTransactionEnabled(
+        id: UUID,
+        isEnabled: Bool,
+        skipsMissedOccurrences: Bool = false,
+        now: Date = .now
+    ) -> Bool {
         proAccessRequired = nil
         guard let index = data.scheduledTransactions.firstIndex(where: { $0.id == id }) else {
             lastActionStatus = "Scheduled transaction not found"
@@ -589,23 +601,35 @@ final class LedgerStore: ObservableObject {
             lastActionStatus = "Completed one-time transactions cannot be re-enabled"
             return false
         }
+        if isEnabled, skipsMissedOccurrences,
+           let lastMissed = scheduledTransaction.occurrences(through: now).last {
+            scheduledTransaction.lastSkippedDate = now
+            if let nextDate = scheduledTransaction.nextOccurrence(after: lastMissed) {
+                scheduledTransaction.nextRunDate = nextDate
+                scheduledTransaction.isEnabled = true
+            } else {
+                scheduledTransaction.isEnabled = false
+            }
+        } else {
+            scheduledTransaction.isEnabled = isEnabled
+        }
         if !PocketLedgerTierPolicy.canActivateSchedule(
-            isEnabled: isEnabled,
-            isAlreadyEnabled: scheduledTransaction.isEnabled,
+            isEnabled: scheduledTransaction.isEnabled,
+            isAlreadyEnabled: data.scheduledTransactions[index].isEnabled,
             enabledCount: data.scheduledTransactions.filter(\.isEnabled).count,
             hasPro: hasProAccess()
         ) {
             return denyForPro("Free includes up to ten enabled schedules.", feature: .schedules)
         }
-        scheduledTransaction.isEnabled = isEnabled
         var updated = data
         updated.scheduledTransactions[index] = scheduledTransaction
         let persisted = persist(
             updated,
-            successMessage: isEnabled ? "Scheduled transaction enabled" : "Scheduled transaction paused"
+            successMessage: skipsMissedOccurrences ? "Missed entries skipped"
+                : isEnabled ? "Scheduled transaction enabled" : "Scheduled transaction paused"
         )
-        if persisted, isEnabled, scheduledTransaction.nextRunDate <= .now {
-            processDueScheduledTransactions()
+        if persisted, scheduledTransaction.isEnabled, scheduledTransaction.nextRunDate <= now {
+            processDueScheduledTransactions(now: now)
         }
         return persisted
     }
@@ -626,12 +650,7 @@ final class LedgerStore: ObservableObject {
         schedule.lastSkippedDate = .now
         if schedule.frequency == .once {
             schedule.isEnabled = false
-        } else if let nextDate = schedule.frequency.nextDate(
-            after: schedule.nextRunDate,
-            calendar: .current,
-            monthlyDay: schedule.recurrenceDay,
-            monthlyRule: schedule.monthlyRule
-        ) {
+        } else if let nextDate = schedule.nextOccurrence(after: schedule.nextRunDate) {
             schedule.nextRunDate = nextDate
         } else {
             schedule.isEnabled = false
@@ -738,13 +757,7 @@ final class LedgerStore: ObservableObject {
                     break
                 }
 
-                guard let nextDate = scheduledTransaction.frequency.nextDate(
-                    after: dueDate,
-                    calendar: calendar,
-                    monthlyDay: scheduledTransaction.recurrenceDay,
-                    monthlyRule: scheduledTransaction.monthlyRule
-                ),
-                      nextDate > dueDate else {
+                guard let nextDate = scheduledTransaction.nextOccurrence(after: dueDate, calendar: calendar) else {
                     scheduledTransaction.isEnabled = false
                     break
                 }
@@ -855,7 +868,7 @@ final class LedgerStore: ObservableObject {
     }
 
     @discardableResult
-    func settleLoansWithPerson(loanIDs: [UUID], accountSplits: [MoneyMovement]) -> Bool {
+    func settleLoansWithPerson(loanIDs: [UUID], accountSplits: [MoneyMovement], date: Date = .now) -> Bool {
         let selectedIDs = Set(loanIDs)
         guard !selectedIDs.isEmpty, selectedIDs.count == loanIDs.count,
               let firstLoan = data.loans.first(where: { $0.id == loanIDs[0] }) else {
@@ -877,6 +890,12 @@ final class LedgerStore: ObservableObject {
         let orderedLoans = activeLoans.sorted {
             if $0.startedAt != $1.startedAt { return $0.startedAt < $1.startedAt }
             return $0.id.uuidString < $1.id.uuidString
+        }
+        let calendar = Calendar.current
+        let settlementDay = calendar.startOfDay(for: date)
+        guard settlementDay <= calendar.startOfDay(for: .now) else {
+            lastActionStatus = "Choose a settlement date through today."
+            return false
         }
         let netBalance = orderedLoans.reduce(Int64.zero) { total, loan in
             total + (loan.direction == .lent ? loan.outstandingAmount.minorUnits : -loan.outstandingAmount.minorUnits)
@@ -913,7 +932,6 @@ final class LedgerStore: ObservableObject {
 
         var updated = data
         let settlementID = UUID()
-        let settlementDate = Date.now
         while offsetRemaining > 0 {
             let offset = min(lentRemaining, borrowedRemaining)
             guard offset > 0,
@@ -924,12 +942,17 @@ final class LedgerStore: ObservableObject {
                 lastActionStatus = "The reciprocal loan balances could not be offset."
                 return false
             }
+            guard settlementDay >= calendar.startOfDay(for: lentLoans[lentIndex].startedAt),
+                  settlementDay >= calendar.startOfDay(for: borrowedLoans[borrowedIndex].startedAt) else {
+                lastActionStatus = "The settlement date must be on or after each loan it offsets."
+                return false
+            }
             let offsetAmount = Money(currency: firstLoan.currency, minorUnits: offset)
             updated.loans[currentLentIndex].payments.append(
-                LoanPayment(date: settlementDate, amount: offsetAmount, settlementID: settlementID)
+                LoanPayment(date: date, amount: offsetAmount, settlementID: settlementID)
             )
             updated.loans[currentBorrowedIndex].payments.append(
-                LoanPayment(date: settlementDate, amount: offsetAmount, settlementID: settlementID)
+                LoanPayment(date: date, amount: offsetAmount, settlementID: settlementID)
             )
             offsetRemaining -= offset
             lentRemaining -= offset
@@ -966,6 +989,10 @@ final class LedgerStore: ObservableObject {
                 }
 
                 let loan = updated.loans[loanIndex]
+                guard settlementDay >= calendar.startOfDay(for: loan.startedAt) else {
+                    lastActionStatus = "The settlement date must be on or after each loan it pays."
+                    return false
+                }
                 let applied = min(splitRemaining, loan.outstandingAmount.minorUnits)
                 let amount = Money(currency: loan.currency, minorUnits: applied)
                 let paymentID = UUID()
@@ -976,7 +1003,7 @@ final class LedgerStore: ObservableObject {
                 )
                 let transaction = LedgerTransaction(
                     id: transactionID,
-                    date: settlementDate,
+                    date: date,
                     note: "Settlement with \(firstLoan.counterparty)",
                     kind: .transfer,
                     categoryID: nil,
@@ -990,7 +1017,7 @@ final class LedgerStore: ObservableObject {
                 updated.loans[loanIndex].payments.append(
                     LoanPayment(
                         id: paymentID,
-                        date: settlementDate,
+                        date: date,
                         amount: amount,
                         transactionID: transactionID,
                         settlementID: settlementID
@@ -1461,6 +1488,18 @@ final class LedgerStore: ObservableObject {
             lastActionStatus = "Category not found"
             return false
         }
+        if isArchived, activeCategories.contains(where: {
+            $0.id != categoryID && ledgerIndex.categoryMatches($0.id, selectedCategoryID: categoryID)
+        }) {
+            lastActionStatus = "Archive this category's active subcategories first."
+            return false
+        }
+        if !isArchived, data.categories.contains(where: {
+            $0.id != categoryID && $0.isArchived && ledgerIndex.categoryMatches(categoryID, selectedCategoryID: $0.id)
+        }) {
+            lastActionStatus = "Restore the parent category first."
+            return false
+        }
         var updated = data
         updated.categories[index].isArchived = isArchived
         return persist(
@@ -1589,6 +1628,7 @@ final class LedgerStore: ObservableObject {
 
     @discardableResult
     func addTemplate(_ template: LedgerTemplate) -> Bool {
+        guard validate(template.transactionTemplate, allowArchivedReferences: true, requireDistinctTransferAccounts: true) else { return false }
         var updated = data
         updated.templates.append(template)
         return persist(updated, successMessage: "Template saved")
@@ -1606,7 +1646,7 @@ final class LedgerStore: ObservableObject {
             lastActionStatus = "Enter a name for this template"
             return false
         }
-        guard validate(template.transactionTemplate, allowArchivedReferences: true) else { return false }
+        guard validate(template.transactionTemplate, allowArchivedReferences: true, requireDistinctTransferAccounts: true) else { return false }
         var updated = data
         updated.templates[index] = template
         return persist(updated, successMessage: "Template updated")
@@ -1998,11 +2038,17 @@ final class LedgerStore: ObservableObject {
             }
             return "Manual · \(setting?.asOf?.formatted(date: .abbreviated, time: .shortened) ?? "Price needed")"
         }
-        guard let quote = data.metalQuotes.first(where: { $0.metal == metal }) else { return "Price needed · enter a manual price or refresh" }
-        let stale = metalPriceFailures.contains(metal) || Date.now.timeIntervalSince(quote.marketDate) > 900
+        let refreshFailed = metalPriceFailures.contains(metal)
+        guard let quote = data.metalQuotes.first(where: { $0.metal == metal }) else {
+            return refreshFailed
+                ? "Couldn’t refresh the quote. Try again or enter a manual price."
+                : "Price needed · refresh or enter a manual price"
+        }
+        let stale = refreshFailed || Date.now.timeIntervalSince(quote.marketDate) > 900
         let conversion = account.currency != .usd && metalPricePerGram(account: account, metal: metal) == nil
             ? " · Exchange rate needed; enter a manual price" : ""
-        return "Gold API\(stale ? " · Stale" : "") · \(quote.marketDate.formatted(date: .abbreviated, time: .shortened))\(conversion)"
+        let retry = refreshFailed ? " · Refresh failed. Try again or enter a manual price." : ""
+        return "Gold API\(stale ? " · Stale" : "") · As of \(quote.marketDate.formatted(date: .abbreviated, time: .shortened))\(conversion)\(retry)"
     }
 
     func refreshMetalPrices(force: Bool = false) async {
@@ -2016,6 +2062,8 @@ final class LedgerStore: ObservableObject {
             }
         })
         for metal in metals {
+            guard metalPriceRefreshes.insert(metal).inserted else { continue }
+            defer { metalPriceRefreshes.remove(metal) }
             do {
                 let quote = try await MetalPriceService.shared.fetch(metal: metal, cached: data.metalQuotes.first { $0.metal == metal }, force: force)
                 var updated = data
@@ -2233,12 +2281,14 @@ final class LedgerStore: ObservableObject {
 
     private func validate(
         _ transaction: LedgerTransaction,
-        allowArchivedReferences: Bool = false
+        allowArchivedReferences: Bool = false,
+        requireDistinctTransferAccounts: Bool = false
     ) -> Bool {
         guard let error = FinanceTransactionValidator.validate(
             transaction,
             in: data,
-            allowArchivedReferences: allowArchivedReferences
+            allowArchivedReferences: allowArchivedReferences,
+            requireDistinctTransferAccounts: requireDistinctTransferAccounts
         ) else {
             return true
         }

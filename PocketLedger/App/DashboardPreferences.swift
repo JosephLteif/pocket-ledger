@@ -110,13 +110,13 @@ struct DashboardPreferences: Codable, Equatable {
     static let defaultPreferences = DashboardPreferences(
         order: [
             .balance,
-            .physicalAssetGain,
             .attention,
+            .upcoming,
+            .physicalAssetGain,
             .monthSummary,
             .recentActivity,
             .accounts,
             .loans,
-            .upcoming,
             .cashFlow,
             .budgetPulse,
             .storageStatus

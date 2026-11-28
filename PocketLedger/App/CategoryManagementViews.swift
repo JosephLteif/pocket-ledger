@@ -6,13 +6,14 @@ struct CategoriesView: View {
     @ObservedObject var store: LedgerStore
     @State private var isPresentingCategory = false
     @State private var editingCategory: LedgerCategory?
+    @State private var categoryActionError: String?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
                 screenSubtitle
 
-                if store.rootCategories.isEmpty {
+                if visibleRootCategories.isEmpty {
                     Text("Add a top-level category to organize your transactions.")
                         .font(.subheadline)
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
@@ -20,7 +21,7 @@ struct CategoriesView: View {
                         .pocketCard()
                 } else {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-                        ForEach(store.rootCategories) { parent in
+                        ForEach(visibleRootCategories) { parent in
                             NavigationLink {
                                 CategorySubcategoriesView(store: store, parent: parent)
                             } label: {
@@ -32,7 +33,9 @@ struct CategoriesView: View {
                                     presentCategory(parent)
                                 }
                                 Button("Archive", systemImage: "archivebox") {
-                                    _ = store.setCategoryArchived(categoryID: parent.id, isArchived: true)
+                                    if !store.setCategoryArchived(categoryID: parent.id, isArchived: true) {
+                                        categoryActionError = store.lastActionStatus ?? "Couldn't archive the category."
+                                    }
                                 }
                             }
                         }
@@ -46,10 +49,12 @@ struct CategoriesView: View {
                         ForEach(archivedCategories) { category in
                             HStack {
                                 CategoryIcon(emoji: category.iconEmoji, systemImage: category.systemImage)
-                                Text(category.displayName)
+                                Text(store.categoryPath(for: category.id))
                                 Spacer()
                                 Button("Restore") {
-                                    _ = store.setCategoryArchived(categoryID: category.id, isArchived: false)
+                                    if !store.setCategoryArchived(categoryID: category.id, isArchived: false) {
+                                        categoryActionError = store.lastActionStatus ?? "Couldn't restore the category."
+                                    }
                                 }
                                 .buttonStyle(.borderless)
                             }
@@ -67,6 +72,7 @@ struct CategoriesView: View {
         .navigationTitle("Categories")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
+        .errorMessageAlert(title: "Couldn't update category", message: $categoryActionError)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -121,6 +127,11 @@ struct CategoriesView: View {
         store.data.categories.filter(\.isArchived)
     }
 
+    private var visibleRootCategories: [LedgerCategory] {
+        let activeIDs = Set(store.activeCategories.map(\.id))
+        return store.activeCategories.filter { $0.parentID.map { !activeIDs.contains($0) } ?? true }
+    }
+
     private func presentCategory(_ category: LedgerCategory?) {
         editingCategory = category
         isPresentingCategory = true
@@ -133,6 +144,7 @@ private struct CategorySubcategoriesView: View {
     let parent: LedgerCategory
     @State private var isPresentingCategory = false
     @State private var editingCategory: LedgerCategory?
+    @State private var categoryActionError: String?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -153,13 +165,26 @@ private struct CategorySubcategoriesView: View {
                 } else {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
                         ForEach(subcategories) { category in
-                            CategoryTile(
+                            let tile = CategoryTile(
                                 category: category,
                                 onEdit: { presentCategory(category) },
                                 onArchive: {
-                                    _ = store.setCategoryArchived(categoryID: category.id, isArchived: true)
+                                    if !store.setCategoryArchived(categoryID: category.id, isArchived: true) {
+                                        categoryActionError = store.lastActionStatus ?? "Couldn't archive the category."
+                                    }
                                 }
                             )
+                            if store.activeCategories.contains(where: { $0.parentID == category.id }) {
+                                NavigationLink {
+                                    CategorySubcategoriesView(store: store, parent: category)
+                                } label: {
+                                    tile
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityHint("Opens subcategories")
+                            } else {
+                                tile
+                            }
                         }
                     }
                 }
@@ -171,6 +196,7 @@ private struct CategorySubcategoriesView: View {
         .pocketScreen()
         .navigationTitle(parent.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .errorMessageAlert(title: "Couldn't update category", message: $categoryActionError)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {

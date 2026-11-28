@@ -7,7 +7,6 @@ struct MetricsCategorySnapshot: Identifiable {
     let currency: LedgerCurrency
     let amount: Int64
     let count: Int
-    let colorIndex: Int
 }
 
 struct MetricsAccountSnapshot: Identifiable {
@@ -17,7 +16,6 @@ struct MetricsAccountSnapshot: Identifiable {
     let currency: LedgerCurrency
     let amount: Int64
     let count: Int
-    let colorIndex: Int
 }
 
 struct MetricsSnapshot {
@@ -171,16 +169,14 @@ struct MetricsSnapshot {
                 if lhs.title != rhs.title { return lhs.title < rhs.title }
                 return (lhs.categoryID?.uuidString ?? "") < (rhs.categoryID?.uuidString ?? "")
             }
-            .enumerated()
-            .map { index, value in
+            .map { value in
                 MetricsCategorySnapshot(
                     id: "\(value.categoryID?.uuidString ?? "uncategorized")-\(selectedCurrency.rawValue)",
                     categoryID: value.categoryID,
                     title: value.title,
                     currency: selectedCurrency,
                     amount: value.amount,
-                    count: value.count,
-                    colorIndex: index
+                    count: value.count
                 )
             }
 
@@ -199,16 +195,14 @@ struct MetricsSnapshot {
                 if lhs.title != rhs.title { return lhs.title < rhs.title }
                 return lhs.accountID.uuidString < rhs.accountID.uuidString
             }
-            .enumerated()
-            .map { index, value in
+            .map { value in
                 MetricsAccountSnapshot(
                     id: "\(value.accountID.uuidString)-\(selectedCurrency.rawValue)",
                     accountID: value.accountID,
                     title: value.title,
                     currency: selectedCurrency,
                     amount: value.amount,
-                    count: value.count,
-                    colorIndex: index
+                    count: value.count
                 )
             }
 
@@ -273,16 +267,14 @@ struct MetricsSnapshot {
                 if lhs.title != rhs.title { return lhs.title < rhs.title }
                 return lhs.categoryID.uuidString < rhs.categoryID.uuidString
             }
-            .enumerated()
-            .map { index, value in
+            .map { value in
                 MetricsCategorySnapshot(
                     id: "detail-\(value.categoryID.uuidString)-\(selectedCurrency.rawValue)",
                     categoryID: value.categoryID,
                     title: value.title,
                     currency: selectedCurrency,
                     amount: value.amount,
-                    count: value.count,
-                    colorIndex: index
+                    count: value.count
                 )
             }
     }
@@ -312,11 +304,12 @@ struct DashboardSnapshot {
     let excludedAccountCount: Int
     let monthExpenses: [LedgerCurrency: Int64]
     let monthTransactionCount: Int
-    let topCategory: String?
+    let topCategoryID: UUID?
     let recentTransactions: [LedgerTransaction]
     let upcomingSchedules: [ScheduledTransaction]
-    let cashFlowSchedules: [ScheduledTransaction]
+    let scheduledEntryCounts: [LedgerCurrency: Int]
     let scheduledChanges: [LedgerCurrency: Int64]
+    let firstProjectedShortfalls: [LedgerCurrency: Date]
     let budgetSummaries: [DashboardBudgetSnapshot]
 
     static var empty: DashboardSnapshot {
@@ -328,11 +321,12 @@ struct DashboardSnapshot {
             excludedAccountCount: 0,
             monthExpenses: [:],
             monthTransactionCount: 0,
-            topCategory: nil,
+            topCategoryID: nil,
             recentTransactions: [],
             upcomingSchedules: [],
-            cashFlowSchedules: [],
+            scheduledEntryCounts: [:],
             scheduledChanges: [:],
+            firstProjectedShortfalls: [:],
             budgetSummaries: []
         )
     }
@@ -355,24 +349,54 @@ struct DashboardSnapshot {
                 return lhs.note.localizedCaseInsensitiveCompare(rhs.note) == .orderedAscending
             }
         let horizon = calendar.date(byAdding: .day, value: 30, to: date) ?? date
-        let cashFlowSchedules = upcomingSchedules.filter { $0.nextRunDate <= horizon }
+        var scheduledEntryCounts: [LedgerCurrency: Int] = [:]
+        var scheduledChangesByDate: [Date: [LedgerCurrency: Int64]] = [:]
+        for schedule in upcomingSchedules where schedule.nextRunDate <= horizon {
+            let occurrences = schedule.occurrences(through: horizon, calendar: calendar)
+                .filter { $0 >= date }
+            guard !occurrences.isEmpty else { continue }
 
-        var scheduledChanges: [LedgerCurrency: Int64] = [:]
-        for schedule in cashFlowSchedules {
-            for movement in schedule.inflows {
-                guard index.includesInTotals(accountID: movement.accountID) else { continue }
-                scheduledChanges[movement.money.currency, default: 0] += movement.money.minorUnits
+            var changes: [LedgerCurrency: Int64] = [:]
+            for (movements, sign) in [(schedule.inflows, Int64(1)), (schedule.outflows, Int64(-1))] {
+                for movement in movements {
+                    guard index.includesInTotals(accountID: movement.accountID),
+                          let account = index.account(with: movement.accountID),
+                          let amount = financeConvertedMinorUnits(
+                              movement.money, to: account.currency, using: schedule.exchangeRate
+                          ) else { continue }
+                    changes[account.currency, default: 0] += sign * amount
+                }
             }
-            for movement in schedule.outflows {
-                guard index.includesInTotals(accountID: movement.accountID) else { continue }
-                scheduledChanges[movement.money.currency, default: 0] -= movement.money.minorUnits
+            for (currency, change) in changes {
+                scheduledEntryCounts[currency, default: 0] += occurrences.count
+                for occurrence in occurrences {
+                    scheduledChangesByDate[occurrence, default: [:]][currency, default: 0] += change
+                }
             }
         }
 
-        let monthStart = calendar.dateInterval(of: .month, for: date)?.start ?? .distantPast
+        let availableBalances = Dictionary(uniqueKeysWithValues: LedgerCurrency.allCases.map {
+            ($0, index.availableBalance(for: $0))
+        })
+        var scheduledChanges: [LedgerCurrency: Int64] = [:]
+        var firstProjectedShortfalls: [LedgerCurrency: Date] = [:]
+        for (occurrence, changes) in scheduledChangesByDate.sorted(by: { $0.key < $1.key }) {
+            for (currency, change) in changes {
+                let totalChange = scheduledChanges[currency, default: 0] + change
+                scheduledChanges[currency] = totalChange
+                if firstProjectedShortfalls[currency] == nil,
+                   (availableBalances[currency]?.minorUnits ?? 0) + totalChange < 0 {
+                    firstProjectedShortfalls[currency] = occurrence
+                }
+            }
+        }
+
+        let month = calendar.dateInterval(of: .month, for: date)
         var categoryCounts: [UUID: Int] = [:]
         var monthTransactionCount = 0
-        for transaction in index.sortedTransactions where transaction.date >= monthStart {
+        for transaction in index.sortedTransactions where month.map({
+            transaction.date >= $0.start && transaction.date < $0.end
+        }) == true {
             if index.transactionHasIncludedAccount(transaction) {
                 monthTransactionCount += 1
             }
@@ -387,22 +411,21 @@ struct DashboardSnapshot {
 
         return DashboardSnapshot(
             attentionItems: attentionItems,
-            availableBalances: LedgerCurrency.allCases.reduce(into: [LedgerCurrency: Money]()) { result, currency in
-                result[currency] = index.availableBalance(for: currency)
-            },
+            availableBalances: availableBalances,
             activeAccounts: activeAccounts,
             includedAccountCount: includedAccountCount,
             excludedAccountCount: activeAccounts.count - includedAccountCount,
             monthExpenses: index.monthlyExpenseTotals(for: date, calendar: calendar),
             monthTransactionCount: monthTransactionCount,
-            topCategory: categoryCounts.max { lhs, rhs in
+            topCategoryID: categoryCounts.max { lhs, rhs in
                 if lhs.value != rhs.value { return lhs.value < rhs.value }
                 return (index.categoryPath(for: lhs.key)) > (index.categoryPath(for: rhs.key))
-            }.map { index.categoryPath(for: $0.key) },
+            }?.key,
             recentTransactions: index.sortedTransactions,
             upcomingSchedules: upcomingSchedules,
-            cashFlowSchedules: cashFlowSchedules,
+            scheduledEntryCounts: scheduledEntryCounts,
             scheduledChanges: scheduledChanges,
+            firstProjectedShortfalls: firstProjectedShortfalls,
             budgetSummaries: makeBudgetSummaries(
                 data: data,
                 index: index,

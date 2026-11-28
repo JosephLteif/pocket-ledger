@@ -345,6 +345,7 @@ private struct InvestmentPurchaseEditor: View {
 @MainActor
 struct AssetTrackingSection: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject var security: AppSecurityService
     let account: Account
     let areBalancesRevealed: Bool
 
@@ -379,19 +380,19 @@ struct AssetTrackingSection: View {
                 Task { await store.refreshMetalPrices() }
             }
         }) { item in
-            switch item {
-            case .purchase:
-                MetalPurchaseEditor(store: store, account: account)
-            case .pricing(let metal):
-                MetalPricingEditor(store: store, account: account, metal: metal)
-            case .investment(let realizing):
-                InvestmentEntryEditor(store: store, account: account, realizing: realizing)
-            case .sale:
-                OtherAssetSaleEditor(store: store, account: account)
+            Group {
+                switch item {
+                case .purchase:
+                    MetalPurchaseEditor(store: store, account: account)
+                case .pricing(let metal):
+                    MetalPricingEditor(store: store, account: account, metal: metal)
+                case .investment(let realizing):
+                    InvestmentEntryEditor(store: store, account: account, realizing: realizing)
+                case .sale:
+                    OtherAssetSaleEditor(store: store, account: account)
+                }
             }
-        }
-        .onChange(of: areBalancesRevealed) { _, revealed in
-            if !revealed { sheet = nil }
+            .modifier(FinancialAmountEditorCover(security: security))
         }
         .task {
             if account.type == .physicalAsset && account.tracking?.physicalAssetSubtype != .other {
@@ -418,7 +419,8 @@ struct AssetTrackingSection: View {
         }
         let displayedMetals = account.tracking?.physicalAssetSubtype?.metal.map { [$0] } ?? heldMetals
         let automaticMetals = Set((account.tracking?.metalPricing ?? []).filter(\.isAutomaticEnabled).map(\.metal))
-        let showsRefreshButton = displayedMetals.contains { automaticMetals.contains($0) }
+        let showsRefreshButton = !account.isArchived && displayedMetals.contains { automaticMetals.contains($0) }
+        let isRefreshing = displayedMetals.contains { store.metalPriceRefreshes.contains($0) }
         let metalPriceRowCount = displayedMetals.count + (showsRefreshButton ? 1 : 0)
 
         Section {
@@ -426,18 +428,11 @@ struct AssetTrackingSection: View {
                 if purchases.isEmpty {
                     Text("Track \(metalName.lowercased()) by purchase, weight and purity.")
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
-                } else {
-                    valueRow("Recorded balance", store.balance(for: account).formatted)
-                    valueRow("Estimated metal value", store.valuation(for: account).formatted)
                 }
                 Button(account.tracking?.physicalAssetSubtype?.metal.map { "Add \($0.displayName.lowercased()) purchase" } ?? "Add metal purchase") { sheet = .purchase }
                     .buttonStyle(.bordered)
                     .tint(PocketLedgerTheme.accent)
-                    .disabled(!areBalancesRevealed || account.isArchived)
-                if !areBalancesRevealed {
-                    Text("Reveal balances to view or update holdings.")
-                        .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
-                }
+                    .disabled(account.isArchived)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 10)
@@ -456,7 +451,7 @@ struct AssetTrackingSection: View {
                 ForEach(Array(purchases.enumerated()), id: \.element.id) { entry in
                     let purchase = entry.element
                     NavigationLink {
-                        MetalPurchaseDetailView(store: store, accountID: account.id, purchaseID: purchase.id)
+                        MetalPurchaseDetailView(store: store, security: security, accountID: account.id, purchaseID: purchase.id)
                     } label: {
                         MetalPurchaseRow(
                             store: store,
@@ -477,9 +472,15 @@ struct AssetTrackingSection: View {
                 ForEach(Array(displayedMetals.enumerated()), id: \.element.id) { entry in
                     let metal = entry.element
                     VStack(alignment: .leading, spacing: 10) {
-                        Button("\(metal.displayName) pricing") { sheet = .pricing(metal) }
-                            .buttonStyle(.plain)
-                            .disabled(!areBalancesRevealed || account.isArchived)
+                        Button {
+                            sheet = .pricing(metal)
+                        } label: {
+                            Label("\(metal.displayName) pricing", systemImage: "slider.horizontal.3")
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(account.isArchived)
                         if let price = store.metalPricePerGram(account: account, metal: metal) {
                             valueRow("Pure metal / gram", "\(assetNumber(price)) \(account.currency.rawValue)")
                         } else {
@@ -497,9 +498,18 @@ struct AssetTrackingSection: View {
                     Button {
                         Task { await store.refreshMetalPrices(force: true) }
                     } label: {
-                        Label("Refresh market prices", systemImage: "arrow.clockwise")
+                        if isRefreshing {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text("Refreshing market prices")
+                            }
+                            .accessibilityElement(children: .combine)
+                        } else {
+                            Label("Refresh market prices", systemImage: "arrow.clockwise")
+                        }
                     }
                     .buttonStyle(.plain)
+                    .disabled(isRefreshing)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 10)
                     .pocketGroupedListRow(index: displayedMetals.count, count: metalPriceRowCount)
@@ -531,18 +541,15 @@ struct AssetTrackingSection: View {
                     .font(.footnote)
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
                 Button(isOtherAsset ? "Update estimated value" : "Update unrealized gain/loss") { sheet = .investment(false) }
-                    .disabled(!areBalancesRevealed || account.isArchived)
+                    .disabled(account.isArchived)
                 if isOtherAsset {
                     Button("Sell all or part") { sheet = .sale }
-                        .disabled(!areBalancesRevealed || store.valuation(for: account).minorUnits <= 0 || account.isArchived)
+                        .disabled(store.valuation(for: account).minorUnits <= 0 || account.isArchived)
                 } else {
                     Button("Realize gain/loss") { sheet = .investment(true) }
-                        .disabled(!areBalancesRevealed || (account.tracking?.unrealizedMinorUnits ?? 0) == 0 || account.isArchived)
+                        .disabled((account.tracking?.unrealizedMinorUnits ?? 0) == 0 || account.isArchived)
                     Text("Realizing a gain or loss preserves estimated total value.")
                         .font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
-                }
-                if !areBalancesRevealed {
-                    Text("Reveal balances to update investment performance.").font(.footnote).foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -686,11 +693,11 @@ private struct MetalPurchaseRow: View {
 @MainActor
 private struct MetalPurchaseDetailView: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject var security: AppSecurityService
     let accountID: UUID
     let purchaseID: UUID
 
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
-    @Environment(\.dismiss) private var dismiss
     @State private var salePurchase: MetalPurchase?
 
     private var account: Account? { store.account(with: accountID) }
@@ -708,16 +715,8 @@ private struct MetalPurchaseDetailView: View {
         }
         .navigationTitle("Metal purchase")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden()
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Label("Back", systemImage: "chevron.left")
-                }
-                .accessibilityLabel("Back to account")
-            }
+            BalanceVisibilityToolbarItem(security: security)
         }
         .pocketScreen()
         .sheet(item: $salePurchase, onDismiss: {
@@ -725,10 +724,8 @@ private struct MetalPurchaseDetailView: View {
         }) { salePurchase in
             if let account = store.account(with: accountID) {
                 MetalSaleEditor(store: store, account: account, purchase: salePurchase)
+                    .modifier(FinancialAmountEditorCover(security: security))
             }
-        }
-        .onChange(of: areBalancesRevealed) { _, revealed in
-            if !revealed { salePurchase = nil }
         }
     }
 
@@ -859,7 +856,7 @@ private struct MetalPurchaseDetailView: View {
                         }
                     .buttonStyle(.borderedProminent)
                     .tint(PocketLedgerTheme.accent)
-                        .disabled(!areBalancesRevealed || account.isArchived)
+                        .disabled(account.isArchived)
                     } else {
                         Label("Fully sold", systemImage: "checkmark.circle")
                             .foregroundStyle(PocketLedgerTheme.textSecondary)

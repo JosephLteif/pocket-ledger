@@ -40,13 +40,6 @@ struct SetupWizardView: View {
                             Label(type.displayName, systemImage: type.systemImage).tag(type)
                         }
                     }
-                    if !proAccess.hasProAccess {
-                        ProUpgradePrompt(
-                            title: "Advanced account types",
-                            detail: "Pro adds investment and physical-asset accounts.",
-                            feature: .accountTypes
-                        )
-                    }
                     CurrencyInputField("Opening balance", text: $openingBalance, currency: $currency)
                 }
 

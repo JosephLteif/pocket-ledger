@@ -384,6 +384,8 @@ struct AppLockView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var passcode = ""
     @State private var errorMessage: String?
+    @State private var lockoutSeconds = 0
+    @State private var lockoutRevision = 0
     @State private var isAuthenticating = false
     @State private var shouldRetryBiometricsOnActivation = true
 
@@ -424,7 +426,7 @@ struct AppLockView: View {
                         Button("Unlock", action: unlockWithPasscode)
                             .buttonStyle(.glassProminent)
                             .tint(PocketLedgerTheme.accent)
-                            .disabled(!AppPasscodeRules.isValid(passcode))
+                            .disabled(lockoutSeconds > 0 || !AppPasscodeRules.isValid(passcode))
 
                         if security.biometricsEnabled {
                             Button {
@@ -443,7 +445,12 @@ struct AppLockView: View {
                                 .controlSize(.small)
                         }
 
-                        if let errorMessage {
+                        if lockoutSeconds > 0 {
+                            Text("Too many incorrect attempts. Try again in \(lockoutSeconds) seconds.")
+                                .font(.footnote)
+                                .foregroundStyle(PocketLedgerTheme.accent)
+                                .multilineTextAlignment(.center)
+                        } else if let errorMessage {
                             Text(errorMessage)
                                 .font(.footnote)
                                 .foregroundStyle(PocketLedgerTheme.accent)
@@ -466,6 +473,14 @@ struct AppLockView: View {
         .onAppear {
             requestBiometricUnlockIfPossible()
         }
+        .task(id: lockoutRevision) {
+            lockoutSeconds = security.passcodeLockoutRemainingSeconds
+            while lockoutSeconds > 0 && !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                lockoutSeconds = security.passcodeLockoutRemainingSeconds
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {
                 shouldRetryBiometricsOnActivation = true
@@ -487,10 +502,9 @@ struct AppLockView: View {
     private func unlockWithPasscode() {
         guard security.verifyPasscode(passcode) else {
             passcode = ""
-            let seconds = security.passcodeLockoutRemainingSeconds
-            errorMessage = seconds > 0
-                ? "Too many incorrect attempts. Try again in \(seconds) seconds."
-                : "That passcode is incorrect."
+            lockoutSeconds = security.passcodeLockoutRemainingSeconds
+            errorMessage = lockoutSeconds > 0 ? nil : "That passcode is incorrect."
+            lockoutRevision += 1
             return
         }
 

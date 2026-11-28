@@ -9,6 +9,7 @@ struct ContentView: View {
     @StateObject private var security = AppSecurityService()
     @StateObject private var intentSearchRouter = FinanceIntentSearchRouter.shared
     @StateObject private var visualBillScanRouter = VisualBillScanRouter.shared
+    @StateObject private var reminderRouter = LedgerReminderRouter.shared
     @State private var addAction: AddAction?
     @State private var searchText = ""
     @State private var isSearchPresented = false
@@ -17,6 +18,7 @@ struct ContentView: View {
     @State private var isShowingSetup = false
     @State private var isShowingImportWizardUITest = false
     @State private var isUnlocked = false
+    @State private var isShowingUnavailableReminder = false
     @SceneStorage("pocketLedger.selectedTab") private var selectedTabRawValue = AppTab.overview.rawValue
     @AppStorage(SetupWizardView.completedKey) private var setupCompleted = false
     @AppStorage(PocketLedgerTheme.appearanceModeKey) private var selectedAppearanceMode = PocketLedgerAppearanceMode.system.rawValue
@@ -28,6 +30,7 @@ struct ContentView: View {
         ZStack {
             unlockedContent
                 .allowsHitTesting(!(security.isPasscodeEnabled && !isUnlocked))
+                .accessibilityHidden(security.isPasscodeEnabled && !isUnlocked)
 
             if security.isPasscodeEnabled && !isUnlocked {
                 AppLockView(security: security, isUnlocked: $isUnlocked)
@@ -41,6 +44,7 @@ struct ContentView: View {
                 Task { await proAccess.refreshEntitlements() }
                 openPendingQuickExpense()
                 store.processDueScheduledTransactions()
+                openPendingReminder()
                 let schedules = store.data.scheduledTransactions
                 let loans = store.data.loans
                 Task {
@@ -77,6 +81,10 @@ struct ContentView: View {
         }
         .onChange(of: isUnlocked) { _, _ in
             openPendingVisualBillScan()
+            openPendingReminder()
+        }
+        .onChange(of: reminderRouter.pendingDestination) { _, _ in
+            openPendingReminder()
         }
         .task {
             await proAccess.refreshEntitlements()
@@ -99,15 +107,22 @@ struct ContentView: View {
             if !setupCompleted && store.data.accounts.isEmpty && store.data.categories.isEmpty {
                 isShowingSetup = true
             }
+            openPendingReminder()
         }
         .onOpenURL(perform: handleDeepLink)
-        .sheet(isPresented: $isShowingSetup) {
+        .sheet(isPresented: $isShowingSetup, onDismiss: openPendingReminder) {
             SetupWizardView(store: store)
         }
         .sheet(isPresented: $isShowingImportWizardUITest) {
             ImportWizardView(store: store, document: importWizardUITestDocument)
                 .presentationDetents([.large])
         }
+        .alert("Reminder item unavailable", isPresented: $isShowingUnavailableReminder) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The loan or scheduled transaction is no longer in your ledger.")
+        }
+        .environmentObject(security)
     }
 
     private var selectedTabBinding: Binding<AppTab> {
@@ -188,6 +203,34 @@ struct ContentView: View {
         }
         selectedTabBinding.wrappedValue = .transactions
         addAction = .visualBillScan(id: request.id, imageData: request.imageData)
+    }
+
+    private func openPendingReminder() {
+        guard scenePhase == .active,
+              !security.isPasscodeEnabled || isUnlocked,
+              !isShowingSetup, !isShowingImportWizardUITest,
+              addAction == nil,
+              let destination = reminderRouter.pendingDestination else { return }
+
+        reminderRouter.pendingDestination = nil
+        switch destination {
+        case .dailyTransactions:
+            selectedTabBinding.wrappedValue = .transactions
+        case .loan(let id):
+            selectedTabBinding.wrappedValue = .more
+            if store.loan(with: id) != nil {
+                addAction = .reminderLoan(id)
+            } else {
+                isShowingUnavailableReminder = true
+            }
+        case .scheduledTransaction(let id):
+            selectedTabBinding.wrappedValue = .more
+            if store.data.scheduledTransactions.contains(where: { $0.id == id }) {
+                addAction = .reminderSchedule(id)
+            } else {
+                isShowingUnavailableReminder = true
+            }
+        }
     }
 
     private var unlockedContent: some View {
@@ -285,7 +328,7 @@ struct ContentView: View {
         .preferredColorScheme(
             PocketLedgerAppearanceMode(rawValue: selectedAppearanceMode)?.preferredColorScheme
         )
-        .sheet(item: $addAction) { action in
+        .sheet(item: $addAction, onDismiss: openPendingReminder) { action in
             switch action {
             case .scanBill(let source):
                 BillScannerView(store: store, initialSource: source)
@@ -312,15 +355,26 @@ struct ContentView: View {
                 LoanEditor(store: store)
             case .scheduled:
                 TransactionEditor(store: store, initialKind: .expense, initialTiming: .scheduled)
+            case .reminderLoan(let id):
+                NavigationStack {
+                    LoanDetailView(store: store, loanID: id, showsCloseButton: true)
+                }
+            case .reminderSchedule(let id):
+                if let schedule = store.data.scheduledTransactions.first(where: { $0.id == id }) {
+                    TransactionEditor(store: store, initialTiming: .scheduled, scheduledTransaction: schedule)
+                        .modifier(FinancialAmountEditorCover(security: security))
+                }
             case .template(let templateID):
                 if let template = store.data.templates.first(where: { $0.id == templateID }) {
                     TransactionEditor(store: store, template: template)
+                        .modifier(FinancialAmountEditorCover(security: security))
                 } else {
                     EmptyView()
                 }
             case .recent(let transactionID):
                 if let transaction = store.data.transactions.first(where: { $0.id == transactionID }) {
                     TransactionEditor(store: store, prefilledTransaction: transaction)
+                        .modifier(FinancialAmountEditorCover(security: security))
                 } else {
                     EmptyView()
                 }
@@ -365,6 +419,8 @@ enum AddAction: Identifiable {
     case investment
     case loan
     case scheduled
+    case reminderLoan(UUID)
+    case reminderSchedule(UUID)
     case template(UUID)
     case recent(UUID)
 
@@ -390,6 +446,10 @@ enum AddAction: Identifiable {
             return "loan"
         case .scheduled:
             return "scheduled"
+        case .reminderLoan(let id):
+            return "reminder-loan-\(id.uuidString)"
+        case .reminderSchedule(let id):
+            return "reminder-schedule-\(id.uuidString)"
         case .template(let id):
             return "template-\(id.uuidString)"
         case .recent(let id):
@@ -422,7 +482,8 @@ struct AddTransactionToolbar: ToolbarContent {
             Button {
                 onAction(.expense)
             } label: {
-                Image(systemName: systemImage)
+                Label("Expense", systemImage: systemImage)
+                    .labelStyle(.titleAndIcon)
             }
             .accessibilityLabel("Add expense")
             .accessibilityHint("Opens a new expense")
@@ -449,7 +510,7 @@ struct AddTransactionToolbar: ToolbarContent {
                                 onAction(.scanBill(.camera))
                             }
                         }
-                        Button("Choose PDF", systemImage: "doc.richtext") {
+                        Button("Attach PDF and enter total manually", systemImage: "doc.richtext") {
                             onAction(.scanBill(.pdf))
                         }
                     }
@@ -479,7 +540,10 @@ struct AddTransactionToolbar: ToolbarContent {
                 if !store.recentTransactions.isEmpty {
                     Section("Recent") {
                         ForEach(Array(store.recentTransactions.prefix(3)), id: \.id) { transaction in
-                            Button(transaction.note, systemImage: "clock.arrow.circlepath") {
+                            Button(
+                                transaction.note.isEmpty ? transaction.kind.displayName : transaction.note,
+                                systemImage: "clock.arrow.circlepath"
+                            ) {
                                 onAction(.recent(transaction.id))
                             }
                         }

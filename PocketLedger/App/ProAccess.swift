@@ -37,6 +37,7 @@ final class ProEntitlementStore: ObservableObject {
     private static let developerOverrideInfoKey = "PocketLedgerDeveloperProOverrideEnabled"
 
     @Published private(set) var product: Product?
+    @Published private(set) var isLoadingProduct = false
     @Published private(set) var hasStoreKitProAccess = false
     @Published private(set) var developerProOverrideEnabled: Bool
     @Published private(set) var hasResolvedEntitlements = false
@@ -114,6 +115,9 @@ final class ProEntitlementStore: ObservableObject {
     }
 
     func loadProduct() async {
+        guard !isLoadingProduct else { return }
+        isLoadingProduct = true
+        defer { isLoadingProduct = false }
         do {
             product = try await Product.products(for: [Self.productIdentifier]).first
         } catch {
@@ -281,6 +285,7 @@ struct ProUpgradeButton<Label: View>: View {
 struct ProUpgradeView: View {
     @ObservedObject var access: ProEntitlementStore
     @Environment(\.dismiss) private var dismiss
+    @State private var didRetryProduct = false
 
     var body: some View {
         NavigationStack {
@@ -316,6 +321,9 @@ struct ProUpgradeView: View {
                     } else if !access.hasResolvedEntitlements {
                         ProgressView("Checking Apple purchases…")
                             .frame(maxWidth: .infinity)
+                    } else if access.isLoadingProduct {
+                        ProgressView("Checking Pro availability…")
+                            .frame(maxWidth: .infinity)
                     } else if let product = access.product {
                         Button {
                             Task { await access.purchase() }
@@ -338,10 +346,15 @@ struct ProUpgradeView: View {
                         ContentUnavailableView(
                             "Pro purchase unavailable",
                             systemImage: "storefront",
-                            description: Text("Try again later or restore an existing purchase.")
+                            description: Text(didRetryProduct
+                                ? "Pro is still unavailable. You can try again later or restore an existing purchase."
+                                : "Try again or restore an existing purchase.")
                         )
                         Button("Try Again") {
-                            Task { await access.loadProduct() }
+                            Task {
+                                await access.loadProduct()
+                                didRetryProduct = true
+                            }
                         }
                         .frame(maxWidth: .infinity)
                     }

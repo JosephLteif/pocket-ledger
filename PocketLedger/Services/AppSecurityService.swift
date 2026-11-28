@@ -275,10 +275,13 @@ final class AppSecurityService: ObservableObject {
         }
     }
 
+    var canAuthenticateToRevealBalances: Bool {
+        LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
+    }
+
     func authenticateToRevealBalances() async -> Bool {
         let context = LAContext()
-        var error: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) else {
             return false
         }
 
@@ -286,8 +289,8 @@ final class AppSecurityService: ObservableObject {
         defer { isBiometricPromptActive = false }
         do {
             return try await context.evaluatePolicy(
-                .deviceOwnerAuthenticationWithBiometrics,
-                localizedReason: "Reveal your Pocket Ledger balances."
+                .deviceOwnerAuthentication,
+                localizedReason: "Reveal your Pocket Ledger financial amounts."
             )
         } catch {
             return false

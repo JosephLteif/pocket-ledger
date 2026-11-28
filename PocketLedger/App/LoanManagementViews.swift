@@ -134,6 +134,7 @@ struct LoansView: View {
                     ForEach(store.legacyLoanAccountsNeedingSetup) { account in
                         NavigationLink {
                             LegacyLoanConversionView(store: store, account: account)
+                                .modifier(FinancialAmountEditorCover(security: security))
                         } label: {
                             HStack(spacing: 12) {
                                 PocketIcon(
@@ -198,9 +199,9 @@ struct LoansView: View {
                         NavigationLink {
                             LoanPersonDetailView(
                                 store: store,
+                                security: security,
                                 personID: person.id,
-                                filter: filter,
-                                areBalancesRevealed: areBalancesRevealed
+                                filter: filter
                             )
                         } label: {
                             LoanPersonRow(
@@ -421,7 +422,7 @@ private struct LoanPersonRow: View {
                 ForEach(person.activeCurrencies) { currency in
                     let balance = person.netBalance(in: currency)
                     HStack(spacing: 5) {
-                        Text(balanceLabel(for: balance))
+                        Text("\(currency.rawValue) · \(balanceLabel(for: balance))")
                         Spacer(minLength: 4)
                         ProtectedAmountText(
                             value: Money(currency: currency, minorUnits: abs(balance)).formatted,
@@ -478,7 +479,7 @@ private struct LoanPersonBalanceRow: View {
                     Text(balanceDescription)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(PocketLedgerTheme.textPrimary)
-                    Text("Net across \(openLoanCount) open loan\(openLoanCount == 1 ? "" : "s")")
+                    Text("\(currency.rawValue) · \(openLoanCount) open loan\(openLoanCount == 1 ? "" : "s")")
                         .font(.caption)
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
                 }
@@ -497,15 +498,16 @@ private struct LoanPersonBalanceRow: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.bordered)
+                .accessibilityLabel("\(actionTitle) in \(currency.rawValue)")
                 if netAmount != 0 {
                     Menu {
                         Button("Resolve all without payment", systemImage: "checkmark.circle", role: .destructive, action: onResolveWithoutPayment)
                     } label: {
                         Image(systemName: "ellipsis")
-                            .frame(width: 40, height: 36)
+                            .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
-                    .accessibilityLabel("More settlement options")
+                    .accessibilityLabel("More settlement options for \(currency.rawValue)")
                 }
             }
         }
@@ -526,9 +528,10 @@ private struct LoanPersonBalanceRow: View {
 @MainActor
 private struct LoanPersonDetailView: View {
     @ObservedObject var store: LedgerStore
+    @ObservedObject var security: AppSecurityService
     let personID: String
     let filter: LoanListFilter
-    let areBalancesRevealed: Bool
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @State private var currencyToResolve: LedgerCurrency?
     @State private var currencyToSettle: LedgerCurrency?
     @State private var errorMessage: String?
@@ -580,6 +583,7 @@ private struct LoanPersonDetailView: View {
                                 areBalancesRevealed: areBalancesRevealed
                             )
                         }
+                        .accessibilityIdentifier("loan-person-loan-\(loan.id)")
                         .listRowBackground(PocketLedgerTheme.surface)
                     }
                 }
@@ -593,6 +597,7 @@ private struct LoanPersonDetailView: View {
         .pocketScreen()
         .navigationTitle(person?.name ?? "Loans")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar { BalanceVisibilityToolbarItem(security: security) }
         .confirmationDialog(
             "Settle balance with \(person?.name ?? "this person")?",
             isPresented: resolveConfirmationPresented,
@@ -612,6 +617,7 @@ private struct LoanPersonDetailView: View {
         }
         .sheet(item: $currencyToSettle) { currency in
             LoanPersonSettlementEditor(store: store, personID: personID, currency: currency)
+                .modifier(FinancialAmountEditorCover(security: security))
         }
     }
 
@@ -619,10 +625,12 @@ private struct LoanPersonDetailView: View {
         guard let person, let currencyToResolve else { return "No account transaction will be created." }
         let net = person.netBalance(in: currencyToResolve)
         let amount = Money(currency: currencyToResolve, minorUnits: abs(net)).formatted
+        let outcome = "This marks all open \(currencyToResolve.rawValue) loans with \(person.name) resolved without changing account balances or creating a transaction."
+        guard areBalancesRevealed else { return outcome }
         let balance = net > 0
             ? "\(person.name) owes you \(amount)."
             : net < 0 ? "You owe \(person.name) \(amount)." : "There is no net amount to pay."
-        return "\(balance) This marks all open \(currencyToResolve.rawValue) loans with \(person.name) resolved without changing account balances or creating a transaction."
+        return "\(balance) \(outcome)"
     }
 
     private var resolveConfirmationPresented: Binding<Bool> {
@@ -657,6 +665,7 @@ private struct LoanPersonSettlementEditor: View {
     let currency: LedgerCurrency
     @Environment(\.dismiss) private var dismiss
     @State private var accountSplits: [LoanSettlementSplitDraft]
+    @State private var settlementDate = Date.now
     @State private var errorMessage: String?
     @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
@@ -680,6 +689,11 @@ private struct LoanPersonSettlementEditor: View {
     }
 
     private var netBalance: Int64 { person?.netBalance(in: currency) ?? 0 }
+
+    private var earliestSettlementDate: Date {
+        let firstStart = person?.activeLoans.filter { $0.currency == currency }.map(\.startedAt).min() ?? .now
+        return min(Calendar.current.startOfDay(for: firstStart), .now)
+    }
 
     private var eligibleAccounts: [Account] {
         store.activeAccounts.filter {
@@ -725,6 +739,10 @@ private struct LoanPersonSettlementEditor: View {
                     Text("Split all or part of this amount across accounts in \(currency.rawValue).")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+
+                Section("Settlement date") {
+                    DatePicker("Date", selection: $settlementDate, in: earliestSettlementDate...Date.now, displayedComponents: .date)
                 }
 
                 Section("Account splits") {
@@ -814,7 +832,7 @@ private struct LoanPersonSettlementEditor: View {
             return
         }
         let loanIDs = person.activeLoans.filter { $0.currency == currency }.map(\.id)
-        guard store.settleLoansWithPerson(loanIDs: loanIDs, accountSplits: parsedSplits) else {
+        guard store.settleLoansWithPerson(loanIDs: loanIDs, accountSplits: parsedSplits, date: settlementDate) else {
             errorMessage = store.lastActionStatus ?? "The person settlement could not be saved."
             return
         }
@@ -1038,6 +1056,9 @@ struct LoanEditor: View {
     let loan: Loan?
     let onSave: (() -> Void)?
     private let wrapsInNavigationStack: Bool
+    private let initialStartDate: Date
+    private let initialAccountID: UUID?
+    private let initialCurrency: LedgerCurrency
     @Environment(\.dismiss) private var dismiss
     @State private var counterparty: String
     @State private var selectedCounterparty: String?
@@ -1051,6 +1072,7 @@ struct LoanEditor: View {
     @State private var dueDate: Date
     @State private var selectedAccountID: UUID?
     @State private var errorMessage: String?
+    @State private var isConfirmingDiscard = false
 
     init(
         store: LedgerStore,
@@ -1073,17 +1095,18 @@ struct LoanEditor: View {
         _amountText = State(initialValue: "")
         _fundingMethod = State(initialValue: .cashMovement)
         _descriptionText = State(initialValue: loan?.description ?? "")
-        _startedAt = State(initialValue: loan?.startedAt ?? .now)
+        let startDate = loan?.startedAt ?? .now
+        initialStartDate = startDate
+        _startedAt = State(initialValue: startDate)
         _hasDueDate = State(initialValue: loan?.dueDate != nil)
         _dueDate = State(initialValue: loan?.dueDate ?? .now)
         let firstAccount = store.activeAccounts.first { $0.type == .cash || $0.type == .bankAccount }
         let accountID = loan?.settlementAccountID ?? firstAccount?.id
+        initialAccountID = accountID
         _selectedAccountID = State(initialValue: accountID)
-        _loanCurrency = State(
-            initialValue: loan?.currency
-                ?? store.activeAccounts.first(where: { $0.id == accountID })?.currency
-                ?? .usd
-        )
+        let currency = loan?.currency ?? firstAccount?.currency ?? .usd
+        initialCurrency = currency
+        _loanCurrency = State(initialValue: currency)
     }
 
     @ViewBuilder
@@ -1202,8 +1225,18 @@ struct LoanEditor: View {
             .pocketListSurface()
             .navigationTitle(loan == nil ? "New loan" : "Edit loan")
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(hasUnsavedChanges)
+            .navigationBarBackButtonHidden(hasUnsavedChanges)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        if hasUnsavedChanges {
+                            isConfirmingDiscard = true
+                        } else {
+                            dismiss()
+                        }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) { Button("Save", action: save) }
             }
             .alert("Loan not saved", isPresented: errorPresented) {
@@ -1211,6 +1244,23 @@ struct LoanEditor: View {
             } message: {
                 Text(errorMessage ?? "")
             }
+            .confirmationDialog("Discard loan changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
+                Button("Discard changes", role: .destructive) { dismiss() }
+                Button("Keep editing", role: .cancel) {}
+            }
+    }
+
+    private var hasUnsavedChanges: Bool {
+        (selectedCounterparty ?? counterparty) != (loan?.counterparty ?? "")
+            || descriptionText != (loan?.description ?? "")
+            || hasDueDate != (loan?.dueDate != nil)
+            || (hasDueDate && dueDate != loan?.dueDate)
+            || !amountText.isEmpty
+            || direction != (loan?.direction ?? .borrowed)
+            || fundingMethod != .cashMovement
+            || startedAt != initialStartDate
+            || selectedAccountID != initialAccountID
+            || loanCurrency != initialCurrency
     }
 
     private var counterpartyLabel: String {
@@ -1371,6 +1421,7 @@ private enum LoanDetailDestination {
 @MainActor
 struct LoanDetailView: View {
     @ObservedObject var store: LedgerStore
+    @EnvironmentObject private var security: AppSecurityService
     let loanID: UUID
     let showsCloseButton: Bool
     @Environment(\.dismiss) private var dismiss
@@ -1400,6 +1451,7 @@ struct LoanDetailView: View {
         .navigationTitle(loan?.counterparty ?? "Loan")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            BalanceVisibilityToolbarItem(security: security)
             if showsCloseButton {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
@@ -1585,10 +1637,13 @@ struct LoanDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .pocketGroupedSurface(cornerRadius: 18)
 
-                    Text("Started \(loan.startedAt.formatted(date: .abbreviated, time: .omitted)) · Original total \(loan.startingAmount.formatted)")
-                        .font(.caption)
-                        .foregroundStyle(PocketLedgerTheme.textTertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Started \(loan.startedAt.formatted(date: .abbreviated, time: .omitted))")
+                        ProtectedAmountText(value: "Original total \(loan.startingAmount.formatted)", isRevealed: areBalancesRevealed)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal, PocketLedgerTheme.screenHorizontalPadding)
                 .padding(.vertical, 12)
@@ -1636,7 +1691,7 @@ struct LoanDetailView: View {
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.headline.weight(.semibold))
-                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -1711,6 +1766,7 @@ struct LoanDetailView: View {
                    let transactionID = payment.transactionID,
                    let transaction = store.data.transactions.first(where: { $0.id == transactionID }) {
                     LoanPaymentEditor(store: store, loan: loan, payment: payment, transaction: transaction)
+                        .modifier(FinancialAmountEditorCover(security: security))
                 } else {
                     ContentUnavailableView("Payment unavailable", systemImage: "exclamationmark.circle")
                 }

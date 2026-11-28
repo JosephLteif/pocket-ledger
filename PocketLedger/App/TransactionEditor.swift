@@ -51,7 +51,8 @@ enum FinanceTransactionDefaults {
     }
 }
 
-private struct PendingAttachmentReplacement: Equatable {
+private struct PendingAttachment: Equatable, Identifiable {
+    let id = UUID()
     let data: Data
     let fileName: String
     let contentType: String
@@ -78,7 +79,8 @@ private struct TransactionEditorSnapshot: Equatable {
     let rateText: String
     let attachmentIDs: [UUID]
     let deletedAttachmentIDs: Set<UUID>
-    let attachmentReplacements: [UUID: PendingAttachmentReplacement]
+    let attachmentReplacements: [UUID: PendingAttachment]
+    let addedAttachments: [PendingAttachment]
 }
 
 @MainActor
@@ -209,13 +211,17 @@ struct TransactionEditor: View {
     @State private var automaticTransferDestinationAmount: String?
     @State private var rateBase: LedgerCurrency = .usd
     @State private var rateQuote: LedgerCurrency = .lbp
-    @State private var rateText = "100000"
+    @State private var rateText = ""
     @State private var attachmentIDs: [UUID]
     @State private var previewAttachment: LedgerAttachment?
+    @State private var previewDraftAttachment: PendingAttachment?
+    @State private var isAddingTransferAccount = false
     @State private var isShowingAttachmentImporter = false
     @State private var replacingAttachmentID: UUID?
+    @State private var isReadingAttachment = false
     @State private var attachmentIDsPendingDeletion: Set<UUID> = []
-    @State private var attachmentReplacements: [UUID: PendingAttachmentReplacement] = [:]
+    @State private var attachmentReplacements: [UUID: PendingAttachment] = [:]
+    @State private var addedAttachments: [PendingAttachment] = []
     @State private var originalEditorSnapshot: TransactionEditorSnapshot?
     @State private var isShowingDiscardConfirmation = false
     @State private var isShowingProUpgrade = false
@@ -232,9 +238,7 @@ struct TransactionEditor: View {
     private let editingTemplateID: UUID?
     private let isCreatingTemplate: Bool
     private let hasPrefilledTransactionContent: Bool
-    private let initialAttachmentData: Data?
-    private let initialAttachmentFileName: String?
-    private let initialAttachmentContentType: String?
+    private let scannedAttachment: PendingAttachment?
     private let initialReceiptItems: [LedgerReceiptLineItem]
 
     init(
@@ -363,11 +367,8 @@ struct TransactionEditor: View {
                 ]
                 : [])
         )
-        let initialHasAttachments = !(transaction?.attachmentIDs ?? []).isEmpty
-            || initialAttachmentData != nil
         _isShowingMoreDetails = State(initialValue:
-            initialHasAttachments
-                || sourceTransaction?.exchangeRate != nil
+            sourceTransaction?.exchangeRate != nil
                 || scheduledTransaction?.exchangeRate != nil
                 || initialCurrencies.count > 1
                 || !initialReceiptItems.isEmpty
@@ -385,8 +386,8 @@ struct TransactionEditor: View {
         )
         _rateText = State(
             initialValue: initialSavedRate.map {
-                NSDecimalNumber(decimal: $0.quoteUnitsPerBaseUnit).stringValue
-            } ?? "100000"
+                ExchangeRate.formattedInput($0.quoteUnitsPerBaseUnit)
+            } ?? ""
         )
         _attachmentIDs = State(initialValue: transaction?.attachmentIDs ?? [])
         _categoryID = State(
@@ -402,9 +403,15 @@ struct TransactionEditor: View {
         editingTemplateID = editingTemplate?.id
         isCreatingTemplate = createTemplate
         hasPrefilledTransactionContent = sourceTransaction != nil
-        self.initialAttachmentData = initialAttachmentData
-        self.initialAttachmentFileName = initialAttachmentFileName
-        self.initialAttachmentContentType = initialAttachmentContentType
+        if let initialAttachmentData, let initialAttachmentFileName, let initialAttachmentContentType {
+            scannedAttachment = PendingAttachment(
+                data: initialAttachmentData,
+                fileName: initialAttachmentFileName,
+                contentType: initialAttachmentContentType
+            )
+        } else {
+            scannedAttachment = nil
+        }
         self.initialReceiptItems = initialReceiptItems
     }
 
@@ -443,19 +450,17 @@ struct TransactionEditor: View {
                     }
                 }
 
+                timingSection
+                detailsSection
                 if kind == .expense {
-                    timingSection
-                    detailsSection
                     expensePaymentsSection
                     moreDetailsSection
                 } else {
-                    timingSection
-                    detailsSection
-                    attachmentSection
                     outgoingMovementSection
                     receivingMovementSection
                     exchangeRateSection
                 }
+                attachmentSection
 
             }
             .scrollDismissesKeyboard(.interactively)
@@ -530,7 +535,7 @@ struct TransactionEditor: View {
                 guard useCustomRate else { return }
                 synchronizeAutomaticTransferAmount()
             }
-            .interactiveDismissDisabled(hasUnsavedChanges)
+            .interactiveDismissDisabled(hasUnsavedChanges || isReadingAttachment)
             .pocketListSurface()
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
@@ -538,10 +543,11 @@ struct TransactionEditor: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: cancel)
+                        .disabled(isReadingAttachment)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(saveButtonTitle, action: save)
-                        .disabled(replacingAttachmentID != nil)
+                         .disabled(isReadingAttachment || simpleTransferIssue != nil)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
@@ -565,8 +571,24 @@ struct TransactionEditor: View {
             }
             .sheet(item: $previewAttachment) { attachment in
                 NavigationStack {
-                    AttachmentPreviewView(store: store, attachment: attachment)
+                    AttachmentPreviewView(
+                        fileName: attachment.fileName,
+                        contentType: attachment.contentType,
+                        url: store.attachmentURL(for: attachment.id)
+                    )
                 }
+            }
+            .sheet(item: $previewDraftAttachment) { attachment in
+                NavigationStack {
+                    AttachmentPreviewView(
+                        fileName: attachment.fileName,
+                        contentType: attachment.contentType,
+                        data: attachment.data
+                    )
+                }
+            }
+            .sheet(isPresented: $isAddingTransferAccount) {
+                AccountEditor(store: store, initialCurrency: outflows.first?.currency ?? .usd)
             }
             .sheet(isPresented: $isSelectingCategory, onDismiss: {
                 categorySelectionPaymentID = nil
@@ -582,7 +604,7 @@ struct TransactionEditor: View {
                 isPresented: $isShowingAttachmentImporter,
                 allowedContentTypes: [.image, .pdf],
                 allowsMultipleSelection: false,
-                onCompletion: replaceAttachment
+                onCompletion: importAttachment
             )
         }
         .onChange(of: specialEditorPath) { _, path in
@@ -650,7 +672,7 @@ struct TransactionEditor: View {
             .disabled(isEditingScheduledTransaction)
 
             if timing == .scheduled {
-                DatePicker("First run", selection: $date, displayedComponents: [.date, .hourAndMinute])
+                DatePicker(isEditingScheduledTransaction ? "Next run" : "First run", selection: $date, displayedComponents: [.date, .hourAndMinute])
                     .datePickerStyle(.compact)
 
                 Picker("Repeats", selection: $scheduleFrequency) {
@@ -787,21 +809,11 @@ struct TransactionEditor: View {
 
     @ViewBuilder
     private var moreDetailsSection: some View {
-        if !attachments.isEmpty || initialAttachmentFileName != nil || selectedCurrencies.count > 1 {
+        if selectedCurrencies.count > 1 {
             Section {
                 DisclosureGroup(isExpanded: $isShowingMoreDetails) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if !attachments.isEmpty || initialAttachmentFileName != nil {
-                            expenseAttachmentDetails
-                        }
-                        if selectedCurrencies.count > 1 {
-                            if !attachments.isEmpty || initialAttachmentFileName != nil {
-                                Divider()
-                            }
-                            exchangeRateDetails
-                        }
-                    }
-                    .padding(.vertical, 6)
+                    exchangeRateDetails
+                        .padding(.vertical, 6)
                 } label: {
                     Label("More details", systemImage: "slider.horizontal.3")
                 }
@@ -868,30 +880,6 @@ struct TransactionEditor: View {
     }
 
     @ViewBuilder
-    private var expenseAttachmentDetails: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Attachments")
-                .font(.subheadline.weight(.semibold))
-
-            TransactionAttachmentRows(
-                attachments: attachments,
-                onPreview: { previewAttachment = $0 },
-                onReplace: { beginReplacingAttachment($0) },
-                onDelete: { deleteAttachment($0) }
-            )
-
-            if attachments.isEmpty, let initialAttachmentFileName {
-                Label(
-                    initialAttachmentFileName,
-                    systemImage: initialAttachmentContentType == "application/pdf" ? "doc.richtext" : "photo"
-                )
-                Text("This local file will be saved with the transaction.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
     @ViewBuilder
     private var detailsSection: some View {
         Section("Details") {
@@ -902,29 +890,57 @@ struct TransactionEditor: View {
 
     @ViewBuilder
     private var attachmentSection: some View {
-        if !attachments.isEmpty {
+        if !isTemplateEditor && (timing == .now || scannedAttachment != nil || !addedAttachments.isEmpty) {
             Section("Attachments") {
                 TransactionAttachmentRows(
                     attachments: attachments,
-                    onPreview: { previewAttachment = $0 },
+                    onPreview: { attachment in
+                        if let replacement = attachmentReplacements[attachment.id] {
+                            previewDraftAttachment = replacement
+                        } else {
+                            previewAttachment = attachment
+                        }
+                    },
                     onReplace: { beginReplacingAttachment($0) },
                     onDelete: { deleteAttachment($0) }
                 )
-                .disabled(replacingAttachmentID != nil)
-                if replacingAttachmentID != nil {
-                    Label("Reading replacement…", systemImage: "hourglass")
+                if let scannedAttachment {
+                    draftAttachmentButton(scannedAttachment)
+                    Text("The scanned receipt will be attached when you save.")
                         .font(.footnote)
-                        .foregroundStyle(PocketLedgerTheme.textSecondary)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(addedAttachments) { attachment in
+                    HStack {
+                        draftAttachmentButton(attachment)
+                        Button("Remove \(attachment.fileName)", systemImage: "minus.circle", role: .destructive) {
+                            addedAttachments.removeAll { $0.id == attachment.id }
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                    }
+                }
+                if isReadingAttachment {
+                    ProgressView("Reading attachment…")
+                } else if timing == .now {
+                    Button("Add receipt", systemImage: "paperclip") {
+                        replacingAttachmentID = nil
+                        isShowingAttachmentImporter = true
+                    }
                 }
             }
-        } else if let initialAttachmentFileName {
-            Section("Receipt attachment") {
-                Label(initialAttachmentFileName, systemImage: initialAttachmentContentType == "application/pdf" ? "doc.richtext" : "photo")
-                Text("This local file will be saved with the transaction after you tap \(saveButtonTitle.lowercased()).")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+            .disabled(isReadingAttachment)
         }
+    }
+
+    private func draftAttachmentButton(_ attachment: PendingAttachment) -> some View {
+        Button {
+            previewDraftAttachment = attachment
+        } label: {
+            Label(attachment.fileName, systemImage: attachment.contentType == "application/pdf" ? "doc.richtext" : "photo")
+        }
+        .buttonStyle(.borderless)
+        .accessibilityHint("Opens receipt preview")
     }
 
     private var allowsArchivedMovementAccounts: Bool {
@@ -1000,16 +1016,24 @@ struct TransactionEditor: View {
                 }
 
             }
+            if simpleTransferIssue != nil, store.activeAccounts.count < 2 {
+                Button("Add account", systemImage: "plus.circle") { isAddingTransferAccount = true }
+            }
         } header: {
             Text(kind == .transfer
                  ? "To"
                  : kind == .expense ? "Change / money returned" : "Money entering accounts")
         } footer: {
-            Text(kind == .transfer
-                 ? "The amount is filled from the sending amount when possible. You can edit it for a specific transfer."
-                 : kind == .expense
-                    ? "Returned money may go to a different account and currency than the payment."
-                    : "Choose the account and currency receiving the money.")
+            if let simpleTransferIssue {
+                Text(simpleTransferIssue)
+                    .foregroundStyle(PocketLedgerTheme.warning)
+            } else {
+                Text(kind == .transfer
+                     ? "The amount is filled from the sending amount when possible. You can edit it for a specific transfer."
+                     : kind == .expense
+                        ? "Returned money may go to a different account and currency than the payment."
+                        : "Choose the account and currency receiving the money.")
+            }
         }
     }
 
@@ -1038,22 +1062,14 @@ struct TransactionEditor: View {
                 }
 
                 if useCustomRate {
-                    Picker("Base", selection: $rateBase) {
-                        ForEach(selectedCurrencies) { currency in
-                            Text(currency.rawValue).tag(currency)
-                        }
-                    }
-                    Picker("Quote", selection: $rateQuote) {
-                        ForEach(selectedCurrencies) { currency in
-                            Text(currency.rawValue).tag(currency)
-                        }
-                    }
+                    rateCurrencyPicker("Base", selection: $rateBase)
+                    rateCurrencyPicker("Quote", selection: $rateQuote)
                     TextField("Quote units per base unit", text: $rateText)
                         .keyboardType(.decimalPad)
 
                     if let savedRate {
                         Button {
-                            rateText = NSDecimalNumber(decimal: savedRate.quoteUnitsPerBaseUnit).stringValue
+                            rateText = ExchangeRate.formattedInput(savedRate.quoteUnitsPerBaseUnit)
                         } label: {
                             Label("Use saved rate: \(savedRate.summary)", systemImage: "arrow.clockwise")
                         }
@@ -1090,22 +1106,14 @@ struct TransactionEditor: View {
             }
 
             if useCustomRate {
-                Picker("Base", selection: $rateBase) {
-                    ForEach(selectedCurrencies) { currency in
-                        Text(currency.rawValue).tag(currency)
-                    }
-                }
-                Picker("Quote", selection: $rateQuote) {
-                    ForEach(selectedCurrencies) { currency in
-                        Text(currency.rawValue).tag(currency)
-                    }
-                }
+                rateCurrencyPicker("Base", selection: $rateBase)
+                rateCurrencyPicker("Quote", selection: $rateQuote)
                 TextField("Quote units per base unit", text: $rateText)
                     .keyboardType(.decimalPad)
 
                 if let savedRate {
                     Button {
-                        rateText = NSDecimalNumber(decimal: savedRate.quoteUnitsPerBaseUnit).stringValue
+                        rateText = ExchangeRate.formattedInput(savedRate.quoteUnitsPerBaseUnit)
                     } label: {
                         Label("Use saved rate: \(savedRate.summary)", systemImage: "arrow.clockwise")
                     }
@@ -1236,36 +1244,39 @@ struct TransactionEditor: View {
         .accessibilityHint("Search categories or browse the category hierarchy")
     }
 
-    private func replaceAttachment(_ result: Result<[URL], Error>) {
-        guard let attachmentID = replacingAttachmentID else { return }
+    private func importAttachment(_ result: Result<[URL], Error>) {
+        let attachmentID = replacingAttachmentID
+        replacingAttachmentID = nil
         do {
-            guard let url = try result.get().first else {
-                replacingAttachmentID = nil
-                return
-            }
+            guard let url = try result.get().first else { return }
             let hasSecurityScope = url.startAccessingSecurityScopedResource()
             let contentType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
                 ?? "application/octet-stream"
+            isReadingAttachment = true
             Task {
                 defer {
                     if hasSecurityScope { url.stopAccessingSecurityScopedResource() }
-                    replacingAttachmentID = nil
+                    isReadingAttachment = false
                 }
                 do {
                     let data = try await Task.detached(priority: .userInitiated) {
                         try Data(contentsOf: url)
                     }.value
-                    attachmentReplacements[attachmentID] = PendingAttachmentReplacement(
+                    let attachment = PendingAttachment(
                         data: data,
                         fileName: url.lastPathComponent,
                         contentType: contentType
                     )
+                    if let attachmentID {
+                        attachmentReplacements[attachmentID] = attachment
+                    } else {
+                        addedAttachments.append(attachment)
+                    }
                 } catch {
                     errorMessage = error.localizedDescription
                 }
             }
         } catch {
-            replacingAttachmentID = nil
             errorMessage = error.localizedDescription
         }
     }
@@ -1324,6 +1335,21 @@ struct TransactionEditor: View {
         store.exchangeRate(base: rateBase, quote: rateQuote)
     }
 
+    private func rateCurrencyPicker(_ title: LocalizedStringKey, selection: Binding<LedgerCurrency>) -> some View {
+        Picker(title, selection: Binding(
+            get: { selection.wrappedValue },
+            set: { currency in
+                guard currency != selection.wrappedValue else { return }
+                selection.wrappedValue = currency
+                rateText = savedRate.map { ExchangeRate.formattedInput($0.quoteUnitsPerBaseUnit) } ?? ""
+            }
+        )) {
+            ForEach(selectedCurrencies) { currency in
+                Text(currency.rawValue).tag(currency)
+            }
+        }
+    }
+
     private var rateCurrencyPair: (base: LedgerCurrency, quote: LedgerCurrency)? {
         if kind == .transfer,
            let sourceCurrency = outflows.first?.currency,
@@ -1349,10 +1375,7 @@ struct TransactionEditor: View {
     }
 
     private var parsedRateValue: Decimal? {
-        Decimal(
-            string: rateText.replacingOccurrences(of: ",", with: ""),
-            locale: Locale(identifier: "en_US_POSIX")
-        )
+        ExchangeRate.parseInput(rateText)
     }
 
     private var customExchangeRate: ExchangeRate? {
@@ -1463,9 +1486,7 @@ struct TransactionEditor: View {
 
         rateBase = currencies[0]
         rateQuote = currencies[1]
-        if let savedRate {
-            rateText = NSDecimalNumber(decimal: savedRate.quoteUnitsPerBaseUnit).stringValue
-        }
+        rateText = savedRate.map { ExchangeRate.formattedInput($0.quoteUnitsPerBaseUnit) } ?? ""
     }
 
     private func handleKindChange(_ newKind: TransactionKind) {
@@ -1481,11 +1502,14 @@ struct TransactionEditor: View {
 
     private func prepareCustomRate() {
         guard let pair = rateCurrencyPair else { return }
+        let pairChanged = rateBase != pair.base || rateQuote != pair.quote
         rateBase = pair.base
         rateQuote = pair.quote
         if let rate = calculatedExchangeRate
             ?? store.exchangeRate(base: pair.base, quote: pair.quote) {
-            rateText = NSDecimalNumber(decimal: rate.quoteUnitsPerBaseUnit).stringValue
+            rateText = ExchangeRate.formattedInput(rate.quoteUnitsPerBaseUnit)
+        } else if pairChanged {
+            rateText = ""
         }
     }
 
@@ -1572,7 +1596,25 @@ struct TransactionEditor: View {
         parseMovements(inflows)
     }
 
+    private var simpleTransferIssue: String? {
+        guard kind == .transfer, outflows.count == 1, inflows.count == 1,
+              let outgoing = outflows.first, let incoming = inflows.first else { return nil }
+        if outgoing.accountID == incoming.accountID {
+            return store.activeAccounts.count < 2
+                ? "Add another account to transfer between accounts."
+                : "Choose different sending and receiving accounts."
+        }
+        if selectedCurrencies.count == 1,
+           let sent = Money.parse(outgoing.amount, currency: outgoing.currency), sent.minorUnits > 0,
+           let received = Money.parse(incoming.amount, currency: incoming.currency), received.minorUnits > 0,
+           sent != received {
+            return "Sending and receiving amounts must match for a same-currency transfer."
+        }
+        return nil
+    }
+
     private var saveValidationMessage: String? {
+        if let simpleTransferIssue { return simpleTransferIssue }
         if isTemplateEditor,
            templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Enter a name for this template."
@@ -1636,7 +1678,8 @@ struct TransactionEditor: View {
             rateText: rateText,
             attachmentIDs: attachmentIDs,
             deletedAttachmentIDs: attachmentIDsPendingDeletion,
-            attachmentReplacements: attachmentReplacements
+            attachmentReplacements: attachmentReplacements,
+            addedAttachments: addedAttachments
         )
     }
 
@@ -1728,26 +1771,38 @@ struct TransactionEditor: View {
             parsedAmountDue = value
         }
 
-        guard !(timing == .scheduled && initialAttachmentData != nil) else {
-            errorMessage = "Receipt attachments can only be saved with an immediate transaction. Switch When back to Now to keep this receipt."
+        if timing == .scheduled,
+           scannedAttachment != nil || !addedAttachments.isEmpty
+            || !attachmentReplacements.isEmpty || !attachmentIDsPendingDeletion.isEmpty {
+            errorMessage = "Switch When to Now to save your receipt changes."
             return
         }
 
         var createdAttachments: [LedgerAttachment] = []
         var savedAttachmentIDs = attachmentIDs.filter { !attachmentIDsPendingDeletion.contains($0) }
-        if timing != .scheduled,
-           editingTransactionID == nil,
-           let initialAttachmentData,
-           let initialAttachmentFileName,
-           let initialAttachmentContentType {
+        if editingTransactionID == nil, let scannedAttachment {
             guard let attachment = store.addAttachment(
-                data: initialAttachmentData,
-                fileName: initialAttachmentFileName,
-                contentType: initialAttachmentContentType,
+                data: scannedAttachment.data,
+                fileName: scannedAttachment.fileName,
+                contentType: scannedAttachment.contentType,
                 receiptItems: initialReceiptItems,
                 extractedTotal: parsedAmountDue
             ) else {
                 errorMessage = store.lastActionStatus ?? "The receipt could not be attached."
+                return
+            }
+            createdAttachments.append(attachment)
+            savedAttachmentIDs.append(attachment.id)
+        }
+
+        for pending in addedAttachments {
+            guard let attachment = store.addAttachment(
+                data: pending.data,
+                fileName: pending.fileName,
+                contentType: pending.contentType
+            ) else {
+                errorMessage = store.lastActionStatus ?? "The receipt could not be attached."
+                createdAttachments.forEach { _ = store.deleteAttachment(id: $0.id) }
                 return
             }
             createdAttachments.append(attachment)
@@ -1761,8 +1816,8 @@ struct TransactionEditor: View {
                     fileName: replacement.fileName,
                     contentType: replacement.contentType
                   ) else {
-                createdAttachments.forEach { _ = store.deleteAttachment(id: $0.id) }
                 errorMessage = store.lastActionStatus ?? "The receipt replacement could not be saved."
+                createdAttachments.forEach { _ = store.deleteAttachment(id: $0.id) }
                 return
             }
             createdAttachments.append(attachment)
@@ -1864,8 +1919,8 @@ struct TransactionEditor: View {
                 saved = store.updateTransaction(transaction)
             }
             guard saved else {
-                createdAttachments.forEach { _ = store.deleteAttachment(id: $0.id) }
                 errorMessage = store.lastActionStatus ?? "The transaction could not be saved."
+                createdAttachments.forEach { _ = store.deleteAttachment(id: $0.id) }
                 return
             }
         }

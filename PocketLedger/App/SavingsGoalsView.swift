@@ -4,9 +4,11 @@ import SwiftUI
 struct SavingsGoalsView: View {
     @ObservedObject var store: LedgerStore
     @ObservedObject var security: AppSecurityService
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @State private var editingGoal: SavingsGoal?
     @State private var isPresentingEditor = false
     @State private var goalToDelete: SavingsGoal?
+    @State private var goalDeletionError: String?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -56,7 +58,12 @@ struct SavingsGoalsView: View {
             }
         }
         .sheet(isPresented: $isPresentingEditor, onDismiss: { editingGoal = nil }) {
-            SavingsGoalEditor(store: store, goal: editingGoal)
+            if let editingGoal {
+                SavingsGoalEditor(store: store, goal: editingGoal)
+                    .modifier(FinancialAmountEditorCover(security: security))
+            } else {
+                SavingsGoalEditor(store: store, goal: nil)
+            }
         }
         .confirmationDialog(
             "Delete savings goal?",
@@ -67,11 +74,14 @@ struct SavingsGoalsView: View {
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
-                if let goalToDelete { _ = store.deleteSavingsGoal(id: goalToDelete.id) }
+                if let goalToDelete, !store.deleteSavingsGoal(id: goalToDelete.id) {
+                    goalDeletionError = store.lastActionStatus ?? "The goal could not be deleted."
+                }
                 self.goalToDelete = nil
             }
             Button("Cancel", role: .cancel) { goalToDelete = nil }
         }
+        .errorMessageAlert(title: "Goal not deleted", message: $goalDeletionError)
     }
 
     private func goalCard(_ goal: SavingsGoal) -> some View {
@@ -92,7 +102,10 @@ struct SavingsGoalsView: View {
                 .accessibilityLabel("Savings goal progress for \(goal.name)")
                 .accessibilityValue("\(Int(progress * 100)) percent")
 
-            Text("\(goal.currentAmount.formatted) saved of \(goal.targetAmount.formatted)")
+            ProtectedAmountText(
+                value: "\(goal.currentAmount.formatted) saved of \(goal.targetAmount.formatted)",
+                isRevealed: areBalancesRevealed
+            )
                 .font(.subheadline.weight(.medium).monospacedDigit())
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
 
@@ -142,6 +155,7 @@ private struct SavingsGoalEditor: View {
     @State private var targetDate: Date
     @State private var errorMessage: String?
     @State private var pendingCurrency: LedgerCurrency?
+    @State private var isConfirmingDiscard = false
 
     init(store: LedgerStore, goal: SavingsGoal?) {
         _store = ObservedObject(wrappedValue: store)
@@ -187,9 +201,16 @@ private struct SavingsGoalEditor: View {
             }
             .pocketListSurface()
             .navigationTitle(goal == nil ? "New savings goal" : "Edit savings goal")
+            .interactiveDismissDisabled(hasUnsavedChanges)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        if hasUnsavedChanges {
+                            isConfirmingDiscard = true
+                        } else {
+                            dismiss()
+                        }
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: save).disabled(!canSave)
@@ -216,7 +237,20 @@ private struct SavingsGoalEditor: View {
             } message: { _ in
                 Text("Enter a new target and saved amount after changing the currency.")
             }
+            .confirmationDialog("Discard goal changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
+                Button("Discard changes", role: .destructive) { dismiss() }
+                Button("Keep editing", role: .cancel) {}
+            }
         }
+    }
+
+    private var hasUnsavedChanges: Bool {
+        name != (goal?.name ?? "")
+            || currency != (goal?.targetAmount.currency ?? .usd)
+            || targetText != (Self.inputText(for: goal?.targetAmount) ?? "")
+            || currentText != (Self.inputText(for: goal?.currentAmount) ?? "0")
+            || includesTargetDate != (goal?.targetDate != nil)
+            || (includesTargetDate && targetDate != goal?.targetDate)
     }
 
     private var parsedTarget: Money? {

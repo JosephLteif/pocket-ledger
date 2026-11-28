@@ -174,7 +174,7 @@ struct ImportWizardView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if draft.step == .review {
-                        Button("Import \(preparedTransactionCount)") {
+                        Button(preparedTransactionCount > 0 ? "Import \(preparedTransactionCount)" : "Import selected data") {
                             isShowingFinalConfirmation = true
                         }
                         .disabled(!canImport)
@@ -641,8 +641,7 @@ private struct ImportWizardSourceStep: View {
     private let requiredFields: [ImportField] = [.date, .amount]
     private let recommendedFields: [ImportField] = [.kind, .currency, .account, .category, .note]
     private let reportingFields: [ImportField] = [.baseAmount, .baseCurrency]
-    private let advancedFields: [ImportField] = [
-        .accountType,
+    private let transferFields: [ImportField] = [
         .destinationAccount,
         .destinationAccountType,
         .destinationAmount,
@@ -650,6 +649,10 @@ private struct ImportWizardSourceStep: View {
     ]
 
     var body: some View {
+        let detectedFields = detectedTransferFields
+        let unmappedTransferFields = detectedFields.filter { (draft.mapping[$0] ?? nil) == nil }
+        let advancedFields: [ImportField] = [.accountType] + transferFields
+
         Form {
             Section("Source") {
                 LabeledContent("File", value: draft.document.fileName)
@@ -676,8 +679,16 @@ private struct ImportWizardSourceStep: View {
             DisclosureGroup("Reporting conversion · \(mappedCount(reportingFields))/\(reportingFields.count)", isExpanded: $isReportingExpanded) {
                 mappingRows(reportingFields)
             }
-            DisclosureGroup("Advanced transfers · \(mappedCount(advancedFields))/\(advancedFields.count)", isExpanded: $isAdvancedExpanded) {
+            DisclosureGroup("Transfer fields · \(mappedCount(transferFields))/\(transferFields.count) mapped", isExpanded: $isAdvancedExpanded) {
                 mappingRows(advancedFields)
+            }
+            if !unmappedTransferFields.isEmpty {
+                Label(
+                    "Review detected transfer columns before continuing: \(unmappedTransferFields.map(\.displayName).formatted(.list(type: .and)))",
+                    systemImage: "exclamationmark.circle"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             }
 
             DisclosureGroup("Sample rows", isExpanded: $areSamplesExpanded) {
@@ -697,6 +708,14 @@ private struct ImportWizardSourceStep: View {
         }
         .pocketListSurface()
         .accessibilityIdentifier("importWizard.source")
+        .onChange(of: draft.selectedTableID, initial: true) { _, _ in
+            isAdvancedExpanded = !detectedFields.isEmpty
+        }
+    }
+
+    private var detectedTransferFields: [ImportField] {
+        let suggestions = FinanceImportParser.suggestedMapping(columns: draft.selectedTable.columns)
+        return transferFields.filter { (suggestions[$0] ?? nil) != nil }
     }
 
     @ViewBuilder
@@ -723,7 +742,7 @@ private struct ImportWizardSourceStep: View {
     }
 
     private func mappedCount(_ fields: [ImportField]) -> Int {
-        fields.filter { draft.mapping[$0] != nil }.count
+        fields.filter { (draft.mapping[$0] ?? nil) != nil }.count
     }
 
     private func sampleValue(for field: ImportField) -> String? {

@@ -1,10 +1,11 @@
+import Combine
 import Foundation
 import UserNotifications
 
 enum NotificationService {
     private static let scheduledPrefix = "pocket-ledger-scheduled-"
     private static let loanPrefix = "pocket-ledger-loan-"
-    private static let dailyTransactionReminderIdentifier = "pocket-ledger-daily-transaction-reminder"
+    fileprivate static let dailyTransactionReminderIdentifier = "pocket-ledger-daily-transaction-reminder"
     static let globalReminderKey = "pocketLedger.scheduledReminderTiming"
     static let dailyTransactionReminderEnabledKey = "pocketLedger.dailyTransactionReminderEnabled"
     static let dailyTransactionReminderMinutesKey = "pocketLedger.dailyTransactionReminderMinutes"
@@ -291,6 +292,19 @@ enum NotificationService {
     }
 }
 
+enum LedgerReminderDestination: Equatable, Sendable {
+    case dailyTransactions
+    case loan(UUID)
+    case scheduledTransaction(UUID)
+}
+
+@MainActor
+final class LedgerReminderRouter: ObservableObject {
+    static let shared = LedgerReminderRouter()
+
+    @Published var pendingDestination: LedgerReminderDestination?
+}
+
 private final class ScheduledNotificationDelegate:
     NSObject,
     UNUserNotificationCenterDelegate,
@@ -303,5 +317,25 @@ private final class ScheduledNotificationDelegate:
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
         [.banner, .sound]
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
+        let request = response.notification.request
+        let destination: LedgerReminderDestination
+        if let rawID = request.content.userInfo["loanID"] as? String, let id = UUID(uuidString: rawID) {
+            destination = .loan(id)
+        } else if let rawID = request.content.userInfo["scheduledTransactionID"] as? String,
+                  let id = UUID(uuidString: rawID) {
+            destination = .scheduledTransaction(id)
+        } else if request.identifier == NotificationService.dailyTransactionReminderIdentifier {
+            destination = .dailyTransactions
+        } else {
+            return
+        }
+        await MainActor.run { LedgerReminderRouter.shared.pendingDestination = destination }
     }
 }

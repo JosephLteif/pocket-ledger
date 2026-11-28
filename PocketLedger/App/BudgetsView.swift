@@ -6,9 +6,11 @@ struct BudgetsView: View {
     @ObservedObject var security: AppSecurityService
     @ObservedObject private var proAccess = ProEntitlementStore.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
     @State private var editingBudget: LedgerBudget?
     @State private var isPresentingEditor = false
     @State private var budgetToDelete: LedgerBudget?
+    @State private var budgetDeletionError: String?
     @State private var budgetSummaries: [DashboardBudgetSnapshot] = []
     @State private var isShowingProUpgrade = false
     @State private var selectedMonth: Date?
@@ -90,7 +92,12 @@ struct BudgetsView: View {
             }
         }
         .sheet(isPresented: $isPresentingEditor, onDismiss: { editingBudget = nil }) {
-            BudgetEditor(store: store, budget: editingBudget, month: selectedMonth)
+            if let editingBudget {
+                BudgetEditor(store: store, budget: editingBudget, month: selectedMonth)
+                    .modifier(FinancialAmountEditorCover(security: security))
+            } else {
+                BudgetEditor(store: store, budget: nil, month: selectedMonth)
+            }
         }
         .background {
             Color.clear.sheet(isPresented: $isShowingProUpgrade) {
@@ -108,11 +115,14 @@ struct BudgetsView: View {
             set: { if !$0 { budgetToDelete = nil } }
         ), titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
-                if let budgetToDelete { _ = store.deleteBudget(id: budgetToDelete.id) }
+                if let budgetToDelete, !store.deleteBudget(id: budgetToDelete.id) {
+                    budgetDeletionError = store.lastActionStatus ?? "The budget could not be deleted."
+                }
                 self.budgetToDelete = nil
             }
             Button("Cancel", role: .cancel) { budgetToDelete = nil }
         }
+        .errorMessageAlert(title: "Budget not deleted", message: $budgetDeletionError)
     }
 
     private var monthPicker: some View {
@@ -200,7 +210,7 @@ struct BudgetsView: View {
                 projectedOver: projectedOver
             )
             HStack {
-                Text("Projected \(summary.projected.formatted)")
+                ProtectedAmountText(value: "Projected \(summary.projected.formatted)", isRevealed: areBalancesRevealed)
                     .font(.caption)
                     .foregroundStyle(projectedOver ? PocketLedgerTheme.warning : PocketLedgerTheme.textSecondary)
                 Spacer()
@@ -258,7 +268,7 @@ struct BudgetsView: View {
                     .foregroundStyle(PocketLedgerTheme.textSecondary)
             }
             Spacer()
-            Text("\(spent.formatted) / \(allowance.formatted)")
+            ProtectedAmountText(value: "\(spent.formatted) / \(allowance.formatted)", isRevealed: areBalancesRevealed)
                 .font(.subheadline.weight(.semibold).monospacedDigit())
                 .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.textPrimary)
         }
@@ -266,13 +276,16 @@ struct BudgetsView: View {
             .tint(over || projectedOver ? PocketLedgerTheme.warning : PocketLedgerTheme.accent)
             .animation(PocketLedgerMotion.expressive(reduceMotion: reduceMotion), value: ratio)
         if let monthlyLimit, monthlyLimit != allowance {
-            Text("Monthly limit \(monthlyLimit.formatted)")
+            ProtectedAmountText(value: "Monthly limit \(monthlyLimit.formatted)", isRevealed: areBalancesRevealed)
                 .font(.caption)
                 .foregroundStyle(PocketLedgerTheme.textSecondary)
         }
-        Text(over
-             ? "Over by \(Money(currency: allowance.currency, minorUnits: -remaining).formatted)"
-             : "Remaining \(Money(currency: allowance.currency, minorUnits: remaining).formatted)")
+        ProtectedAmountText(
+            value: over
+                ? "Over by \(Money(currency: allowance.currency, minorUnits: -remaining).formatted)"
+                : "Remaining \(Money(currency: allowance.currency, minorUnits: remaining).formatted)",
+            isRevealed: areBalancesRevealed
+        )
             .font(.caption.weight(.semibold))
             .foregroundStyle(over ? PocketLedgerTheme.warning : PocketLedgerTheme.positive)
     }
@@ -357,6 +370,9 @@ private struct BudgetEditor: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint("Search categories or browse the category hierarchy")
+                        Text("Budgets for a parent category include spending in its subcategories.")
+                            .font(.footnote)
+                            .foregroundStyle(PocketLedgerTheme.textSecondary)
                         CurrencyInputField("Monthly limit", text: $amount, currency: $currency)
                         if !canSave {
                             Label(

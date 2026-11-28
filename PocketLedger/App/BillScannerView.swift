@@ -196,7 +196,7 @@ struct BillScannerView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("Add a photo or PDF, then review the detected items.")
+                    Text("Scan a photo for detected items, or attach a PDF and enter the total yourself.")
                         .font(.subheadline)
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
 
@@ -314,7 +314,7 @@ struct BillScannerView: View {
                 Button {
                     isShowingDocumentImporter = true
                 } label: {
-                    Label("Choose PDF", systemImage: "doc.richtext")
+                    Label("Attach PDF manually", systemImage: "doc.richtext")
                 }
             }
             .photosPicker(
@@ -589,7 +589,7 @@ struct BillScannerView: View {
             }
             .buttonStyle(.glassProminent)
             .tint(PocketLedgerTheme.accent)
-            .disabled(currentBillTotal == nil)
+            .disabled(currentBillTotal == nil || !hasMatchingAccount)
 
             if !requiresCurrencySelection, !hasMatchingAccount {
                 Text("Add a \(currency.rawValue) account first to use this total.")
@@ -887,7 +887,7 @@ private struct BillImageFullScreenView: View {
 }
 
 @MainActor
-private struct ZoomableBillImageView: UIViewRepresentable {
+struct ZoomableBillImageView: UIViewRepresentable {
     let image: UIImage
 
     func makeCoordinator() -> Coordinator {
@@ -904,6 +904,8 @@ private struct ZoomableBillImageView: UIViewRepresentable {
 
         let imageView = UIImageView(image: image)
         imageView.contentMode = .scaleAspectFit
+        imageView.isAccessibilityElement = true
+        imageView.accessibilityLabel = "Receipt image"
         imageView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.addSubview(imageView)
         NSLayoutConstraint.activate([

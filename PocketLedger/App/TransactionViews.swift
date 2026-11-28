@@ -121,6 +121,7 @@ struct TransactionListSnapshot {
         includesCategoryDescendants: Bool = true,
         accountID: UUID? = nil,
         reportingCurrency: LedgerCurrency? = nil,
+        includeAmountsInSearch: Bool = true,
         calendar: Calendar = .current
     ) -> TransactionListSnapshot {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -190,7 +191,7 @@ struct TransactionListSnapshot {
             }
 
             guard !query.isEmpty else { return true }
-            return FinanceSearch.matches(transaction, query: query, index: index)
+            return FinanceSearch.matches(transaction, query: query, index: index, includeAmounts: includeAmountsInSearch)
         }
 
         var expenseTotals: [LedgerCurrency: Int64] = [:]
@@ -277,6 +278,11 @@ struct TransactionsView: View {
     @State private var isShowingFilters = false
     @State private var isSelectingTransactions = false
     @State private var selectedTransactionIDs: Set<UUID> = []
+    @State private var isChoosingBulkCategory = false
+    @State private var didChooseBulkCategory = false
+    @State private var pendingBulkCategoryID: UUID?
+    @State private var isConfirmingSplitCategoryReplacement = false
+    @State private var bulkUpdateStatus: String?
     @State private var isShowingBulkDeleteConfirmation = false
     @State private var deletedTransactionsForUndo: [LedgerTransaction] = []
     @State private var transactionDeletionError: String?
@@ -308,8 +314,6 @@ struct TransactionsView: View {
         self.onAddExpense = onAddExpense
         self.onAddAction = onAddAction
         self.security = security
-        _selectedFilter = State(initialValue: initialFilter)
-        _selectedPeriod = State(initialValue: initialPeriod)
         _drilldownCategoryID = State(initialValue: initialCategoryID)
         _drilldownIncludesCategoryDescendants = State(initialValue: initialCategoryIncludesDescendants)
         _drilldownAccountID = State(initialValue: initialAccountID)
@@ -319,11 +323,10 @@ struct TransactionsView: View {
         let persistedQuickFilter = TransactionQuickFilter(
             rawValue: UserDefaults.standard.string(forKey: Self.lastQuickFilterKey) ?? ""
         ) ?? .none
-        _selectedQuickFilter = State(
-            initialValue: initialFilter == .uncategorized
-                ? .uncategorized
-                : hasExplicitContext ? .none : persistedQuickFilter
-        )
+        let quickFilter: TransactionQuickFilter = hasExplicitContext ? .none : persistedQuickFilter
+        _selectedQuickFilter = State(initialValue: quickFilter)
+        _selectedFilter = State(initialValue: quickFilter == .uncategorized ? .uncategorized : initialFilter)
+        _selectedPeriod = State(initialValue: quickFilter == .thisMonth ? .thisMonth : initialPeriod)
         _searchText = State(initialValue: initialSearch)
         let calendar = Calendar.current
         let start = initialCustomStartDate ?? calendar.date(byAdding: .day, value: -30, to: .now) ?? .now
@@ -343,6 +346,22 @@ struct TransactionsView: View {
                     .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 4, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
+            }
+            if let bulkUpdateStatus {
+                HStack {
+                    Text(bulkUpdateStatus)
+                        .font(.footnote)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        self.bulkUpdateStatus = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Dismiss update status")
+                }
+                .listRowSeparator(.hidden)
             }
 
             HStack(spacing: 10) {
@@ -447,6 +466,36 @@ struct TransactionsView: View {
         .scrollIndicators(.hidden)
         .pocketScreen()
         .transactionActionAlert(message: $transactionDeletionError)
+        .sheet(isPresented: $isChoosingBulkCategory, onDismiss: finishChoosingBulkCategory) {
+            CategorySelectionSheet(
+                categories: store.activeCategories,
+                selectedCategoryID: Binding(
+                    get: { pendingBulkCategoryID },
+                    set: {
+                        pendingBulkCategoryID = $0
+                        didChooseBulkCategory = true
+                    }
+                ),
+                includeUncategorized: true,
+                allowsParentSelection: false,
+                showsCurrentSelection: false
+            )
+        }
+        .confirmationDialog(
+            "Replace split-payment categories?",
+            isPresented: $isConfirmingSplitCategoryReplacement,
+            titleVisibility: .visible
+        ) {
+            Button("Keep split categories") {
+                applyBulkCategory(pendingBulkCategoryID, replaceSplitCategories: false)
+            }
+            Button("Replace split categories", role: .destructive) {
+                applyBulkCategory(pendingBulkCategoryID, replaceSplitCategories: true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Some selected expenses have more than one category. Replacing them assigns the chosen category to every payment in those expenses.")
+        }
         .navigationTitle("Transactions")
         .navigationBarTitleDisplayMode(.large)
         .toolbar(.visible, for: .navigationBar)
@@ -522,6 +571,7 @@ struct TransactionsView: View {
             transactionPage = 0
             refreshListSnapshot()
         }
+        .onChange(of: areBalancesRevealed) { _, _ in refreshListSnapshot() }
         .onChange(of: transactionPage) { _, _ in refreshListPage() }
         .onChange(of: store.ledgerRevision) { _, _ in
             refreshListSnapshot()
@@ -532,6 +582,7 @@ struct TransactionsView: View {
         }
         .sheet(item: $editingTransaction) { transaction in
             TransactionEditor(store: store, transaction: transaction)
+                .modifier(FinancialAmountEditorCover(security: security))
         }
         .sheet(item: $transactionToTemplate) { transaction in
             TemplateNameEditor(store: store, transaction: transaction)
@@ -574,7 +625,13 @@ struct TransactionsView: View {
             NavigationStack {
                 Form {
                     Section("Type") {
-                        Picker("Transactions", selection: $selectedFilter) {
+                        Picker("Transactions", selection: Binding(
+                            get: { selectedFilter },
+                            set: {
+                                selectedFilter = $0
+                                selectedQuickFilter = .none
+                            }
+                        )) {
                             ForEach(TransactionFilter.allCases) { filter in
                                 Text(filter.rawValue).tag(filter)
                             }
@@ -583,7 +640,13 @@ struct TransactionsView: View {
                     }
 
                     Section("Date range") {
-                        Picker("Period", selection: $selectedPeriod) {
+                        Picker("Period", selection: Binding(
+                            get: { selectedPeriod },
+                            set: {
+                                selectedPeriod = $0
+                                selectedQuickFilter = .none
+                            }
+                        )) {
                             ForEach(TransactionPeriod.allCases) { period in
                                 Text(period.rawValue).tag(period)
                             }
@@ -595,7 +658,7 @@ struct TransactionsView: View {
                         }
                     }
 
-                    Section("Saved filter") {
+                    Section("Filter preset") {
                         Menu {
                             ForEach(TransactionQuickFilter.allCases) { filter in
                                 Button {
@@ -609,7 +672,10 @@ struct TransactionsView: View {
                                 }
                             }
                         } label: {
-                            Label("Saved filter: \(selectedQuickFilter.title)", systemImage: "line.3.horizontal.decrease.circle")
+                            Label(
+                                selectedQuickFilter == .none ? "Choose a preset" : "Preset: \(selectedQuickFilter.title)",
+                                systemImage: "line.3.horizontal.decrease.circle"
+                            )
                         }
                         .accessibilityIdentifier("transaction-saved-filter")
                     }
@@ -685,18 +751,14 @@ struct TransactionsView: View {
 
             Spacer()
 
-            Menu {
-                Button("Remove category", systemImage: "tag.slash") {
-                    applyBulkCategory(nil)
-                }
-                ForEach(store.activeCategories) { category in
-                    Button(store.categoryPath(for: category.id), systemImage: category.systemImage) {
-                        applyBulkCategory(category.id)
-                    }
-                }
+            Button {
+                pendingBulkCategoryID = nil
+                didChooseBulkCategory = false
+                isChoosingBulkCategory = true
             } label: {
                 Label("Category", systemImage: "tag")
             }
+            .buttonStyle(.borderless)
             .disabled(selectedTransactionIDs.isEmpty)
 
             Menu {
@@ -788,35 +850,52 @@ struct TransactionsView: View {
         }
     }
 
-    private func applyBulkCategory(_ categoryID: UUID?) {
-        guard !selectedTransactionIDs.isEmpty else { return }
-        if store.updateTransactionCategories(ids: selectedTransactionIDs, categoryID: categoryID) {
-            selectedTransactionIDs.removeAll()
-            isSelectingTransactions = false
+    private func finishChoosingBulkCategory() {
+        guard didChooseBulkCategory else { return }
+        if store.data.transactions.contains(where: {
+            selectedTransactionIDs.contains($0.id) && store.hasDistinctPaymentCategories($0)
+        }) {
+            isConfirmingSplitCategoryReplacement = true
+        } else {
+            applyBulkCategory(pendingBulkCategoryID, replaceSplitCategories: false)
         }
+    }
+
+    private func applyBulkCategory(_ categoryID: UUID?, replaceSplitCategories: Bool) {
+        guard !selectedTransactionIDs.isEmpty else { return }
+        let updatedIDs = store.updateTransactionCategories(
+            ids: selectedTransactionIDs,
+            categoryID: categoryID,
+            replaceSplitCategories: replaceSplitCategories
+        )
+        finishBulkUpdate(updatedIDs, skippedReason: "Split categories or linked activity were kept.")
     }
 
     private func applyBulkAccount(_ accountID: UUID) {
         guard !selectedTransactionIDs.isEmpty else { return }
-        if store.updateSingleAccountTransactions(ids: selectedTransactionIDs, accountID: accountID) {
-            selectedTransactionIDs.removeAll()
+        let updatedIDs = store.updateSingleAccountTransactions(ids: selectedTransactionIDs, accountID: accountID)
+        finishBulkUpdate(updatedIDs, skippedReason: "Only single-account transactions in the same currency can be reassigned.")
+    }
+
+    private func finishBulkUpdate(_ updatedIDs: Set<UUID>?, skippedReason: String) {
+        guard let updatedIDs else {
+            transactionDeletionError = store.lastActionStatus ?? "Couldn't update the selected transactions."
+            return
+        }
+        selectedTransactionIDs.subtract(updatedIDs)
+        let skipped = selectedTransactionIDs.count
+        bulkUpdateStatus = skipped == 0
+            ? "\(updatedIDs.count) updated."
+            : "\(updatedIDs.count) updated, \(skipped) skipped. \(skippedReason)"
+        if selectedTransactionIDs.isEmpty {
             isSelectingTransactions = false
         }
     }
 
     private func applyQuickFilter(_ filter: TransactionQuickFilter) {
         selectedQuickFilter = filter
-        switch filter {
-        case .none:
-            selectedFilter = .all
-        case .thisMonth:
-            selectedFilter = .all
-            selectedPeriod = .thisMonth
-        case .uncategorized:
-            selectedFilter = .uncategorized
-        case .needsReceipt, .cash:
-            selectedFilter = .all
-        }
+        selectedFilter = filter == .uncategorized ? .uncategorized : .all
+        selectedPeriod = filter == .thisMonth ? .thisMonth : .all
         transactionPage = 0
     }
 
@@ -834,7 +913,8 @@ struct TransactionsView: View {
             categoryID: drilldownCategoryID,
             includesCategoryDescendants: drilldownIncludesCategoryDescendants,
             accountID: drilldownAccountID,
-            reportingCurrency: drilldownReportingCurrency
+            reportingCurrency: drilldownReportingCurrency,
+            includeAmountsInSearch: areBalancesRevealed
         )
     }
 
@@ -1253,6 +1333,7 @@ struct TransactionRow: View {
             : transaction.loanID != nil
                 ? "Opens loan details"
                 : "Opens transaction details")
+        .accessibilityAddTraits(isSelectionMode && isSelected ? [.isSelected] : [])
         .contextMenu {
             if canEditTransaction {
                 Button("Edit", systemImage: "pencil", action: onEdit)
@@ -1409,7 +1490,7 @@ struct TransactionRow: View {
                         .lineLimit(1)
                 }
 
-                if let exchangeRate = transaction.exchangeRate {
+                if areBalancesRevealed, let exchangeRate = transaction.exchangeRate {
                     Text(exchangeRate.displaySummary)
                         .font(.caption2)
                         .foregroundStyle(PocketLedgerTheme.textTertiary)

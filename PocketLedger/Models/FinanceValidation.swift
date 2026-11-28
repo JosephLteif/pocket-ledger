@@ -11,6 +11,7 @@ enum FinanceTransactionValidationError: LocalizedError, Equatable {
     case invalidAmountDue
     case invalidChange
     case missingAttachment
+    case sameTransferAccount
     case unbalancedTransfer
     case missingExchangeRate
     case invalidLoanActivity
@@ -37,6 +38,8 @@ enum FinanceTransactionValidationError: LocalizedError, Equatable {
             return "Requested and actual change must use the same currency and cannot be negative."
         case .missingAttachment:
             return "Every transaction attachment must exist in the ledger."
+        case .sameTransferAccount:
+            return "Choose different sending and receiving accounts."
         case .unbalancedTransfer:
             return "A same-currency transfer must send and receive the same amount."
         case .missingExchangeRate:
@@ -51,7 +54,8 @@ enum FinanceTransactionValidator {
     static func validate(
         _ transaction: LedgerTransaction,
         in data: FinanceData,
-        allowArchivedReferences: Bool = false
+        allowArchivedReferences: Bool = false,
+        requireDistinctTransferAccounts: Bool = false
     ) -> FinanceTransactionValidationError? {
         let movements = transaction.outflows + transaction.inflows
         let isLoanActivity = transaction.loanID != nil
@@ -134,6 +138,11 @@ enum FinanceTransactionValidator {
 
         let currencies = Set(movements.map { $0.money.currency })
         if transaction.kind == .transfer, transaction.loanID == nil {
+            if requireDistinctTransferAccounts,
+               transaction.outflows.count == 1, transaction.inflows.count == 1,
+               transaction.outflows[0].accountID == transaction.inflows[0].accountID {
+                return .sameTransferAccount
+            }
             if currencies.count == 1 {
                 let outflowTotal = transaction.outflows.reduce(Int64.zero) { $0 + $1.money.minorUnits }
                 let inflowTotal = transaction.inflows.reduce(Int64.zero) { $0 + $1.money.minorUnits }

@@ -27,6 +27,9 @@ struct ScheduledTransactionsView: View {
 
     @State private var editorRoute: ScheduledEditorRoute?
     @State private var scheduleToDelete: ScheduledTransaction?
+    @State private var scheduleToResume: ScheduledTransaction?
+    @State private var resumeCutoff = Date.now
+    @State private var isConfirmingResume = false
     @State private var isShowingDeleteConfirmation = false
     @State private var reminderStatus: String?
     @State private var recordStatus: String?
@@ -36,6 +39,7 @@ struct ScheduledTransactionsView: View {
     @State private var recurringCostIsYearly = false
     @AppStorage(NotificationService.globalReminderKey)
     private var globalReminderRawValue = ScheduledReminderTiming.oneDayBefore.rawValue
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     var body: some View {
         List {
@@ -142,11 +146,35 @@ struct ScheduledTransactionsView: View {
             }
         }
         .sheet(item: $editorRoute) { route in
-            TransactionEditor(
-                store: store,
-                initialTiming: .scheduled,
-                scheduledTransaction: route.schedule
-            )
+            if let schedule = route.schedule {
+                TransactionEditor(store: store, initialTiming: .scheduled, scheduledTransaction: schedule)
+                    .modifier(FinancialAmountEditorCover(security: security))
+            } else {
+                TransactionEditor(store: store, initialTiming: .scheduled)
+            }
+        }
+        .confirmationDialog(
+            "Resume overdue schedule?",
+            isPresented: $isConfirmingResume,
+            titleVisibility: .visible,
+            presenting: scheduleToResume
+        ) { schedule in
+            Button("Record missed entries") {
+                resume(schedule, skipsMissedOccurrences: false)
+            }
+            Button(schedule.frequency == .once ? "Skip this entry" : "Skip missed and resume") {
+                resume(schedule, skipsMissedOccurrences: true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { schedule in
+            let dates = schedule.occurrences(through: resumeCutoff)
+            if let first = dates.first, let last = dates.last {
+                let firstDate = first.formatted(date: .abbreviated, time: .omitted)
+                let lastDate = last.formatted(date: .abbreviated, time: .omitted)
+                Text(dates.count == 1
+                     ? "One entry was due on \(firstDate)."
+                     : "\(dates.count) entries were due from \(firstDate) to \(lastDate).")
+            }
         }
         .confirmationDialog(
             "Delete scheduled transaction?",
@@ -289,14 +317,13 @@ struct ScheduledTransactionsView: View {
             .pickerStyle(.segmented)
 
             ForEach(LedgerCurrency.allCases.filter { recurringExpenseAnnualTotals[$0] != nil }) { currency in
-                LabeledContent(
-                    currency.rawValue,
-                    value: formatted(
+                LabeledContent(currency.rawValue) {
+                    ProtectedAmountText(value: formatted(
                         (recurringExpenseAnnualTotals[currency] ?? .zero) / (recurringCostIsYearly ? 1 : 12),
                         currency: currency
-                    )
-                )
-                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    ), isRevealed: areBalancesRevealed)
+                }
+                .font(.subheadline.weight(.semibold).monospacedDigit())
             }
             Text("Estimates use each schedule’s frequency. Price changes are matched by exact transaction name and currency.")
                 .font(.footnote)
@@ -335,7 +362,10 @@ struct ScheduledTransactionsView: View {
                     Text(schedule.note.isEmpty ? schedule.kind.displayName : schedule.note)
                         .font(.headline)
                         .lineLimit(2)
-                    Text(store.transactionSummary(schedule.transactionTemplate))
+                    ProtectedAmountText(
+                        value: store.transactionSummary(schedule.transactionTemplate),
+                        isRevealed: areBalancesRevealed
+                    )
                         .font(.subheadline.weight(.semibold).monospacedDigit())
                         .foregroundStyle(PocketLedgerTheme.textPrimary)
                 }
@@ -394,7 +424,7 @@ struct ScheduledTransactionsView: View {
                     editorRoute = .edit(schedule)
                 } label: {
                     Image(systemName: "pencil")
-                        .frame(width: 20, height: 20)
+                        .frame(minWidth: 44, minHeight: 44)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -406,7 +436,14 @@ struct ScheduledTransactionsView: View {
                         schedule.isEnabled ? "Pause schedule" : "Enable schedule",
                         systemImage: schedule.isEnabled ? "pause.circle" : "play.circle"
                     ) {
-                        setScheduleEnabled(id: schedule.id, isEnabled: !schedule.isEnabled)
+                        let now = Date.now
+                        if !schedule.isEnabled, schedule.nextRunDate <= now {
+                            scheduleToResume = schedule
+                            resumeCutoff = now
+                            isConfirmingResume = true
+                        } else {
+                            setScheduleEnabled(id: schedule.id, isEnabled: !schedule.isEnabled, now: now)
+                        }
                     }
                     .disabled(isCompletedOneTime(schedule))
 
@@ -449,7 +486,7 @@ struct ScheduledTransactionsView: View {
                     .tint(.red)
                 } label: {
                     Image(systemName: "ellipsis")
-                        .frame(width: 20, height: 20)
+                        .frame(minWidth: 44, minHeight: 44)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -523,16 +560,16 @@ struct ScheduledTransactionsView: View {
                             .font(.caption)
                             .foregroundStyle(PocketLedgerTheme.textSecondary)
                         Spacer(minLength: 8)
-                        Text(formatted(
+                        ProtectedAmountText(value: formatted(
                             Decimal(charge.minorUnits) * annualMultiplier(for: schedule.frequency)
                                 / (recurringCostIsYearly ? 1 : 12),
                             currency: charge.currency
-                        ))
+                        ), isRevealed: areBalancesRevealed)
                         .font(.caption.weight(.semibold).monospacedDigit())
                         .foregroundStyle(PocketLedgerTheme.textPrimary)
                     }
 
-                    if let change = priceChange(for: schedule, currency: charge.currency) {
+                    if areBalancesRevealed, let change = priceChange(for: schedule, currency: charge.currency) {
                         Label("Changed from \(change.previous.formatted) to \(change.current.formatted)", systemImage: "arrow.left.arrow.right")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(PocketLedgerTheme.warning)
@@ -693,12 +730,35 @@ struct ScheduledTransactionsView: View {
         editorRoute = .new
     }
 
-    private func setScheduleEnabled(id: UUID, isEnabled: Bool) {
-        guard !store.setScheduledTransactionEnabled(id: id, isEnabled: isEnabled),
-              let feature = store.proAccessRequired else {
+    private func resume(_ schedule: ScheduledTransaction, skipsMissedOccurrences: Bool) {
+        guard store.data.scheduledTransactions.first(where: { $0.id == schedule.id }) == schedule else {
+            recordUndoReceipt = nil
+            recordStatus = "This schedule changed. Review it before trying again."
             return
         }
-        proAccess.requestUpgrade(for: feature)
-        isShowingProUpgrade = true
+        setScheduleEnabled(
+            id: schedule.id, isEnabled: true, skipsMissedOccurrences: skipsMissedOccurrences, now: resumeCutoff
+        )
+    }
+
+    private func setScheduleEnabled(
+        id: UUID, isEnabled: Bool, skipsMissedOccurrences: Bool = false, now: Date
+    ) {
+        recordUndoReceipt = nil
+        guard !store.setScheduledTransactionEnabled(
+            id: id,
+            isEnabled: isEnabled,
+            skipsMissedOccurrences: skipsMissedOccurrences,
+            now: now
+        ) else {
+            recordStatus = store.lastActionStatus
+            return
+        }
+        if let feature = store.proAccessRequired {
+            proAccess.requestUpgrade(for: feature)
+            isShowingProUpgrade = true
+        } else {
+            recordStatus = store.lastActionStatus ?? "The schedule could not be updated."
+        }
     }
 }

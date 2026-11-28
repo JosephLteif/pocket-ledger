@@ -159,11 +159,18 @@ struct AccountDetailView: View {
             .sheet(item: $presentedSheet) { sheet in
                 switch sheet {
                 case .accountEditor:
-                    if let account { AccountEditor(store: store, account: account) }
+                    if let account {
+                        AccountEditor(store: store, account: account)
+                            .modifier(FinancialAmountEditorCover(security: security))
+                    }
                 case .balanceEditor:
-                    if let account { AccountBalanceEditor(store: store, account: account) }
+                    if let account {
+                        AccountBalanceEditor(store: store, account: account)
+                            .modifier(FinancialAmountEditorCover(security: security))
+                    }
                 case .transaction(let transaction):
                     TransactionEditor(store: store, transaction: transaction)
+                        .modifier(FinancialAmountEditorCover(security: security))
                 case .template(let transaction):
                     TemplateNameEditor(store: store, transaction: transaction)
                 }
@@ -228,7 +235,7 @@ struct AccountDetailView: View {
             }
             .listSectionSeparator(.hidden)
 
-            AssetTrackingSection(store: store, account: account, areBalancesRevealed: areBalancesRevealed)
+            AssetTrackingSection(store: store, security: security, account: account, areBalancesRevealed: areBalancesRevealed)
 
             if !hidesGenericActivity {
                 Section {
@@ -406,7 +413,9 @@ struct AccountDetailView: View {
     }
 
     private func balanceCard(_ account: Account) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let tracksMarketValue = account.type == .physicalAsset || account.type == .investment
+
+        return VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Label(
                     account.type == .physicalAsset
@@ -422,15 +431,26 @@ struct AccountDetailView: View {
                     .foregroundStyle(PocketLedgerTheme.accent)
             }
 
-            ProtectedAmountText(
-                value: store.valuation(for: account).formatted,
-                isRevealed: areBalancesRevealed
-            )
-                .font(.largeTitle.weight(.bold).monospacedDigit())
-                .monospacedDigit()
-                .lineLimit(2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(tracksMarketValue ? "Estimated value" : "Current balance")
+                    .font(.subheadline)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                ProtectedAmountText(
+                    value: store.valuation(for: account).formatted,
+                    isRevealed: areBalancesRevealed
+                )
+                    .font(.largeTitle.weight(.bold).monospacedDigit())
+                    .lineLimit(2)
+            }
 
-            if account.type == .physicalAsset || account.type == .investment {
+            if tracksMarketValue {
+                LabeledContent("Recorded balance") {
+                    ProtectedAmountText(
+                        value: store.balance(for: account).formatted,
+                        isRevealed: areBalancesRevealed
+                    )
+                    .monospacedDigit()
+                }
                 HStack {
                     Text("Total gain/loss")
                         .foregroundStyle(PocketLedgerTheme.textSecondary)
@@ -477,7 +497,7 @@ struct AccountDetailView: View {
                 Button {
                     presentedSheet = .balanceEditor
                 } label: {
-                    Label("Adjust current balance", systemImage: "slider.horizontal.3")
+                    Label(tracksMarketValue ? "Adjust recorded balance" : "Adjust current balance", systemImage: "slider.horizontal.3")
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                 }
@@ -558,7 +578,7 @@ private struct AccountBalanceEditor: View {
                 if recordAsTransaction {
                     Section("Transaction details") {
                         TextField("Note (optional)", text: $note)
-                        Text("The adjustment uses the account's own currency and is marked Uncategorized.")
+                        Text("The adjustment uses the account’s currency and appears under Balance adjustments. It is excluded from income and expense totals.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -603,10 +623,56 @@ private struct AccountBalanceEditor: View {
             note: note
         )
         guard saved else {
-            errorMessage = "The persistent database is unavailable, so this balance was not changed."
+            errorMessage = store.lastActionStatus ?? "The balance could not be adjusted."
             return
         }
 
         dismiss()
+    }
+}
+
+@MainActor
+struct FinancialAmountEditorCover: ViewModifier {
+    let security: AppSecurityService
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var isRevealed = false
+    @State private var wasRevealed = false
+    @State private var isConfirmingDiscard = false
+
+    func body(content: Content) -> some View {
+        ZStack {
+            content
+                .opacity(isRevealed ? 1 : 0)
+                .disabled(!isRevealed)
+                .accessibilityHidden(!isRevealed)
+
+            if !isRevealed {
+                ContentUnavailableView {
+                    Label("Financial amounts hidden", systemImage: "eye.slash")
+                } description: {
+                    Text("Reveal amounts to continue editing.")
+                } actions: {
+                    BalanceVisibilityControl(security: security, isRevealed: $isRevealed)
+                    Button("Close editor") {
+                        if wasRevealed {
+                            isConfirmingDiscard = true
+                        } else {
+                            dismiss()
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(PocketLedgerTheme.surface)
+            }
+        }
+        .toolbar(isRevealed ? .automatic : .hidden, for: .navigationBar)
+        .onChange(of: isRevealed, initial: true) { _, revealed in
+            if revealed { wasRevealed = true }
+        }
+        .interactiveDismissDisabled(wasRevealed && !isRevealed)
+        .confirmationDialog("Discard editor changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
+            Button("Discard changes", role: .destructive) { dismiss() }
+            Button("Keep editing", role: .cancel) {}
+        }
     }
 }

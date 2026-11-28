@@ -118,9 +118,7 @@ private struct ExchangeRateEditor: View {
         _baseCurrency = State(initialValue: existingRate?.baseCurrency ?? .usd)
         _quoteCurrency = State(initialValue: existingRate?.quoteCurrency ?? .lbp)
         _rateText = State(
-            initialValue: existingRate.map {
-                NSDecimalNumber(decimal: $0.quoteUnitsPerBaseUnit).stringValue
-            } ?? "100000"
+            initialValue: existingRate.map { ExchangeRate.formattedInput($0.quoteUnitsPerBaseUnit) } ?? ""
         )
     }
 
@@ -128,13 +126,13 @@ private struct ExchangeRateEditor: View {
         NavigationStack {
             Form {
                 Section("Rate") {
-                    Picker("Base currency", selection: $baseCurrency) {
+                    Picker("Base currency", selection: clearingRateWhenChanging($baseCurrency)) {
                         ForEach(LedgerCurrency.allCases) { currency in
                             Text("\(currency.rawValue) · \(currency.displayName)").tag(currency)
                         }
                     }
 
-                    Picker("Quote currency", selection: $quoteCurrency) {
+                    Picker("Quote currency", selection: clearingRateWhenChanging($quoteCurrency)) {
                         ForEach(LedgerCurrency.allCases) { currency in
                             Text("\(currency.rawValue) · \(currency.displayName)").tag(currency)
                         }
@@ -193,10 +191,7 @@ private struct ExchangeRateEditor: View {
     }
 
     private var parsedRate: Decimal? {
-        Decimal(
-            string: rateText.replacingOccurrences(of: ",", with: ""),
-            locale: Locale(identifier: "en_US_POSIX")
-        )
+        ExchangeRate.parseInput(rateText)
     }
 
     private var canSave: Bool {
@@ -233,8 +228,19 @@ private struct ExchangeRateEditor: View {
         baseCurrency = quoteCurrency
         quoteCurrency = previousBase
         if let rate = parsedRate, rate > 0 {
-            rateText = NSDecimalNumber(decimal: reciprocal(of: rate)).stringValue
+            rateText = ExchangeRate.formattedInput(reciprocal(of: rate))
         }
+    }
+
+    private func clearingRateWhenChanging(_ currency: Binding<LedgerCurrency>) -> Binding<LedgerCurrency> {
+        Binding(
+            get: { currency.wrappedValue },
+            set: { selection in
+                guard selection != currency.wrappedValue else { return }
+                currency.wrappedValue = selection
+                rateText = ""
+            }
+        )
     }
 
     private var errorPresented: Binding<Bool> {

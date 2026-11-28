@@ -10,7 +10,7 @@ struct AccountsView: View {
     @State private var isPresentingAccount = false
     @State private var editingAccount: Account?
     @State private var accountToDelete: Account?
-    @State private var accountDeletionError: String?
+    @State private var accountActionError: String?
     @State private var isShowingProUpgrade = false
     @State private var isArchivedAccountsExpanded = false
     @State private var isAccountSummaryExpanded = false
@@ -70,16 +70,16 @@ struct AccountsView: View {
                 archivedAccountsSection
             }
 
-            Text(store.storageAvailable && store.sharedStorageAvailable
-                 ? "Stored locally in the shared app container for App Intents."
-                 : store.storageAvailable
-                 ? "Stored persistently on this device; shared App Intent access is unavailable."
-                 : "Persistent storage is unavailable; changes cannot be saved.")
-                .font(.caption)
-                .foregroundStyle(PocketLedgerTheme.textTertiary)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 20, trailing: 16))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+            if !store.storageAvailable || !store.sharedStorageAvailable {
+                Text(store.storageAvailable
+                     ? "Shortcuts can’t access this ledger. Changes are saved on this device."
+                     : "Changes can’t be saved because ledger storage is unavailable.")
+                    .font(.caption)
+                    .foregroundStyle(PocketLedgerTheme.textSecondary)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 20, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
         }
         .listStyle(.plain)
         .listSectionSpacing(20)
@@ -120,7 +120,12 @@ struct AccountsView: View {
             }
         }
         .sheet(isPresented: $isPresentingAccount, onDismiss: { editingAccount = nil }) {
-            AccountEditor(store: store, account: editingAccount)
+            if let editingAccount {
+                AccountEditor(store: store, account: editingAccount)
+                    .modifier(FinancialAmountEditorCover(security: security))
+            } else {
+                AccountEditor(store: store)
+            }
         }
         .confirmationDialog(
             "Delete account and history?",
@@ -136,11 +141,7 @@ struct AccountsView: View {
         } message: {
             Text(accountDeletionMessage)
         }
-        .alert("Account not deleted", isPresented: accountDeletionErrorPresented) {
-            Button("OK") { accountDeletionError = nil }
-        } message: {
-            Text(accountDeletionError ?? "")
-        }
+        .errorMessageAlert(title: "Account change not saved", message: $accountActionError)
         .onChange(of: archivedAccounts.isEmpty) { _, isEmpty in
             if isEmpty {
                 isArchivedAccountsExpanded = false
@@ -327,13 +328,10 @@ struct AccountsView: View {
                         account.includeInTotals ? "Exclude from totals" : "Include in totals",
                         systemImage: account.includeInTotals ? "eye.slash" : "eye"
                     ) {
-                        _ = store.setAccountIncludedInTotals(
-                            accountID: account.id,
-                            included: !account.includeInTotals
-                        )
+                        toggleTotals(for: account)
                     }
                     Button("Archive", systemImage: "archivebox") {
-                        _ = store.setAccountArchived(accountID: account.id, isArchived: true)
+                        setArchived(true, accountID: account.id)
                     }
                     Button("Delete Account", systemImage: "trash", role: .destructive) {
                         accountToDelete = account
@@ -357,7 +355,7 @@ struct AccountsView: View {
                         systemImage: "archivebox",
                         tint: PocketLedgerTheme.warning
                     ) {
-                        _ = store.setAccountArchived(accountID: account.id, isArchived: true)
+                        setArchived(true, accountID: account.id)
                     }
                     PocketSwipeActionButton(
                         title: "Delete account",
@@ -374,10 +372,7 @@ struct AccountsView: View {
                         systemImage: account.includeInTotals ? "eye.slash" : "eye",
                         tint: account.includeInTotals ? PocketLedgerTheme.textSecondary : PocketLedgerTheme.positive
                     ) {
-                        _ = store.setAccountIncludedInTotals(
-                            accountID: account.id,
-                            included: !account.includeInTotals
-                        )
+                        toggleTotals(for: account)
                     }
                 }
                 .listRowInsets(
@@ -462,7 +457,7 @@ struct AccountsView: View {
                                 systemImage: "arrow.uturn.backward",
                                 tint: PocketLedgerTheme.accent
                             ) {
-                                restoreAccount(account.id)
+                                setArchived(false, accountID: account.id)
                             }
                         }
                     }
@@ -536,26 +531,26 @@ struct AccountsView: View {
         isPresentingAccount = true
     }
 
-    private func restoreAccount(_ accountID: UUID) {
-        guard !store.setAccountArchived(accountID: accountID, isArchived: false),
-              let feature = store.proAccessRequired else {
-            return
+    private func setArchived(_ isArchived: Bool, accountID: UUID) {
+        guard !store.setAccountArchived(accountID: accountID, isArchived: isArchived) else { return }
+        if let feature = store.proAccessRequired {
+            proAccess.requestUpgrade(for: feature)
+            isShowingProUpgrade = true
+        } else {
+            accountActionError = store.lastActionStatus ?? (isArchived ? "The account could not be archived." : "The account could not be restored.")
         }
-        proAccess.requestUpgrade(for: feature)
-        isShowingProUpgrade = true
+    }
+
+    private func toggleTotals(for account: Account) {
+        if !store.setAccountIncludedInTotals(accountID: account.id, included: !account.includeInTotals) {
+            accountActionError = store.lastActionStatus ?? "The account’s inclusion in totals could not be changed."
+        }
     }
 
     private var deleteAccountConfirmationPresented: Binding<Bool> {
         Binding(
             get: { accountToDelete != nil },
             set: { if !$0 { accountToDelete = nil } }
-        )
-    }
-
-    private var accountDeletionErrorPresented: Binding<Bool> {
-        Binding(
-            get: { accountDeletionError != nil },
-            set: { if !$0 { accountDeletionError = nil } }
         )
     }
 
@@ -567,7 +562,7 @@ struct AccountsView: View {
     @discardableResult
     private func deleteAccount(_ account: Account) -> Bool {
         guard store.deleteAccount(id: account.id) else {
-            accountDeletionError = store.lastActionStatus ?? "The account could not be deleted."
+            accountActionError = store.lastActionStatus ?? "The account could not be deleted."
             return false
         }
         return true

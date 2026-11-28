@@ -3,10 +3,13 @@ import SwiftUI
 @MainActor
 struct TemplatesView: View {
     @ObservedObject var store: LedgerStore
+    let security: AppSecurityService
     @State private var templateToUse: LedgerTemplate?
     @State private var templateToEdit: LedgerTemplate?
     @State private var templateToDelete: LedgerTemplate?
     @State private var isCreatingTemplate = false
+    @State private var templateActionError: String?
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -24,7 +27,7 @@ struct TemplatesView: View {
                                 .foregroundStyle(PocketLedgerTheme.textTertiary)
                             Text("No templates yet")
                                 .font(.headline)
-                            Text("Save a transaction as a template from the transaction history context menu.")
+                            Text("Create a template for a transaction you repeat. You can also save one from transaction history.")
                                 .font(.subheadline)
                                 .foregroundStyle(PocketLedgerTheme.textSecondary)
                                 .multilineTextAlignment(.center)
@@ -60,9 +63,11 @@ struct TemplatesView: View {
         }
         .sheet(item: $templateToUse) { template in
             TransactionEditor(store: store, template: template)
+                .modifier(FinancialAmountEditorCover(security: security))
         }
         .sheet(item: $templateToEdit) { template in
             TransactionEditor(store: store, editingTemplate: template)
+                .modifier(FinancialAmountEditorCover(security: security))
         }
         .sheet(isPresented: $isCreatingTemplate) {
             TransactionEditor(store: store, createTemplate: true)
@@ -72,13 +77,14 @@ struct TemplatesView: View {
             set: { if !$0 { templateToDelete = nil } }
         ), titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
-                if let templateToDelete {
-                    _ = store.deleteTemplate(id: templateToDelete.id)
+                if let templateToDelete, !store.deleteTemplate(id: templateToDelete.id) {
+                    templateActionError = store.lastActionStatus ?? "Couldn't delete the template."
                 }
                 self.templateToDelete = nil
             }
             Button("Cancel", role: .cancel) { templateToDelete = nil }
         }
+        .errorMessageAlert(title: "Couldn't delete template", message: $templateActionError)
     }
 
     private func templateCard(_ template: LedgerTemplate) -> some View {
@@ -87,7 +93,10 @@ struct TemplatesView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(template.name)
                         .font(.headline)
-                    Text(store.transactionSummary(template.transactionTemplate))
+                    ProtectedAmountText(
+                        value: store.transactionSummary(template.transactionTemplate),
+                        isRevealed: areBalancesRevealed
+                    )
                         .font(.subheadline.weight(.semibold).monospacedDigit())
                     Text(template.kind.displayName + (template.kind == .expense ? " · " + store.categoryPath(for: template.categoryID) : ""))
                         .font(.caption)
@@ -121,13 +130,14 @@ struct TemplatesView: View {
         }
     }
 }
-
 @MainActor
 struct TemplateNameEditor: View {
     @ObservedObject var store: LedgerStore
     @Environment(\.dismiss) private var dismiss
     let transaction: LedgerTransaction
     @State private var name: String
+    @State private var templateActionError: String?
+    @AppStorage(PocketLedgerTheme.balanceVisibilityKey) private var areBalancesRevealed = false
 
     init(store: LedgerStore, transaction: LedgerTransaction) {
         _store = ObservedObject(wrappedValue: store)
@@ -140,12 +150,13 @@ struct TemplateNameEditor: View {
             Form {
                 Section("Template") {
                     TextField("Template name", text: $name)
-                    Text(store.transactionSummary(transaction))
+                    ProtectedAmountText(value: store.transactionSummary(transaction), isRevealed: areBalancesRevealed)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
             }
             .pocketListSurface()
+            .errorMessageAlert(title: "Couldn't save template", message: $templateActionError)
             .navigationTitle("Save template")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -164,6 +175,8 @@ struct TemplateNameEditor: View {
         guard !trimmedName.isEmpty else { return }
         if store.addTemplate(LedgerTemplate(name: trimmedName, transaction: transaction)) {
             dismiss()
+        } else {
+            templateActionError = store.lastActionStatus ?? "Couldn't save the template."
         }
     }
 }

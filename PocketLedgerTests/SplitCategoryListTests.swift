@@ -21,4 +21,17 @@ final class SplitCategoryListTests: XCTestCase {
         XCTAssertEqual(snapshot.filteredTransactions.map(\.id), [transaction.id])
         XCTAssertEqual(snapshot.expenseTotals[.usd], 400)
     }
+
+    func testTransactionSearchDoesNotMatchHiddenAmounts() {
+        let amount = Money(currency: .usd, minorUnits: 987_654)
+        let account = Account(name: "Cash", type: .cash, currency: .usd, openingBalance: amount)
+        let transaction = LedgerTransaction(note: "Holiday", kind: .expense, categoryID: nil, outflows: [
+            MoneyMovement(accountID: account.id, money: amount)
+        ], inflows: [])
+        let index = LedgerIndex(data: FinanceData(accounts: [account], categories: [], transactions: [transaction]))
+
+        XCTAssertTrue(FinanceSearch.matches(transaction, query: amount.formatted, index: index))
+        XCTAssertFalse(FinanceSearch.matches(transaction, query: amount.formatted, index: index, includeAmounts: false))
+        XCTAssertTrue(FinanceSearch.matches(transaction, query: "Holiday", index: index, includeAmounts: false))
+    }
 }

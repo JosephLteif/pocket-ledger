@@ -9,8 +9,11 @@ private struct LoadedAttachmentPreview: @unchecked Sendable {
 
 @MainActor
 struct AttachmentPreviewView: View {
-    @ObservedObject var store: LedgerStore
-    let attachment: LedgerAttachment
+    @Environment(\.dismiss) private var dismiss
+    let fileName: String
+    let contentType: String
+    var url: URL? = nil
+    var data: Data? = nil
     @State private var document: PDFDocument?
     @State private var image: UIImage?
     @State private var isLoading = true
@@ -20,12 +23,7 @@ struct AttachmentPreviewView: View {
             if let document {
                 AttachmentPDFView(document: document)
             } else if let image {
-                ScrollView([.vertical, .horizontal]) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .padding()
-                }
+                ZoomableBillImageView(image: image)
             } else if isLoading {
                 ProgressView("Loading receipt…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -38,9 +36,14 @@ struct AttachmentPreviewView: View {
             }
         }
         .pocketScreen()
-        .navigationTitle(attachment.fileName)
+        .navigationTitle(fileName)
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: attachment.id) {
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
+        .task {
             await loadPreview()
         }
     }
@@ -49,13 +52,9 @@ struct AttachmentPreviewView: View {
         isLoading = true
         document = nil
         image = nil
-        guard let url = store.attachmentURL(for: attachment.id) else {
-            isLoading = false
-            return
-        }
-        let isPDF = attachment.contentType == "application/pdf"
-        let loaded = await Task.detached(priority: .userInitiated) {
-            guard let data = try? Data(contentsOf: url) else {
+        let isPDF = contentType == "application/pdf"
+        let loaded = await Task.detached(priority: .userInitiated) { [data, url] in
+            guard let data = data ?? url.flatMap({ try? Data(contentsOf: $0) }) else {
                 return LoadedAttachmentPreview(document: nil, image: nil)
             }
             return LoadedAttachmentPreview(
